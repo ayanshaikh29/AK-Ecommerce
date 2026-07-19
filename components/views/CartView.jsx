@@ -52,23 +52,25 @@ export function CartView() {
         <div className="lg:col-span-2 space-y-4">
           {cart.map((i, idx) => (
             <Card key={i.product_id} className="radius-lg shadow-soft card-lift" style={{ animationDelay: `${idx * 60}ms` }}>
-              <CardContent className="pt-4 flex gap-4">
-                <Image src={i.image} width={96} height={128} className="w-24 h-32 object-cover rounded-xl" alt={i.product_name_snapshot} loading="lazy" />
-                <div className="flex-1">
-                  <p className="font-semibold">{i.product_name_snapshot}</p>
-                  <p className="text-muted-foreground text-sm">{formatINR(i.price_snapshot)}</p>
-                  <div className="flex items-center gap-3 mt-4">
+              <CardContent className="pt-4 flex gap-3 sm:gap-4">
+                <Image src={i.image} width={96} height={128} className="w-20 sm:w-24 h-28 sm:h-32 object-cover rounded-xl shrink-0" alt={i.product_name_snapshot} loading="lazy" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-start gap-2">
+                    <p className="font-semibold text-sm sm:text-base leading-tight line-clamp-2">{i.product_name_snapshot}</p>
+                    <p className="font-display font-extrabold text-base sm:text-xl whitespace-nowrap shrink-0">{formatINR(i.price_snapshot * i.quantity)}</p>
+                  </div>
+                  <p className="text-muted-foreground text-xs sm:text-sm mt-1">{formatINR(i.price_snapshot)}</p>
+                  <div className="flex items-center gap-3 mt-3 sm:mt-4">
                     <div className="flex items-center border rounded-full">
-                      <button onClick={() => updateQty(i.product_id, i.quantity - 1)} className="p-2"><Minus className="w-3 h-3" /></button>
-                      <span className="px-3 font-semibold">{i.quantity}</span>
-                      <button onClick={() => updateQty(i.product_id, i.quantity + 1)} className="p-2"><Plus className="w-3 h-3" /></button>
+                      <button onClick={() => updateQty(i.product_id, i.quantity - 1)} className="p-1.5 sm:p-2"><Minus className="w-3 h-3 sm:w-3.5 sm:h-3.5" /></button>
+                      <span className="px-2.5 sm:px-3 font-semibold text-sm">{i.quantity}</span>
+                      <button onClick={() => updateQty(i.product_id, i.quantity + 1)} className="p-1.5 sm:p-2"><Plus className="w-3 h-3 sm:w-3.5 sm:h-3.5" /></button>
                     </div>
-                    <button onClick={() => removeItem(i.product_id)} className="text-sm text-muted-foreground hover:text-destructive flex items-center gap-1">
-                      <Trash2 className="w-4 h-4" />Remove
+                    <button onClick={() => removeItem(i.product_id)} className="text-xs sm:text-sm text-muted-foreground hover:text-destructive flex items-center gap-1">
+                      <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />Remove
                     </button>
                   </div>
                 </div>
-                <p className="font-display font-extrabold text-xl">{formatINR(i.price_snapshot * i.quantity)}</p>
               </CardContent>
             </Card>
           ))}

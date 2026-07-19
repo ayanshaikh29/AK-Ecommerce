@@ -4,12 +4,13 @@ import { Megaphone } from 'lucide-react'
 export function TopMarquee({ settings }) {
   const msgs = settings?.marquee_messages?.length ? settings.marquee_messages : ['🚚 Free Pan-India Delivery on Bulk Orders']
   return (
-    <div className="maroon-gradient text-primary-foreground overflow-hidden py-2.5 text-xs relative marquee-wrap">
+    <div className="maroon-gradient text-primary-foreground overflow-hidden py-2.5 text-xs relative">
       <div className="flex whitespace-nowrap marquee-slow">
         {[...msgs, ...msgs, ...msgs].map((m,i) => (
           <span key={i} className="mx-10 inline-flex items-center gap-2 font-medium">{m}</span>
         ))}
       </div>
+      <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(90deg, hsl(0,55%,22%) 0%, transparent 8%, transparent 92%, hsl(0,55%,22%) 100%)' }} />
     </div>
   )
 }

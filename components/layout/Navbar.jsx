@@ -3,17 +3,15 @@ import React, { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { Menu, Search, Package, LogOut, User, ShoppingBag, X, Heart } from 'lucide-react'
+import { Search, Package, LogOut, User, ShoppingBag, Heart } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import { useAppContext } from '@/components/providers/AppProvider'
 
 export function Navbar({ settings }) {
   const { user, cartCount, setCartOpen, logout } = useAppContext()
   const router = useRouter()
   const [scrolled, setScrolled] = useState(false)
-  const [mobileMenu, setMobileMenu] = useState(false)
   const [q, setQ] = useState('')
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
@@ -69,18 +67,14 @@ export function Navbar({ settings }) {
 
   const submit = e => {
     e.preventDefault()
-    if (q) {
-      router.push('/products?search=' + encodeURIComponent(q))
-      setMobileMenu(false)
-    }
+      if (q) {
+        router.push('/products?search=' + encodeURIComponent(q))
+      }
   }
 
   return (
     <header className={`sticky top-0 z-40 transition-all duration-500 ${scrolled ? 'glass-strong shadow-soft py-2' : 'glass py-3'}`}>
       <div className="max-w-7xl mx-auto px-4 md:px-6 flex items-center gap-4">
-        <button className="lg:hidden" onClick={() => setMobileMenu(true)}>
-          <Menu className="w-6 h-6"/>
-        </button>
         <Link href="/" className="flex items-center gap-3 group">
           <div className="relative w-11 h-11 rounded-2xl gold-gradient flex items-center justify-center font-display font-extrabold text-primary text-lg group-hover:rotate-6 transition-transform shadow-soft">
             AK
@@ -232,82 +226,7 @@ export function Navbar({ settings }) {
           </button>
         </div>
       </div>
-      {mobileMenu && (
-        <div className="fixed inset-0 bg-black/60 z-50 lg:hidden fade-in" onClick={() => setMobileMenu(false)}>
-          <div className="bg-background w-80 h-full p-6 slide-in-left overflow-y-auto shadow-dramatic" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-8">
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 rounded-xl gold-gradient flex items-center justify-center font-extrabold text-primary">AK</div>
-                <span className="font-display font-extrabold">AK ENTERPRISES</span>
-              </div>
-              <button onClick={() => setMobileMenu(false)} aria-label="Close menu">
-                <X className="w-5 h-5"/>
-              </button>
-            </div>
-            <div className="relative mb-6">
-              <form onSubmit={submit}>
-                <Input 
-                  value={q} 
-                  onChange={e => { setQ(e.target.value); setShowSuggestions(true) }} 
-                  onFocus={() => setShowSuggestions(true)}
-                  placeholder="Search..." 
-                  className="rounded-full h-11 pl-4"
-                />
-              </form>
-              {showSuggestions && suggestions.length > 0 && (
-                <div className="absolute top-12 left-0 right-0 bg-background border rounded-2xl shadow-elevated overflow-hidden z-50 py-2 divide-y divide-border max-h-60 overflow-y-auto">
-                  {suggestions.map(p => (
-                    <Link 
-                      key={p.id}
-                      href={'/product/' + p.slug}
-                      onClick={() => { setShowSuggestions(false); setMobileMenu(false); setQ('') }}
-                      className="flex items-center gap-3 px-4 py-2 hover:bg-secondary/60 transition text-left"
-                    >
-                      <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-secondary shrink-0">
-                        <Image src={p.images?.[0] || '/placeholder.png'} alt={p.name} fill className="object-cover" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-semibold text-foreground line-clamp-1">{p.name}</p>
-                      </div>
-                      <div className="text-xs font-bold text-primary shrink-0">₹{p.price}</div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="flex flex-col gap-1">
-              {[
-                ['Home', '/'],
-                ['All Products', '/products'],
-                ['Stationery', '/products?category=office-stationery'],
-                ['Housekeeping', '/products?category=housekeeping'],
-                ['UPS Solutions', '/products?category=ups-solutions'],
-                ['About Us', '/about'],
-                ['Contact', '/contact']
-              ].map(([label, path]) => (
-                <Link key={label} href={path} onClick={() => setMobileMenu(false)} className="text-left py-3 px-3 rounded-xl hover:bg-secondary font-medium">
-                  {label}
-                </Link>
-              ))}
-              <Separator className="my-3"/>
-              {user ? (
-                <>
-                  <Link href="/account" onClick={() => setMobileMenu(false)} className="text-left py-3 px-3 rounded-xl hover:bg-secondary font-medium flex items-center gap-2.5"><User className="w-4.5 h-4.5"/>My Profile</Link>
-                  <Link href="/orders" onClick={() => setMobileMenu(false)} className="text-left py-3 px-3 rounded-xl hover:bg-secondary font-medium flex items-center gap-2.5"><Package className="w-4.5 h-4.5"/>My Orders</Link>
-                  <Link href="/wishlist" onClick={() => setMobileMenu(false)} className="text-left py-3 px-3 rounded-xl hover:bg-secondary font-medium flex items-center gap-2.5"><Heart className="w-4.5 h-4.5"/>Wishlist</Link>
-                  {user.role === 'admin' && (
-                    <Link href="/admin" onClick={() => setMobileMenu(false)} className="text-left py-3 px-3 rounded-xl gold-gradient text-primary font-bold flex items-center gap-2.5"><Package className="w-4.5 h-4.5"/>Admin Panel</Link>
-                  )}
-                  <Separator className="my-2"/>
-                  <button onClick={() => { logout(); setMobileMenu(false); }} className="text-left py-3 px-3 rounded-xl text-destructive font-medium flex items-center gap-2.5"><LogOut className="w-4.5 h-4.5"/>Sign out</button>
-                </>
-              ) : (
-                <Link href="/login" onClick={() => setMobileMenu(false)} className="text-left py-3 px-3 rounded-xl hover:bg-secondary font-medium flex items-center gap-2.5"><User className="w-4.5 h-4.5"/>Sign in</Link>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+
     </header>
   )
 }

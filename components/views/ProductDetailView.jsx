@@ -227,10 +227,10 @@ export function ProductDetailView({ initialProduct }) {
 
           <div className="flex flex-col gap-3">
             <div className="flex flex-col sm:flex-row gap-3">
-              <Button size="lg" onClick={(e) => { addRipple(e); addToCart(product, qty) }} disabled={product.stock_quantity === 0} className="flex-1 rounded-full h-14 bg-accent text-accent-foreground hover:bg-accent/90 btn-shine ripple font-bold shadow-glow">
-                <ShoppingBag className="w-4 h-4 mr-1" />Add to Cart
+              <Button size="lg" onClick={(e) => { addRipple(e); addToCart(product, qty) }} disabled={product.stock_quantity === 0} className="w-full sm:flex-1 rounded-full h-14 bg-accent text-accent-foreground hover:bg-accent/90 btn-shine ripple font-bold shadow-glow text-sm sm:text-base px-6">
+                <ShoppingBag className="w-5 h-5 mr-2" />Add to Cart
               </Button>
-              <Button size="lg" onClick={(e) => { addRipple(e); addToCart(product, qty); router.push('/checkout') }} disabled={product.stock_quantity === 0} className="flex-1 rounded-full h-14 btn-shine ripple">
+              <Button size="lg" onClick={(e) => { addRipple(e); addToCart(product, qty); router.push('/checkout') }} disabled={product.stock_quantity === 0} className="w-full sm:flex-1 rounded-full h-14 btn-shine ripple text-sm sm:text-base px-6">
                 Buy Now
               </Button>
             </div>
@@ -238,9 +238,9 @@ export function ProductDetailView({ initialProduct }) {
               size="lg"
               variant="outline"
               onClick={() => router.push(`/bulk-quote?product=${encodeURIComponent(product.name)}`)}
-              className="w-full rounded-full h-12 font-semibold border-2 flex items-center justify-center gap-2"
+              className="w-full rounded-full h-14 font-semibold border-2 flex items-center justify-center gap-2 text-sm sm:text-base px-6"
             >
-              <FileText className="w-4 h-4" /> Request Bulk Quote
+              <FileText className="w-5 h-5" /> Request Bulk Quote
             </Button>
           </div>
 
