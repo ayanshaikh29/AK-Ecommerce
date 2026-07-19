@@ -1,0 +1,350 @@
+'use client'
+import React, { useState, useEffect, useRef } from 'react'
+import Link from 'next/link'
+import Image from 'next/image'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+import { Plus, Minus, Star, PlayCircle, Heart, ShoppingBag, Truck, Package, Shield, Zap, ChevronRight, FileText } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Separator } from '@/components/ui/separator'
+import { useAppContext } from '@/components/providers/AppProvider'
+import { ProductCard } from '@/components/ui/ProductCard'
+
+const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
+
+function addRipple(e) {
+  const btn = e.currentTarget; if (!btn) return
+  const rect = btn.getBoundingClientRect()
+  const r = document.createElement('span')
+  const size = Math.max(rect.width, rect.height)
+  r.className = 'ripple-el'
+  r.style.width = r.style.height = size + 'px'
+  r.style.left = (e.clientX - rect.left - size / 2) + 'px'
+  r.style.top = (e.clientY - rect.top - size / 2) + 'px'
+  btn.appendChild(r)
+  setTimeout(() => r.remove(), 600)
+}
+
+function useScrollReveal(deps = []) {
+  useEffect(() => {
+    const io = new IntersectionObserver(entries => {
+      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in-view'); io.unobserve(e.target) } })
+    }, { threshold: 0.08, rootMargin: '0px 0px -60px 0px' })
+    document.querySelectorAll('.reveal:not(.in-view), .reveal-scale:not(.in-view)').forEach(el => io.observe(el))
+    return () => io.disconnect()
+  }, deps)
+}
+
+export function ProductDetailView({ initialProduct }) {
+  const router = useRouter()
+  const { user, addToCart } = useAppContext()
+  const [product, setProduct] = useState(initialProduct)
+  const [imgIdx, setImgIdx] = useState(0)
+  const [qty, setQty] = useState(1)
+  const [reviewRating, setReviewRating] = useState(5)
+  const [reviewText, setReviewText] = useState('')
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [localReviews, setLocalReviews] = useState(initialProduct?.reviews || [])
+  const [wishlisted, setWishlisted] = useState(false)
+  const [wishlistLoading, setWishlistLoading] = useState(false)
+  const imgRef = useRef(null)
+
+  useScrollReveal([product])
+
+  // Check wishlist status on mount
+  useEffect(() => {
+    if (!user || !product?.id) return
+    const token = localStorage.getItem('token')
+    if (!token) return
+    fetch('/api/wishlist', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(items => {
+        setWishlisted(items.some(i => i.product?.id === product.id))
+      })
+      .catch(() => {})
+  }, [user, product?.id])
+
+  const toggleWishlist = async () => {
+    if (!user) { router.push('/login'); return }
+    if (wishlistLoading) return
+    setWishlistLoading(true)
+    setWishlisted(prev => !prev)
+    try {
+      const res = await fetch('/api/wishlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: JSON.stringify({ product_id: product.id })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setWishlisted(data.status === 'added')
+        toast.success(data.status === 'added' ? 'Added to wishlist' : 'Removed from wishlist')
+      } else {
+        setWishlisted(prev => !prev) // revert
+      }
+    } catch {
+      setWishlisted(prev => !prev)
+    } finally {
+      setWishlistLoading(false)
+    }
+  }
+
+  const submitReview = async () => {
+    if (!user) { toast.error('Please sign in to review'); return }
+    if (!reviewText.trim()) { toast.error('Please write a review comment'); return }
+    setReviewLoading(true)
+    try {
+      const res = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: JSON.stringify({ product_id: product.id, rating: reviewRating, comment: reviewText })
+      })
+      if (!res.ok) throw new Error('Failed to post review')
+      
+      // Optimistically add to reviews list
+      const newReview = {
+        id: Date.now().toString(),
+        user_name: user.full_name || user.email,
+        rating: reviewRating,
+        comment: reviewText,
+        created_at: new Date().toISOString()
+      }
+      setLocalReviews(prev => [newReview, ...prev])
+      
+      // Update product rating display (optimistic)
+      const newCount = (product.rating_count || 0) + 1
+      const newAvg = ((product.rating_avg || 0) * (product.rating_count || 0) + reviewRating) / newCount
+      setProduct(prev => ({ ...prev, rating_avg: +newAvg.toFixed(1), rating_count: newCount }))
+      
+      setReviewText('')
+      setReviewRating(5)
+      toast.success('Review posted! Thank you.')
+    } catch (e) {
+      toast.error('Failed to post review')
+    } finally {
+      setReviewLoading(false)
+    }
+  }
+
+  if (!product) return <div className="text-center py-20">Product not found</div>
+
+  const lowStock = product.stock_quantity < 10 && product.stock_quantity > 0
+  const allMedia = [
+    ...(product.images || []).map(u => ({ type: 'image', url: u })),
+    ...(product.videos || []).map(u => ({ type: 'video', url: u }))
+  ]
+  const current = allMedia[imgIdx]
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 md:px-6 py-8 md:py-12">
+      <div className="flex items-center gap-1 text-xs text-muted-foreground mb-6 overflow-x-auto whitespace-nowrap pb-2">
+        <Link href="/" className="hover:text-foreground transition-colors">Home</Link>
+        <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+        <Link href="/products" className="hover:text-foreground transition-colors">Shop</Link>
+        {product.category?.name && (
+          <>
+            <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+            <Link href={`/products?category=${product.category.slug}`} className="hover:text-foreground transition-colors">
+              {product.category.name}
+            </Link>
+          </>
+        )}
+        <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+        <span className="font-semibold text-foreground truncate max-w-xs">{product.name}</span>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-8 md:gap-12 mb-16">
+        {/* Image Gallery */}
+        <div className="slide-in-left">
+          <div className="relative aspect-square radius-xl overflow-hidden bg-secondary mb-4 shadow-soft">
+            {current?.type === 'video' ?
+              <video src={current.url} controls autoPlay className="w-full h-full object-cover" /> :
+              <Image ref={imgRef} src={current?.url || '/placeholder.png'} alt={product.name} fill className="object-cover" priority sizes="(max-width: 768px) 100vw, 50vw" />
+            }
+            {product.discount_percent > 0 && <div className="absolute top-6 left-6 gold-gradient text-primary rounded-full px-4 py-1.5 text-sm font-extrabold shadow-glow">{product.discount_percent}% OFF</div>}
+
+            {/* Wishlist heart on image */}
+            <button
+              onClick={toggleWishlist}
+              disabled={wishlistLoading}
+              className={`absolute top-4 right-4 w-10 h-10 rounded-full bg-background/90 backdrop-blur flex items-center justify-center shadow-soft hover:scale-110 transition z-10 ${wishlistLoading ? 'opacity-60' : ''}`}
+              aria-label={wishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
+            >
+              <Heart className={`w-5 h-5 transition-colors ${wishlisted ? 'fill-rose-500 text-rose-500' : 'text-muted-foreground'}`} />
+            </button>
+          </div>
+          <div className="flex gap-3 overflow-x-auto no-scrollbar">
+            {allMedia.map((m, i) => (
+              <button key={i} onClick={() => setImgIdx(i)} className={`relative w-20 h-20 shrink-0 rounded-xl overflow-hidden transition ${imgIdx === i ? 'ring-2 ring-accent ring-offset-2' : 'opacity-70 hover:opacity-100'}`}>
+                {m.type === 'video' ? (
+                  <>
+                    <video src={m.url} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center"><PlayCircle className="w-6 h-6 text-white" /></div>
+                  </>
+                ) : (
+                  <Image src={m.url} alt={product.name} width={80} height={80} className="w-full h-full object-cover" loading="lazy" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Product Info */}
+        <div className="slide-in-right">
+          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-3">{product.category?.name} • {product.subcategory}</p>
+          <h1 className="font-display text-3xl md:text-4xl lg:text-5xl font-extrabold mb-4 text-balance leading-[1.05]">{product.name}</h1>
+          <div className="flex items-center gap-2 mb-6">
+            <div className="flex">
+              {[1, 2, 3, 4, 5].map(i => <Star key={i} className={`w-4 h-4 ${i <= Math.round(product.rating_avg) ? 'fill-accent text-accent' : 'text-muted-foreground'}`} />)}
+            </div>
+            <span className="text-sm text-muted-foreground">{product.rating_avg} · {product.rating_count} reviews</span>
+          </div>
+          <div className="flex items-baseline gap-3 mb-2">
+            <span className="font-display text-4xl md:text-5xl font-extrabold text-primary">{formatINR(product.price)}</span>
+            {product.mrp > product.price && (
+              <>
+                <span className="text-lg text-muted-foreground line-through">{formatINR(product.mrp)}</span>
+                <span className="text-accent font-extrabold">{product.discount_percent}% off</span>
+              </>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mb-5">Inclusive of all taxes • GST invoice available</p>
+          {lowStock && <div className="bg-destructive/10 text-destructive rounded-2xl p-4 text-sm font-semibold mb-5 bounce-in inline-flex items-center gap-2"><Zap className="w-4 h-4" />Only {product.stock_quantity} left — order soon!</div>}
+          {product.stock_quantity === 0 && <div className="text-destructive font-bold mb-4">Out of stock</div>}
+          <p className="text-muted-foreground mb-8 leading-relaxed">{product.description}</p>
+
+          <div className="flex items-center gap-3 mb-6">
+            <span className="text-sm font-semibold">Qty</span>
+            <div className="flex items-center border rounded-full">
+              <button onClick={() => setQty(Math.max(1, qty - 1))} className="p-3"><Minus className="w-4 h-4" /></button>
+              <span className="px-5 font-semibold">{qty}</span>
+              <button onClick={() => setQty(qty + 1)} className="p-3"><Plus className="w-4 h-4" /></button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button size="lg" onClick={(e) => { addRipple(e); addToCart(product, qty) }} disabled={product.stock_quantity === 0} className="flex-1 rounded-full h-14 bg-accent text-accent-foreground hover:bg-accent/90 btn-shine ripple font-bold shadow-glow">
+                <ShoppingBag className="w-4 h-4 mr-1" />Add to Cart
+              </Button>
+              <Button size="lg" onClick={(e) => { addRipple(e); addToCart(product, qty); router.push('/checkout') }} disabled={product.stock_quantity === 0} className="flex-1 rounded-full h-14 btn-shine ripple">
+                Buy Now
+              </Button>
+            </div>
+            <Button
+              size="lg"
+              variant="outline"
+              onClick={() => router.push(`/bulk-quote?product=${encodeURIComponent(product.name)}`)}
+              className="w-full rounded-full h-12 font-semibold border-2 flex items-center justify-center gap-2"
+            >
+              <FileText className="w-4 h-4" /> Request Bulk Quote
+            </Button>
+          </div>
+
+          <Separator className="my-8" />
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            {[
+              [Truck, 'Free Shipping', 'On ₹1999+'],
+              [Package, 'Easy Returns', '7-day policy'],
+              [Shield, 'GST Invoice', 'B2B ready']
+            ].map(([I, t, s], i) => (
+              <div key={i}>
+                <div className="w-10 h-10 gold-gradient rounded-xl flex items-center justify-center mb-2"><I className="w-5 h-5 text-primary" /></div>
+                <p className="font-semibold">{t}</p><p className="text-muted-foreground text-xs">{s}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <Tabs defaultValue="desc" className="mb-16 reveal">
+        <TabsList className="rounded-full h-11 p-1 flex-wrap">
+          <TabsTrigger value="desc" className="rounded-full">Description</TabsTrigger>
+          <TabsTrigger value="specs" className="rounded-full">Specifications</TabsTrigger>
+          <TabsTrigger value="reviews" className="rounded-full">Reviews ({localReviews.length})</TabsTrigger>
+        </TabsList>
+        <TabsContent value="desc" className="pt-6 text-muted-foreground leading-relaxed max-w-3xl text-lg">{product.description}</TabsContent>
+        <TabsContent value="specs" className="pt-6 max-w-2xl">
+          <table className="w-full text-sm">
+            <tbody>
+              {[
+                ['SKU', product.sku],
+                ['Category', product.category?.name],
+                ['Sub-category', product.subcategory],
+                ['Availability', product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'],
+                ['Payment', 'COD, Bank Transfer'],
+                ['Shipping', 'Pan India — 1-5 days']
+              ].map(([k, v]) => (
+                <tr key={k} className="border-b">
+                  <td className="py-3 text-muted-foreground">{k}</td><td className="font-medium">{v}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TabsContent>
+        <TabsContent value="reviews" className="pt-6 space-y-6">
+          {user && (
+            <Card className="radius-lg">
+              <CardContent className="pt-6">
+                <p className="font-bold mb-3">Write a Review</p>
+                <div className="flex gap-1 mb-4">
+                  {[1, 2, 3, 4, 5].map(i => (
+                    <button key={i} onClick={() => setReviewRating(i)} className="hover:scale-110 transition-transform">
+                      <Star className={`w-7 h-7 transition-colors ${i <= reviewRating ? 'fill-accent text-accent' : 'text-muted-foreground/40 hover:text-accent'}`} />
+                    </button>
+                  ))}
+                  <span className="ml-2 text-sm text-muted-foreground self-center">{reviewRating} star{reviewRating !== 1 ? 's' : ''}</span>
+                </div>
+                <Textarea
+                  value={reviewText}
+                  onChange={e => setReviewText(e.target.value)}
+                  placeholder="Tell others what you think about this product..."
+                  className="mb-4 rounded-xl"
+                  rows={3}
+                />
+                <Button onClick={submitReview} disabled={reviewLoading || !reviewText.trim()} className="rounded-full">
+                  {reviewLoading ? 'Posting...' : 'Post Review'}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+          {localReviews.length > 0 ? localReviews.map(r => (
+            <div key={r.id} className="border-b pb-6 fade-in">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center font-semibold shrink-0">{r.user_name?.[0]?.toUpperCase() || '?'}</div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex">
+                      {[1, 2, 3, 4, 5].map(i => <Star key={i} className={`w-3 h-3 ${i <= r.rating ? 'fill-accent text-accent' : 'text-muted-foreground/30'}`} />)}
+                    </div>
+                    <span className="text-sm font-bold">{r.user_name}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                </div>
+              </div>
+              <p className="text-muted-foreground pl-13 leading-relaxed">{r.comment}</p>
+            </div>
+          )) : (
+            <div className="text-center py-12 border border-dashed rounded-2xl">
+              <Star className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+              <p className="text-muted-foreground font-medium">No reviews yet.</p>
+              {user ? <p className="text-xs text-muted-foreground mt-1">Be the first to share your experience!</p> : <Link href="/login" className="text-xs text-primary font-semibold mt-1 block">Sign in to write a review</Link>}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {product.related?.length > 0 && (
+        <div className="reveal">
+          <h2 className="font-display text-2xl md:text-3xl font-extrabold mb-6">You May Also Like</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+            {product.related.map(p => <ProductCard key={p.id} product={p} />)}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
