@@ -50,7 +50,7 @@ export function AuthView({ mode }) {
       setUser(data.user)
       
       toast.success(mode === 'login' ? 'Welcome back' : 'Account created')
-      router.push(data.user.role === 'admin' ? '/admin' : '/') 
+      window.location.href = data.user.role === 'admin' ? '/admin' : '/'
     } catch (e) { 
       toast.error(e.message) 
     } finally { 

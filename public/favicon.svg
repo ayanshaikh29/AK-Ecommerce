@@ -1,0 +1,12 @@
+
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFE5B4" />
+      <stop offset="50%" stop-color="#D4AF37" />
+      <stop offset="100%" stop-color="#996515" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#gold)" />
+  <text x="50%" y="54%" font-size="220" font-weight="900" font-family="system-ui, -apple-system, sans-serif" fill="#1a1a1a" text-anchor="middle" dominant-baseline="middle">AK</text>
+</svg>

@@ -49,9 +49,9 @@ export function Footer({ settings }) {
       <div className="max-w-7xl mx-auto px-4 md:px-6 mt-16 pt-8 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-4 text-xs">
         <p>© {new Date().getFullYear()} {settings?.brand_name || 'AK Enterprises'}. All rights reserved.</p>
         <div className="flex items-center gap-6">
-          <Link href="#" className="hover:text-white transition">Privacy Policy</Link>
-          <Link href="#" className="hover:text-white transition">Terms of Service</Link>
-          <Link href="#" className="hover:text-white transition">Refund Policy</Link>
+          <Link href="/privacy-policy" className="hover:text-white transition">Privacy Policy</Link>
+          <Link href="/terms-conditions" className="hover:text-white transition">Terms of Service</Link>
+          <Link href="/refund-policy" className="hover:text-white transition">Refund Policy</Link>
         </div>
       </div>
     </footer>

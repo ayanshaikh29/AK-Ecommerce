@@ -168,8 +168,7 @@ export function CheckoutView() {
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}))
         console.error('Checkout API error:', errData.error || errData)
-        let msg = 'Unable to place your order. Please check your details and try again.'
-        if (errData.error) msg += ` (${errData.error})`
+        const msg = errData.error || 'Unable to place your order. Please check your details and try again.'
         throw new Error(msg)
       }
       const order = await res.json()

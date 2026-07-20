@@ -129,16 +129,62 @@ async function seed() {
   console.log(`Housekeeping ID: ${hkCatId}`)
   console.log(`Stationery ID: ${stationaryCatId}`)
 
-  // Clear existing products but keep featured ones
-  console.log('\nClearing existing products...')
+  // Clear existing product images and products
+  console.log('\nClearing existing product images and products...')
+  await supabase.from('product_images').delete().neq('id', '00000000-0000-0000-0000-000000000000')
   await supabase.from('products').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+
+  const uploadedCache = {}
+
+  async function uploadImage(filename) {
+    if (!filename) return '/placeholder.png'
+    if (uploadedCache[filename]) return uploadedCache[filename]
+
+    const fullPath = path.join(UPLOADS_DIR, filename)
+    if (existsSync(fullPath)) {
+      const buf = readFileSync(fullPath)
+      const ext = filename.split('.').pop() || 'bin'
+      const storageFilename = `${uuidv4()}.${ext}`
+
+      const contentTypeMap = {
+        webp: 'image/webp',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        png: 'image/png',
+        gif: 'image/gif',
+      }
+
+      const { error: uploadErr } = await supabase.storage
+        .from('product-images')
+        .upload(storageFilename, buf, {
+          contentType: contentTypeMap[ext] || `image/${ext}`,
+          cacheControl: '31536000'
+        })
+
+      if (!uploadErr) {
+        const { data: { publicUrl } } = supabase.storage
+          .from('product-images')
+          .getPublicUrl(storageFilename)
+        uploadedCache[filename] = publicUrl
+        console.log(`Uploaded ${filename} -> ${publicUrl}`)
+        return publicUrl
+      } else {
+        console.error(`Failed to upload ${filename}:`, uploadErr.message)
+        return `/uploads/${filename}`
+      }
+    } else {
+      console.warn(`Local file ${filename} not found in ${UPLOADS_DIR}`)
+      return `/uploads/${filename}`
+    }
+  }
 
   // Insert housekeeping products
   console.log(`\nInserting ${housekeepingProducts.length} housekeeping products...`)
   for (const p of housekeepingProducts) {
-    const images = [`/uploads/${p.filename}`]
+    const publicUrl = await uploadImage(p.filename)
+    const pId = uuidv4()
     const doc = {
-      id: uuidv4(),
+      id: pId,
       name: p.name,
       slug: slugify(p.name),
       description: p.desc,
@@ -153,21 +199,29 @@ async function seed() {
       is_featured: p.featured,
       rating_avg: 4.5,
       rating_count: 15,
-      images,
+      images: [publicUrl],
       videos: [],
       created_at: now,
       updated_at: now,
     }
     await supabase.from('products').insert(doc)
+    await supabase.from('product_images').insert({
+      id: uuidv4(),
+      product_id: pId,
+      image_url: publicUrl,
+      sort_order: 0,
+      created_at: now
+    })
     console.log(`  ✓ ${p.name}`)
   }
 
   // Insert stationery products
   console.log(`\nInserting ${stationeryProducts.length} stationery products...`)
   for (const p of stationeryProducts) {
-    const images = [`/uploads/${p.filename}`]
+    const publicUrl = await uploadImage(p.filename)
+    const pId = uuidv4()
     const doc = {
-      id: uuidv4(),
+      id: pId,
       name: p.name,
       slug: slugify(p.name),
       description: p.desc,
@@ -182,12 +236,19 @@ async function seed() {
       is_featured: p.featured,
       rating_avg: 4.3,
       rating_count: 12,
-      images,
+      images: [publicUrl],
       videos: [],
       created_at: now,
       updated_at: now,
     }
     await supabase.from('products').insert(doc)
+    await supabase.from('product_images').insert({
+      id: uuidv4(),
+      product_id: pId,
+      image_url: publicUrl,
+      sort_order: 0,
+      created_at: now
+    })
     console.log(`  ✓ ${p.name}`)
   }
 

@@ -26,6 +26,7 @@ function slugify(text) {
 
 async function run() {
   const now = new Date().toISOString()
+  const uploadedCache = {}
   
   // 1. Seed categories (without 'description' or 'icon' columns as they don't exist in DB)
   console.log('Clearing and seeding categories...')
@@ -101,10 +102,53 @@ async function run() {
     }
     
     // Insert image
+    let imageUrl = p.image_url
+    if (imageUrl && imageUrl.startsWith('/uploads/')) {
+      const filename = imageUrl.replace('/uploads/', '')
+      if (uploadedCache[filename]) {
+        imageUrl = uploadedCache[filename]
+      } else {
+        const fullPath = path.join(process.cwd(), 'public', 'uploads', filename)
+        if (existsSync(fullPath)) {
+          const buf = readFileSync(fullPath)
+          const ext = filename.split('.').pop() || 'bin'
+          const storageFilename = `${uuidv4()}.${ext}`
+          
+          const contentTypeMap = {
+            webp: 'image/webp',
+            jpg: 'image/jpeg',
+            jpeg: 'image/jpeg',
+            png: 'image/png',
+            gif: 'image/gif',
+          }
+          
+          const { error: uploadErr } = await supabase.storage
+            .from('product-images')
+            .upload(storageFilename, buf, {
+              contentType: contentTypeMap[ext] || `image/${ext}`,
+              cacheControl: '31536000'
+            })
+            
+          if (!uploadErr) {
+            const { data: { publicUrl } } = supabase.storage
+              .from('product-images')
+              .getPublicUrl(storageFilename)
+            uploadedCache[filename] = publicUrl
+            imageUrl = publicUrl
+            console.log(`Uploaded local ${filename} to Supabase Storage: ${publicUrl}`)
+          } else {
+            console.error(`Failed to upload local image ${filename}:`, uploadErr.message)
+          }
+        } else {
+          console.warn(`Local file ${filename} not found in public/uploads`)
+        }
+      }
+    }
+
     const imgDoc = {
       id: uuidv4(),
       product_id: pId,
-      image_url: p.image_url,
+      image_url: imageUrl,
       sort_order: 0,
       created_at: now
     }

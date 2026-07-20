@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Filter, ChevronRight, RefreshCw } from 'lucide-react'
+import { Filter, ChevronRight, RefreshCw, Star } from 'lucide-react'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
@@ -19,12 +19,13 @@ function useScrollReveal(deps = []) {
   }, deps)
 }
 
-export function ProductsView({ initialProducts, cats, initialCategory, initialSearch, initialSort, initialMinPrice, initialMaxPrice }) {
+export function ProductsView({ initialProducts, cats, initialCategory, initialSearch, initialSort, initialMinPrice, initialMaxPrice, initialBrand, initialRating }) {
   const router = useRouter()
   const [sort, setSort] = useState(initialSort)
   const [priceRange, setPriceRange] = useState([initialMinPrice, initialMaxPrice])
   const [selectedCat, setSelectedCat] = useState(initialCategory)
-  const [selectedBrands, setSelectedBrands] = useState([])
+  const [selectedBrands, setSelectedBrands] = useState(initialBrand ? initialBrand.split(',') : [])
+  const [selectedRating, setSelectedRating] = useState(initialRating || 0)
   const [inStockOnly, setInStockOnly] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
 
@@ -35,7 +36,9 @@ export function ProductsView({ initialProducts, cats, initialCategory, initialSe
     setSelectedCat(initialCategory)
     setPriceRange([initialMinPrice, initialMaxPrice])
     setSort(initialSort)
-  }, [initialCategory, initialMinPrice, initialMaxPrice, initialSort])
+    setSelectedBrands(initialBrand ? initialBrand.split(',') : [])
+    setSelectedRating(initialRating || 0)
+  }, [initialCategory, initialMinPrice, initialMaxPrice, initialSort, initialBrand, initialRating])
 
   // Get available brands dynamically based on category
   const allBrands = useMemo(() => {
@@ -44,10 +47,12 @@ export function ProductsView({ initialProducts, cats, initialCategory, initialSe
   }, [initialProducts])
 
   // When filters change, push to router to trigger server refetch
-  const applyFilters = (newCat, newSort, newPrice) => {
+  const applyFilters = (newCat, newSort, newPrice, newBrands, newRating) => {
     const cat = newCat !== undefined ? newCat : selectedCat
     const s = newSort !== undefined ? newSort : sort
     const p = newPrice !== undefined ? newPrice : priceRange
+    const brs = newBrands !== undefined ? newBrands : selectedBrands
+    const rat = newRating !== undefined ? newRating : selectedRating
     
     const q = new URLSearchParams()
     if (cat) q.set('category', cat)
@@ -55,6 +60,8 @@ export function ProductsView({ initialProducts, cats, initialCategory, initialSe
     if (s && s !== 'newest') q.set('sort', s)
     if (p[0] > 0) q.set('minPrice', p[0])
     if (p[1] < 15000) q.set('maxPrice', p[1])
+    if (brs.length > 0) q.set('brand', brs.join(','))
+    if (rat > 0) q.set('rating', rat)
     
     router.push('/products?' + q.toString())
   }
@@ -64,8 +71,14 @@ export function ProductsView({ initialProducts, cats, initialCategory, initialSe
     let list = [...initialProducts]
 
     // Brand filter
+    // Brand filter
     if (selectedBrands.length > 0) {
-      list = list.filter(p => selectedBrands.includes(p.brand))
+      list = list.filter(p => selectedBrands.includes(p.brand || 'AK Quality'))
+    }
+
+    // Rating filter
+    if (selectedRating > 0) {
+      list = list.filter(p => (p.rating_avg || 4.5) >= selectedRating)
     }
 
     // Stock availability filter
@@ -77,20 +90,29 @@ export function ProductsView({ initialProducts, cats, initialCategory, initialSe
     list = list.filter(p => p.price >= priceRange[0] && p.price <= priceRange[1])
 
     return list
-  }, [initialProducts, selectedBrands, inStockOnly, priceRange])
+  }, [initialProducts, selectedBrands, selectedRating, inStockOnly, priceRange])
 
   const toggleBrand = (brand) => {
-    setSelectedBrands(prev => 
-      prev.includes(brand) ? prev.filter(b => b !== brand) : [...prev, brand]
-    )
+    const next = selectedBrands.includes(brand)
+      ? selectedBrands.filter(b => b !== brand)
+      : [...selectedBrands, brand]
+    setSelectedBrands(next)
+    applyFilters(undefined, undefined, undefined, next, undefined)
+  }
+
+  const toggleRating = (ratingVal) => {
+    const next = selectedRating === ratingVal ? 0 : ratingVal
+    setSelectedRating(next)
+    applyFilters(undefined, undefined, undefined, undefined, next)
   }
 
   const clearAllFilters = () => {
     setSelectedBrands([])
+    setSelectedRating(0)
     setInStockOnly(false)
     setPriceRange([0, 15000])
     setSelectedCat('')
-    applyFilters('', 'newest', [0, 15000])
+    applyFilters('', 'newest', [0, 15000], [], 0)
   }
 
   const categoryName = selectedCat ? cats.find(c => c.slug === selectedCat)?.name : null
@@ -195,6 +217,34 @@ export function ProductsView({ initialProducts, cats, initialCategory, initialSe
           />
           <span className="select-none text-xs font-medium">In Stock Only</span>
         </label>
+      </div>
+
+      {/* Rating Filters Section */}
+      <div className="pt-4 border-t">
+        <h4 className="font-semibold text-sm text-foreground mb-3 tracking-wide">Customer Rating</h4>
+        <div className="space-y-2">
+          {[4, 3, 2].map(stars => (
+            <button
+              key={stars}
+              onClick={() => toggleRating(stars)}
+              className={`flex items-center gap-2 text-xs py-1.5 px-2.5 rounded-lg w-full text-left transition-colors ${
+                selectedRating === stars ? 'bg-secondary text-accent font-bold' : 'text-muted-foreground hover:bg-secondary/40 hover:text-foreground'
+              }`}
+            >
+              <div className="flex shrink-0">
+                {[1, 2, 3, 4, 5].map(star => (
+                  <Star
+                    key={star}
+                    className={`w-3.5 h-3.5 ${
+                      star <= stars ? 'fill-accent text-accent' : 'text-muted-foreground/30'
+                    }`}
+                  />
+                ))}
+              </div>
+              <span>& Up</span>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )

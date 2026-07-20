@@ -11,6 +11,8 @@ export default async function ProductsPage({ searchParams }) {
   const sort = searchParams?.sort || 'newest'
   const minPrice = searchParams?.minPrice ? parseInt(searchParams.minPrice) : 0
   const maxPrice = searchParams?.maxPrice ? parseInt(searchParams.maxPrice) : 15000
+  const brand = searchParams?.brand || ''
+  const rating = searchParams?.rating ? parseFloat(searchParams.rating) : 0
 
   // Parallel fetching
   const [{ data: cats }, { data: allProducts }] = await Promise.all([
@@ -26,6 +28,8 @@ export default async function ProductsPage({ searchParams }) {
       if (featured) query = query.eq('is_featured', true)
       if (minPrice) query = query.gte('price', minPrice)
       if (maxPrice) query = query.lte('price', maxPrice)
+      if (brand) query = query.eq('brand', brand)
+      if (rating) query = query.gte('rating_avg', rating)
       
       if (sort === 'price-asc') query = query.order('price', { ascending: true })
       else if (sort === 'price-desc') query = query.order('price', { ascending: false })
@@ -50,6 +54,8 @@ export default async function ProductsPage({ searchParams }) {
       initialSort={sort}
       initialMinPrice={minPrice}
       initialMaxPrice={maxPrice}
+      initialBrand={brand}
+      initialRating={rating}
     />
   )
 }

@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useAppContext } from '@/components/providers/AppProvider'
 import { ProductCard } from '@/components/ui/ProductCard'
+import { RecentlyViewed } from '@/components/product/RecentlyViewed'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 const catIcon = { 'office-stationery': FileText, 'housekeeping': Sparkles, 'ups-solutions': BatteryCharging }
@@ -41,9 +42,40 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
   const router = useRouter()
   useScrollReveal([initialFeatured, initialCats, initialTrending, initialBanners, initialClients])
 
+  const now = new Date()
+  const activeBanners = (initialBanners || []).filter(b => {
+    if (b.start_date && new Date(b.start_date) > now) return false
+    if (b.end_date && new Date(b.end_date) < now) return false
+    return true
+  })
+
+  const categoriesList = initialCats && initialCats.length >= 3 ? initialCats : [
+    {
+      id: 'cat-stationery',
+      name: 'Office Stationery',
+      slug: 'office-stationery',
+      description: 'Pens, files, notebooks, office devices & more',
+      image_url: 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=800&auto=format&fit=crop&q=80'
+    },
+    {
+      id: 'cat-housekeeping',
+      name: 'Housekeeping Supplies',
+      slug: 'housekeeping',
+      description: 'Cleaning chemicals, garbage bags, tissues & floor tools',
+      image_url: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&auto=format&fit=crop&q=80'
+    },
+    {
+      id: 'cat-ups',
+      name: 'UPS & Power Solutions',
+      slug: 'ups-solutions',
+      description: 'UPS systems, backup batteries & industrial supplies',
+      image_url: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=800&auto=format&fit=crop&q=80'
+    }
+  ]
+
   return (
     <div>
-      <HeroSection banners={initialBanners} router={router} />
+      <HeroSection banners={activeBanners} router={router} />
 
       {/* Quick Category Bar */}
       <section className="bg-background border-b border-border/40 py-8 relative z-10">
@@ -104,11 +136,11 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
           <p className="text-muted-foreground text-lg">Three curated collections. Hundreds of products. One trusted supplier.</p>
         </div>
         <div className="grid md:grid-cols-3 gap-6">
-          {initialCats.map((c, i) => {
+          {categoriesList.map((c, i) => {
             const Icon = catIcon[c.slug] || Grid3x3
             return (
               <button key={c.id} onClick={() => router.push('/products?category=' + c.slug)} className="group relative aspect-[4/5] radius-xl overflow-hidden shadow-soft hover:shadow-elevated transition-all duration-500 reveal-scale" style={{ transitionDelay: `${i * 100}ms` }}>
-                <Image src={c.image_url} alt={c.name} fill className="object-cover product-card-img" loading="lazy" sizes="(max-width: 768px) 100vw, 33vw" />
+                <Image src={c.image_url} alt={c.name} fill className="object-cover product-card-img group-hover:scale-105 transition-transform duration-500" loading="lazy" sizes="(max-width: 768px) 100vw, 33vw" />
                 <div className="absolute inset-0 bg-gradient-to-t from-primary via-primary/50 to-transparent" />
                 <div className="absolute inset-0 p-8 flex flex-col justify-end text-left text-white">
                   <div className="w-14 h-14 gold-gradient rounded-2xl flex items-center justify-center mb-4 group-hover:rotate-12 group-hover:scale-110 transition-all duration-500 shadow-glow"><Icon className="w-7 h-7 text-primary" /></div>
@@ -192,7 +224,43 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
         </div>
       </section>
 
+      <RecentlyViewed />
       <Newsletter />
+    </div>
+  )
+}
+
+function CountdownTimer({ endDate }) {
+  const [timeLeft, setTimeLeft] = useState('')
+
+  useEffect(() => {
+    const calculate = () => {
+      const difference = +new Date(endDate) - +new Date()
+      if (difference <= 0) {
+        setTimeLeft('Promotion Ended')
+        return
+      }
+      const days = Math.floor(difference / (1000 * 60 * 60 * 24))
+      const hours = Math.floor((difference / (1000 * 60 * 60)) % 24)
+      const minutes = Math.floor((difference / 1000 / 60) % 60)
+      const seconds = Math.floor((difference / 1000) % 60)
+
+      let parts = []
+      if (days > 0) parts.push(`${days}d`)
+      parts.push(`${hours}h`)
+      parts.push(`${minutes}m`)
+      parts.push(`${seconds}s`)
+      setTimeLeft(parts.join(' : '))
+    }
+
+    calculate()
+    const timer = setInterval(calculate, 1000)
+    return () => clearInterval(timer)
+  }, [endDate])
+
+  return (
+    <div className="inline-flex items-center gap-2 bg-accent/20 border border-accent/40 rounded-xl px-4 py-2 mt-2 text-xs font-bold text-accent animate-pulse font-mono tracking-widest shadow-glow">
+      ⏳ Sale Ends In: {timeLeft}
     </div>
   )
 }
@@ -238,7 +306,12 @@ function HeroSection({ banners, router }) {
                     </span>
                   ))}
                 </h1>
-                <p className="text-lg md:text-xl mb-8 text-primary-foreground/85 max-w-xl fade-in" style={{ animationDelay: '0.8s' }}>{s.subtitle}</p>
+                <p className="text-lg md:text-xl mb-6 text-primary-foreground/85 max-w-xl fade-in" style={{ animationDelay: '0.8s' }}>{s.subtitle}</p>
+                {s.show_countdown && s.end_date && (
+                  <div className="mb-6 fade-in" style={{ animationDelay: '0.9s' }}>
+                    <CountdownTimer endDate={s.end_date} />
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-3 fade-in" style={{ animationDelay: '1s' }}>
                   <Link href={s.cta_link || '/products'}>
                     <Button size="lg" className="rounded-full px-8 h-14 bg-accent text-accent-foreground hover:bg-accent/90 btn-shine ripple font-bold text-base shadow-glow">{s.cta_text || 'Shop Now'} <ArrowRight className="ml-2 w-4 h-4" /></Button>

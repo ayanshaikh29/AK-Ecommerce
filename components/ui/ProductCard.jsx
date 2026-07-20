@@ -124,6 +124,63 @@ export function ProductCard({ product }) {
     }
   }
 
+  const [compareChecked, setCompareChecked] = useState(false)
+
+  const checkCompareState = useCallback(() => {
+    try {
+      const stored = localStorage.getItem('compare_products')
+      const list = stored ? JSON.parse(stored) : []
+      setCompareChecked(list.some(item => item.id === product.id))
+    } catch {
+      setCompareChecked(false)
+    }
+  }, [product.id])
+
+  useEffect(() => {
+    checkCompareState()
+    window.addEventListener('compare-updated', checkCompareState)
+    return () => {
+      window.removeEventListener('compare-updated', checkCompareState)
+    }
+  }, [checkCompareState])
+
+  const toggleCompare = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    try {
+      const stored = localStorage.getItem('compare_products')
+      let list = stored ? JSON.parse(stored) : []
+      const exists = list.some(item => item.id === product.id)
+      
+      if (exists) {
+        list = list.filter(item => item.id !== product.id)
+        toast.success('Removed from comparison')
+      } else {
+        if (list.length >= 4) {
+          toast.error('You can compare a maximum of 4 products')
+          return
+        }
+        list.push({
+          id: product.id,
+          name: product.name,
+          slug: product.slug,
+          price: product.price,
+          mrp: product.mrp,
+          image: product.images?.[0] || '/placeholder.png',
+          brand: product.brand || 'AK Quality',
+          rating_avg: product.rating_avg || 4.5,
+          stock_quantity: product.stock_quantity,
+          sku: product.sku
+        })
+        toast.success('Added to comparison')
+      }
+      localStorage.setItem('compare_products', JSON.stringify(list))
+      window.dispatchEvent(new Event('compare-updated'))
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
   return (
     <div
       className="group cursor-hover bg-card rounded-2xl overflow-hidden border border-border/60 hover:border-accent/40 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col h-full"
@@ -139,8 +196,21 @@ export function ProductCard({ product }) {
           loading="lazy"
           sizes="(max-width: 768px) 50vw, 25vw"
         />
+        {/* Compare Checkbox */}
+        <button
+          onClick={toggleCompare}
+          className="absolute top-2.5 left-2.5 flex items-center gap-1.5 glass-strong text-foreground px-2 py-1 rounded-md text-[10px] backdrop-blur font-bold cursor-pointer shadow-sm z-10 hover:scale-105 transition"
+        >
+          <input
+            type="checkbox"
+            checked={compareChecked}
+            readOnly
+            className="w-3.5 h-3.5 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer accent-primary"
+          />
+          Compare
+        </button>
         {product.videos?.length > 0 && (
-          <div className="absolute top-2.5 left-2.5 flex items-center gap-1 glass-dark text-white px-2 py-0.5 rounded text-[10px] backdrop-blur font-medium">
+          <div className="absolute top-10 left-2.5 flex items-center gap-1 glass-dark text-white px-2 py-0.5 rounded text-[10px] backdrop-blur font-medium">
             <PlayCircle className="w-3 h-3" />
             Video
           </div>

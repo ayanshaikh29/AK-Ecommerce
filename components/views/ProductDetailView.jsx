@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { useAppContext } from '@/components/providers/AppProvider'
 import { ProductCard } from '@/components/ui/ProductCard'
+import { RecentlyViewed } from '@/components/product/RecentlyViewed'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
@@ -50,9 +51,75 @@ export function ProductDetailView({ initialProduct }) {
   const [localReviews, setLocalReviews] = useState(initialProduct?.reviews || [])
   const [wishlisted, setWishlisted] = useState(false)
   const [wishlistLoading, setWishlistLoading] = useState(false)
+  
+  // Q&A States
+  const [qaList, setQaList] = useState([])
+  const [questionText, setQuestionText] = useState('')
+  const [qaLoading, setQaLoading] = useState(false)
+
   const imgRef = useRef(null)
 
   useScrollReveal([product])
+
+  // Track recently viewed product
+  useEffect(() => {
+    if (!product?.id) return
+    try {
+      const stored = localStorage.getItem('recently_viewed')
+      let list = stored ? JSON.parse(stored) : []
+      list = list.filter(item => item.id !== product.id)
+      list.unshift({
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+        price: product.price,
+        mrp: product.mrp,
+        image: product.images?.[0] || '/placeholder.png'
+      })
+      if (list.length > 10) list.pop()
+      localStorage.setItem('recently_viewed', JSON.stringify(list))
+    } catch (e) {
+      console.error('Error tracking recently viewed:', e)
+    }
+  }, [product?.id])
+
+  // Load Q&A questions
+  const loadQa = () => {
+    if (!product?.id) return
+    fetch(`/api/products/${product.id}/qa`)
+      .then(r => r.json())
+      .then(setQaList)
+      .catch(console.error)
+  }
+
+  useEffect(() => {
+    loadQa()
+  }, [product?.id])
+
+  const submitQuestion = async () => {
+    if (!user) { toast.error('Please sign in to ask a question'); return }
+    if (!questionText.trim()) { toast.error('Please type a question'); return }
+    setQaLoading(true)
+    try {
+      const res = await fetch(`/api/products/${product.id}/qa`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: JSON.stringify({ question: questionText })
+      })
+      if (res.ok) {
+        toast.success('Your question has been posted successfully')
+        setQuestionText('')
+        loadQa()
+      } else {
+        const d = await res.json()
+        toast.error(d.message || 'Failed to post question')
+      }
+    } catch (e) {
+      toast.error('Network error')
+    } finally {
+      setQaLoading(false)
+    }
+  }
 
   // Check wishlist status on mount
   useEffect(() => {
@@ -265,6 +332,7 @@ export function ProductDetailView({ initialProduct }) {
           <TabsTrigger value="desc" className="rounded-full">Description</TabsTrigger>
           <TabsTrigger value="specs" className="rounded-full">Specifications</TabsTrigger>
           <TabsTrigger value="reviews" className="rounded-full">Reviews ({localReviews.length})</TabsTrigger>
+          <TabsTrigger value="qa" className="rounded-full">Q&A ({qaList.length})</TabsTrigger>
         </TabsList>
         <TabsContent value="desc" className="pt-6 text-muted-foreground leading-relaxed max-w-3xl text-lg">{product.description}</TabsContent>
         <TabsContent value="specs" className="pt-6 max-w-2xl">
@@ -335,6 +403,46 @@ export function ProductDetailView({ initialProduct }) {
             </div>
           )}
         </TabsContent>
+        <TabsContent value="qa" className="pt-6 space-y-6">
+          <Card className="radius-lg">
+            <CardContent className="pt-6">
+              <p className="font-bold mb-3">Ask a Question</p>
+              <Textarea
+                value={questionText}
+                onChange={e => setQuestionText(e.target.value)}
+                placeholder="Ask something about this product (e.g. dimensions, bulk capacity)..."
+                className="mb-4 rounded-xl"
+                rows={3}
+              />
+              <Button onClick={submitQuestion} disabled={qaLoading || !questionText.trim()} className="rounded-full">
+                {qaLoading ? 'Posting...' : 'Ask Question'}
+              </Button>
+            </CardContent>
+          </Card>
+          
+          <div className="space-y-4">
+            {qaList.length > 0 ? qaList.map(q => (
+              <div key={q.id} className="border-b pb-4 fade-in">
+                <div className="flex justify-between items-start mb-2">
+                  <p className="font-bold text-foreground text-sm">Q: {q.question}</p>
+                  <span className="text-[10px] text-muted-foreground">{new Date(q.created_at).toLocaleDateString()}</span>
+                </div>
+                <div className="pl-4 border-l-2 border-primary/20 bg-secondary/5 p-3 rounded-r-xl">
+                  {q.answer ? (
+                    <p className="text-xs text-foreground/80"><span className="font-bold text-primary mr-1">A:</span>{q.answer}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic"><span className="font-bold text-muted-foreground/60 mr-1">A:</span>No answer from seller yet. Typically answered in 2-4 hours.</p>
+                  )}
+                </div>
+              </div>
+            )) : (
+              <div className="text-center py-12 border border-dashed rounded-2xl">
+                <p className="text-muted-foreground font-medium">No questions asked yet.</p>
+                <p className="text-xs text-muted-foreground mt-1">Have any questions about this item? Ask them above!</p>
+              </div>
+            )}
+          </div>
+        </TabsContent>
       </Tabs>
 
       {product.related?.length > 0 && (
@@ -345,6 +453,7 @@ export function ProductDetailView({ initialProduct }) {
           </div>
         </div>
       )}
+      <RecentlyViewed />
     </div>
   )
 }
