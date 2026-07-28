@@ -1,8 +1,10 @@
 'use client'
 import React from 'react'
-import { Phone } from 'lucide-react'
+import { usePathname } from 'next/navigation'
 
 export function WhatsAppButton({ settings }) {
+  const pathname = usePathname()
+  if (pathname?.startsWith('/admin') || pathname?.includes('/admin') || pathname?.startsWith('/vendor') || pathname?.includes('/vendor')) return null
   const num = settings?.whatsapp_number || '918308860894'
   return (
     <a 

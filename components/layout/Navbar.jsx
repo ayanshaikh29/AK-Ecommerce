@@ -2,15 +2,20 @@
 import React, { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { Search, Package, LogOut, User, ShoppingBag, Heart } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useAppContext } from '@/components/providers/AppProvider'
+import { useCartToast } from '@/components/providers/CartToastProvider'
 
 export function Navbar({ settings }) {
+  const pathname = usePathname()
   const { user, cartCount, setCartOpen, logout } = useAppContext()
+  const { cartBounce } = useCartToast()
   const router = useRouter()
+
+  if (pathname?.startsWith('/admin') || pathname?.startsWith('/vendor')) return null
   const [scrolled, setScrolled] = useState(false)
   const [q, setQ] = useState('')
   const [suggestions, setSuggestions] = useState([])
@@ -85,17 +90,15 @@ export function Navbar({ settings }) {
             <div className="text-[10px] text-muted-foreground uppercase tracking-[0.15em] font-medium">{settings?.brand_tagline || 'Trusted B2B Partner'}</div>
           </div>
         </Link>
-        <nav className="hidden lg:flex items-center gap-1 ml-4 text-sm font-medium">
+        {/* Desktop Navigation Links */}
+        <nav className={`hidden lg:flex items-center gap-1 ${user ? 'ml-4' : 'mx-auto'} text-sm font-medium`}>
           {[
             ['Home', '/'],
             ['Shop', '/products'],
-            ['Stationery', '/products?category=office-stationery'],
-            ['Housekeeping', '/products?category=housekeeping'],
-            ['UPS', '/products?category=ups-solutions'],
             ['About', '/about'],
             ['Contact', '/contact']
           ].map(([label, path]) => (
-            <Link key={label} href={path} className="px-3 py-2 rounded-full hover:bg-secondary transition">
+            <Link key={label} href={path} className="px-3 py-2 rounded-full hover:bg-secondary transition font-medium">
               {label}
             </Link>
           ))}
@@ -104,85 +107,106 @@ export function Navbar({ settings }) {
               ADMIN
             </Link>
           )}
-        </nav>
-        <div ref={searchRef} className="flex-1 max-w-sm hidden md:block ml-4 relative">
-          <form onSubmit={submit}>
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"/>
-              <Input 
-                value={q} 
-                onChange={e => { setQ(e.target.value); setShowSuggestions(true) }} 
-                onFocus={() => setShowSuggestions(true)}
-                placeholder="Search products..." 
-                className="pl-10 h-10 rounded-full bg-secondary/60 border-transparent focus-visible:bg-white focus-visible:shadow-soft transition"
-              />
-            </div>
-          </form>
-          {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute top-12 left-0 right-0 bg-background border rounded-2xl shadow-elevated overflow-hidden z-50 py-2 divide-y divide-border">
-              {suggestions.map(p => (
-                <Link 
-                  key={p.id}
-                  href={'/product/' + p.slug}
-                  onClick={() => { setShowSuggestions(false); setQ('') }}
-                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-secondary/60 transition text-left"
-                >
-                  <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-secondary shrink-0">
-                    <Image src={p.images?.[0] || '/placeholder.png'} alt={p.name} fill className="object-cover" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-foreground line-clamp-1">{p.name}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase">{p.subcategory}</p>
-                  </div>
-                  <div className="text-xs font-bold text-primary shrink-0">₹{p.price}</div>
-                </Link>
-              ))}
-            </div>
+          {user?.role === 'vendor' && (
+            <Link href="/vendor" className="ml-2 px-3 py-1.5 bg-blue-600 text-white rounded-full text-xs font-bold shadow-soft">
+              VENDOR PORTAL
+            </Link>
           )}
-        </div>
-        <div className="flex-1 md:hidden"/>
-        <div className="flex items-center gap-1">
-          {/* Account Dropdown or Sign In */}
-          <div className="relative" ref={profileRef}>
-            {user ? (
-              <>
+        </nav>
+
+        {/* Search Bar - Logged in users only */}
+        {user ? (
+          <div ref={searchRef} className="flex-1 max-w-sm hidden md:block ml-4 relative">
+            <form onSubmit={submit}>
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground"/>
+                <Input 
+                  value={q} 
+                  onChange={e => { setQ(e.target.value); setShowSuggestions(true) }} 
+                  onFocus={() => setShowSuggestions(true)}
+                  placeholder="Search products..." 
+                  className="pl-10 h-10 rounded-full bg-secondary/60 border-transparent focus-visible:bg-white focus-visible:shadow-soft transition"
+                />
+              </div>
+            </form>
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute top-12 left-0 right-0 bg-background border rounded-2xl shadow-elevated overflow-hidden z-50 py-2 divide-y divide-border">
+                {suggestions.map(p => (
+                  <Link 
+                    key={p.id}
+                    href={'/product/' + p.slug}
+                    onClick={() => { setShowSuggestions(false); setQ('') }}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-secondary/60 transition text-left"
+                  >
+                    <div className="relative w-8 h-8 rounded-lg overflow-hidden bg-secondary shrink-0">
+                      <Image src={p.images?.[0] || '/placeholder.png'} alt={p.name} fill className="object-cover" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-foreground line-clamp-1">{p.name}</p>
+                      <p className="text-[10px] text-muted-foreground uppercase">{p.subcategory}</p>
+                    </div>
+                    <div className="text-xs font-bold text-primary shrink-0">₹{p.price}</div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {/* User Account / Sign In & Cart Icons */}
+        <div className="flex items-center gap-2">
+          {user ? (
+            <>
+              <div className="relative" ref={profileRef}>
                 <button
                   onClick={() => setProfileOpen(prev => !prev)}
                   className="flex items-center gap-1.5 p-2.5 hover:bg-secondary rounded-full transition text-muted-foreground hover:text-foreground focus:outline-none"
                   aria-label="Account Menu"
                 >
-                  <User className="w-5 h-5" />
+                  {user?.avatar_url ? (
+                    <img 
+                      src={user.avatar_url} 
+                      alt={user.full_name || 'User Profile'} 
+                      className="w-6 h-6 rounded-full object-cover border border-border/80" 
+                    />
+                  ) : (
+                    <User className="w-5 h-5" />
+                  )}
                 </button>
                 
                 {profileOpen && (
                   <div className="absolute right-0 top-12 w-56 bg-background border rounded-2xl shadow-elevated overflow-hidden z-55 py-2 divide-y divide-border scale-in">
                     <div className="px-4 py-2.5">
-                      <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Account</p>
+                      <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Account ({user.role})</p>
                       <p className="text-sm font-bold text-foreground truncate mt-0.5">{user.full_name || 'Business Partner'}</p>
                       <p className="text-[10px] text-muted-foreground truncate">{user.email}</p>
                     </div>
                     <div className="py-1">
-                      <Link 
-                        href="/account"
-                        onClick={() => setProfileOpen(false)}
-                        className="flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-secondary/60 transition text-muted-foreground hover:text-foreground font-medium"
-                      >
-                        <User className="w-4 h-4" /> My Profile
-                      </Link>
-                      <Link 
-                        href="/orders"
-                        onClick={() => setProfileOpen(false)}
-                        className="flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-secondary/60 transition text-muted-foreground hover:text-foreground font-medium"
-                      >
-                        <Package className="w-4 h-4" /> My Orders
-                      </Link>
-                      <Link
-                        href="/wishlist"
-                        onClick={() => setProfileOpen(false)}
-                        className="flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-secondary/60 transition text-muted-foreground hover:text-foreground font-medium"
-                      >
-                        <Heart className="w-4 h-4" /> Wishlist
-                      </Link>
+                      {user.role === 'customer' && (
+                        <>
+                          <Link 
+                            href="/account"
+                            onClick={() => setProfileOpen(false)}
+                            className="flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-secondary/60 transition text-muted-foreground hover:text-foreground font-medium"
+                          >
+                            <User className="w-4 h-4" /> My Profile
+                          </Link>
+                          <Link 
+                            href="/orders"
+                            onClick={() => setProfileOpen(false)}
+                            className="flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-secondary/60 transition text-muted-foreground hover:text-foreground font-medium"
+                          >
+                            <Package className="w-4 h-4" /> My Orders
+                          </Link>
+                          <Link
+                            href="/wishlist"
+                            onClick={() => setProfileOpen(false)}
+                            className="flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-secondary/60 transition text-muted-foreground hover:text-foreground font-medium"
+                          >
+                            <Heart className="w-4 h-4" /> Wishlist
+                          </Link>
+                        </>
+                      )}
                       {user.role === 'admin' && (
                         <Link 
                           href="/admin"
@@ -190,6 +214,15 @@ export function Navbar({ settings }) {
                           className="flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-secondary/60 text-primary font-bold transition"
                         >
                           <Package className="w-4 h-4" /> Admin Panel
+                        </Link>
+                      )}
+                      {user.role === 'vendor' && (
+                        <Link 
+                          href="/vendor"
+                          onClick={() => setProfileOpen(false)}
+                          className="flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-secondary/60 text-blue-600 font-bold transition"
+                        >
+                          <Package className="w-4 h-4" /> Vendor Dashboard
                         </Link>
                       )}
                     </div>
@@ -203,27 +236,30 @@ export function Navbar({ settings }) {
                     </div>
                   </div>
                 )}
-              </>
-            ) : (
-              <Link href="/login" className="flex items-center gap-1.5 p-2.5 hover:bg-secondary rounded-full transition text-muted-foreground hover:text-foreground" aria-label="Sign in">
-                <User className="w-5 h-5" />
-              </Link>
-            )}
-          </div>
+              </div>
 
-          <button 
-            id="cart-icon" 
-            onClick={() => setCartOpen(true)} 
-            className="relative p-2.5 hover:bg-secondary rounded-full transition"
-            aria-label="Open cart"
-          >
-            <ShoppingBag className="w-5 h-5"/>
-            {cartCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 gold-gradient text-primary text-[10px] font-extrabold rounded-full w-5 h-5 flex items-center justify-center shadow-soft">
-                {cartCount}
-              </span>
-            )}
-          </button>
+              <button 
+                id="cart-icon" 
+                onClick={() => setCartOpen(true)} 
+                className={`relative p-2.5 hover:bg-secondary rounded-full transition-all duration-300 ${cartBounce ? 'scale-125 text-accent' : ''}`}
+                aria-label="Open cart"
+              >
+                <ShoppingBag className={`w-5 h-5 transition-transform duration-300 ${cartBounce ? 'animate-bounce' : ''}`}/>
+                {cartCount > 0 && (
+                  <span className={`absolute -top-0.5 -right-0.5 gold-gradient text-primary text-[10px] font-extrabold rounded-full w-5 h-5 flex items-center justify-center shadow-soft transition-transform duration-300 ${cartBounce ? 'scale-125 shadow-glow' : ''}`}>
+                    {cartCount}
+                  </span>
+                )}
+              </button>
+            </>
+          ) : (
+            <Link 
+              href="/login" 
+              className="px-5 py-2 rounded-full gold-gradient text-primary font-bold text-xs shadow-soft hover:shadow-glow transition-all"
+            >
+              Login to Portal
+            </Link>
+          )}
         </div>
       </div>
 

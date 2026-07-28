@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Grid3x3, Plus, Upload, ClipboardList, ImageIcon, 
   Users, Settings, LogOut, Package, TrendingUp, AlertTriangle, 
   Trash2, Video, FileText, Building2, Bell, BellRing, Menu, X, MessageSquare,
-  Loader2
+  Loader2, ShieldCheck, Truck, CheckCircle2, XCircle, Activity
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
@@ -21,7 +21,68 @@ import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useAppContext } from '@/components/providers/AppProvider'
 
+import { CustomerPricingManager } from './CustomerPricingManager'
+import { InventoryManager } from './InventoryManager'
+import { VendorManager } from './VendorManager'
+import { BillingManager } from './BillingManager'
+import { AdminHeaderNotifications } from './AdminHeaderNotifications'
+import { AdminToastFeed } from './AdminToastFeed'
+import { AdminLiveActivityFeed } from './AdminLiveActivityFeed'
+import { GlobalErrorBoundary } from '@/components/ui/GlobalErrorBoundary'
+import { useLiveCustomers } from '@/lib/hooks/useAdminRealtime'
+
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
+
+class AdminErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Admin Panel Exception caught by ErrorBoundary:', error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 text-center bg-card border radius-xl shadow-soft max-w-xl mx-auto my-12 text-left slide-up">
+          <div className="w-12 h-12 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center mb-4">
+            <AlertTriangle className="w-6 h-6" />
+          </div>
+          <h3 className="font-display font-extrabold text-xl mb-2 text-foreground">Something went wrong in this section</h3>
+          <p className="text-xs text-muted-foreground mb-6 leading-relaxed">
+            An unexpected client-side error occurred while rendering this section ({this.state.error?.message || 'Client Exception'}).
+          </p>
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={() => {
+                this.setState({ hasError: false, error: null })
+                window.location.reload()
+              }}
+              className="rounded-xl font-bold text-xs gold-gradient text-primary"
+            >
+              Retry & Reload Page
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="rounded-xl text-xs"
+            >
+              Dismiss Error
+            </Button>
+          </div>
+        </div>
+      )
+    }
+
+    return this.props.children
+  }
+}
 
 function AdminMarquee() {
   return (
@@ -46,11 +107,34 @@ export function AdminApp() {
   const id = slug[1]
   
   const [authChecked, setAuthChecked] = useState(false)
+  const [authError, setAuthError] = useState(null)
+  const [retryCount, setRetryCount] = useState(0)
   const [unreadOrders, setUnreadOrders] = useState([])
   const [showNotifications, setShowNotifications] = useState(false)
   const [supabaseClient, setSupabaseClient] = useState(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  // New Order Center-Screen Popup State
+  const [activeOrderPopup, setActiveOrderPopup] = useState(null)
+  const [popupCountdown, setPopupCountdown] = useState(5)
+
+  // Auto-disappear countdown timer (5 seconds)
+  useEffect(() => {
+    if (!activeOrderPopup) return
+    setPopupCountdown(5)
+    const interval = setInterval(() => {
+      setPopupCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval)
+          setActiveOrderPopup(null)
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [activeOrderPopup])
 
   // Initialize client-side Supabase client for realtime updates
   useEffect(() => {
@@ -72,85 +156,211 @@ export function AdminApp() {
     initSupabase()
   }, [authChecked])
 
-  // Subscribe to realtime orders INSERT events
+  // Subscribe to realtime orders, catalog requests, and customer logins
   useEffect(() => {
     if (!supabaseClient) return
     
-    const channel = supabaseClient
+    const ordersChannel = supabaseClient
       .channel('realtime-admin-orders')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'orders' },
         async (payload) => {
           const newOrder = payload.new
-          
-          // Play a notification sound
           try {
             const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav')
             audio.play()
-          } catch (e) {
-            console.log('Audio play blocked or failed:', e)
-          }
+          } catch (e) {}
 
           let customerName = 'Customer'
           try {
-            const { data: addr } = await supabaseClient
-              .from('addresses')
-              .select('full_name')
-              .eq('id', newOrder.address_id)
-              .maybeSingle()
-            if (addr?.full_name) {
-              customerName = addr.full_name
-            }
-          } catch (e) {
-            console.error(e)
+            const { data: addr } = await supabaseClient.from('addresses').select('full_name').eq('id', newOrder.address_id).maybeSingle()
+            if (addr?.full_name) customerName = addr.full_name
+          } catch (e) {}
+
+          const orderInfo = {
+            id: newOrder.id,
+            order_number: newOrder.order_number,
+            customerName,
+            total: newOrder.total,
+            placed_at: newOrder.placed_at || new Date().toISOString()
           }
 
-          const orderWithCustomer = { ...newOrder, customerName }
-
-          // Trigger a toast notification
-          toast.success(`New Order #${newOrder.order_number}!`, {
-            description: `Placed by ${customerName} for ₹${newOrder.total}.`
-          })
-
-          // Add to unread orders array
-          setUnreadOrders(prev => [orderWithCustomer, ...prev])
-
-          // Trigger refresh of list/stats
+          toast.success(`New Order #${newOrder.order_number}!`, { description: `Placed by ${customerName} for ₹${newOrder.total}.` })
+          setUnreadOrders(prev => [{ ...newOrder, customerName }, ...prev])
+          setActiveOrderPopup(orderInfo)
           setRefreshTrigger(prev => prev + 1)
         }
       )
       .subscribe()
 
+    const catalogRequestsChannel = supabaseClient
+      .channel('realtime-admin-catalog-requests')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'catalog_requests' },
+        async (payload) => {
+          const req = payload.new
+          try {
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav')
+            audio.play()
+          } catch (e) {}
+
+          toast.info(`Catalog Access Request from ${req.customer_name}!`, { description: `${req.email || req.phone}: ${req.note}` })
+          setRefreshTrigger(prev => prev + 1)
+        }
+      )
+      .subscribe()
+
+    const customerLoginsChannel = supabaseClient
+      .channel('realtime-admin-customer-logins')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'customer_logins' },
+        async (payload) => {
+          const login = payload.new
+          toast.info(`${login.user_name} logged in`, { description: `Customer activity at ${new Date(login.login_at || Date.now()).toLocaleTimeString()}` })
+          setRefreshTrigger(prev => prev + 1)
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'settings', filter: 'id=eq.customer_logins_data' },
+        async (payload) => {
+          const row = payload.new
+          if (row?.marquee_messages?.length > 0) {
+            const raw = row.marquee_messages[0]
+            const login = typeof raw === 'string' ? JSON.parse(raw) : raw
+            if (login?.user_name) {
+              toast.info(`${login.user_name} logged in`, { description: `Customer activity at ${new Date(login.login_at || Date.now()).toLocaleTimeString()}` })
+              setRefreshTrigger(prev => prev + 1)
+            }
+          }
+        }
+      )
+      .subscribe()
+
     return () => {
-      supabaseClient.removeChannel(channel)
+      supabaseClient.removeChannel(ordersChannel)
+      supabaseClient.removeChannel(catalogRequestsChannel)
+      supabaseClient.removeChannel(customerLoginsChannel)
     }
   }, [supabaseClient])
   
   useEffect(() => { 
     const check = async () => { 
-      if (!user) { router.push('/login'); return } 
-      try { 
-        const res = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
-        if (!res.ok) throw new Error('Access denied')
-        const { user: u } = await res.json()
-        if (u?.role !== 'admin') { toast.error('Access denied'); setUser(null); localStorage.removeItem('token'); router.push('/login'); return } 
-        setAuthChecked(true) 
-      } catch { 
+      setAuthError(null)
+      const token = localStorage.getItem('token')
+      if (!token) { 
         setUser(null)
         localStorage.removeItem('token')
-        router.push('/login') 
+        localStorage.removeItem('user')
+        document.cookie = 'user_role=; path=/; max-age=0'
+        router.push('/login')
+        return 
       } 
-    }; 
+      try { 
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 6000)
+
+        const res = await fetch('/api/auth/me', { 
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal
+        })
+        clearTimeout(timeoutId)
+
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            toast.error('Session expired or access denied')
+            setUser(null)
+            localStorage.removeItem('token')
+            localStorage.removeItem('user')
+            document.cookie = 'user_role=; path=/; max-age=0'
+            router.push('/login')
+            return
+          }
+          throw new Error(`Server returned status ${res.status}`)
+        }
+
+        const { user: u } = await res.json()
+        if (u?.role !== 'admin') { 
+          toast.error('Access denied: Admin role required')
+          setUser(null) 
+          localStorage.removeItem('token')
+          localStorage.removeItem('user')
+          document.cookie = 'user_role=; path=/; max-age=0'
+          router.push('/login') 
+          return 
+        } 
+        setUser(u)
+        localStorage.setItem('user', JSON.stringify(u))
+        document.cookie = 'user_role=admin; path=/; max-age=31536000'
+        setAuthChecked(true) 
+        setAuthError(null)
+      } catch (err) { 
+        console.error('Admin role check error:', err)
+        if (err.name === 'AbortError') {
+          setAuthError('Access check timed out. The server took too long to respond.')
+        } else {
+          setAuthError(err.message || 'Unable to verify admin access.')
+        }
+      } 
+    } 
     check() 
-  }, [user, router, setUser])
+  }, [router, setUser, retryCount])
   
-  if (!authChecked) return <div className="min-h-screen flex items-center justify-center"><div className="animate-pulse text-lg">Checking access...</div></div>
+  if (!authChecked) {
+    if (authError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center p-4 bg-secondary/10">
+          <div className="max-w-md w-full bg-card border radius-xl p-6 shadow-soft text-center space-y-4">
+            <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6 text-destructive" />
+            </div>
+            <div>
+              <h3 className="font-display font-extrabold text-lg text-foreground">Access Check Failed</h3>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{authError}</p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <Button 
+                onClick={() => setRetryCount(prev => prev + 1)} 
+                className="rounded-xl gold-gradient text-primary font-bold text-xs shadow-soft"
+              >
+                Retry
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setUser(null)
+                  localStorage.removeItem('token')
+                  localStorage.removeItem('user')
+                  document.cookie = 'user_role=; path=/; max-age=0'
+                  router.push('/login')
+                }}
+                className="rounded-xl text-xs"
+              >
+                Sign In Again
+              </Button>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-3">
+          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <div className="text-sm font-medium text-muted-foreground animate-pulse">Checking access...</div>
+        </div>
+      </div>
+    )
+  }
 
   const logout = () => {
     setUser(null)
     localStorage.removeItem('token')
     localStorage.removeItem('user')
+    document.cookie = 'user_role=; path=/; max-age=0'
     router.push('/login')
   }
 
@@ -178,27 +388,31 @@ export function AdminApp() {
               <nav className="space-y-1">
                 {[
                   ['dashboard','Dashboard',LayoutDashboard],
+                  ['customer-pricing','Customer Pricing',ShieldCheck],
+                  ['orders','Orders',ClipboardList],
+                  ['inventory','Stock Inventory',Package],
+                  ['vendors','Vendor Partners',Truck],
+                  ['billing','Billing & Invoices',FileText],
                   ['products','Products',Grid3x3],
                   ['product-new','Add Product',Plus],
-                  ['csv','CSV Import',Upload],
-                  ['orders','Orders',ClipboardList],
-                  ['banners','Hero Banners',ImageIcon],
-                  ['clients','Clients',Users],
-                  ['faqs','FAQ Manager',FileText],
-                  ['chat-logs','Chat Logs',MessageSquare],
                   ['reports','Sales Reports',TrendingUp],
-                  ['customers','VIP Customers',Users],
-                  ['product-qa','Product Q&A',MessageSquare],
-                  ['settings','Site Settings',Settings]
-                ].map(([s,l,I]) => (
-                  <button 
-                    key={s} 
-                    onClick={() => { router.push('/admin/' + s); setMobileMenuOpen(false) }} 
-                    className={`w-full text-left flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition ${section === s || (s === 'products' && section === 'product-edit') ? 'gold-gradient text-primary font-bold' : 'text-white/80 hover:bg-white/10'}`}
-                  >
-                    <I className="w-4 h-4"/>{l}
-                  </button>
-                ))}
+                  ['settings','Settings',Settings]
+                ].map(([s,l,I]) => {
+                  const isActive = section === s || 
+                    (s === 'products' && section === 'product-edit') ||
+                    (s === 'product-new' && section === 'csv') ||
+                    (s === 'settings' && ['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners'].includes(section))
+
+                  return (
+                    <button 
+                      key={s} 
+                      onClick={() => { router.push('/admin/' + s); setMobileMenuOpen(false) }} 
+                      className={`w-full text-left flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition ${isActive ? 'gold-gradient text-primary font-bold shadow-soft' : 'text-white/80 hover:bg-white/10'}`}
+                    >
+                      <I className="w-4 h-4"/>{l}
+                    </button>
+                  )
+                })}
               </nav>
             </div>
             <button 
@@ -212,44 +426,50 @@ export function AdminApp() {
       )}
 
       <div className="flex">
-        <aside className="w-64 mesh-dark text-white p-4 hidden md:block min-h-screen sticky top-0">
-          <div className="mb-8">
-            <button onClick={() => router.push('/')} className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl gold-gradient flex items-center justify-center font-display font-extrabold text-primary">AK</div>
-              <div className="text-left">
-                <div className="font-display font-extrabold">AK Admin</div>
-                <div className="text-xs text-white/60">Control Panel</div>
-              </div>
-            </button>
-          </div>
-          <nav className="space-y-1">
-            {[
-              ['dashboard','Dashboard',LayoutDashboard],
-              ['products','Products',Grid3x3],
-              ['product-new','Add Product',Plus],
-              ['csv','CSV Import',Upload],
-              ['orders','Orders',ClipboardList],
-              ['banners','Hero Banners',ImageIcon],
-              ['clients','Clients',Users],
-              ['faqs','FAQ Manager',FileText],
-              ['chat-logs','Chat Logs',MessageSquare],
-              ['reports','Sales Reports',TrendingUp],
-              ['customers','VIP Customers',Users],
-              ['product-qa','Product Q&A',MessageSquare],
-              ['settings','Site Settings',Settings]
-            ].map(([s,l,I]) => (
-              <button 
-                key={s} 
-                onClick={() => router.push('/admin/' + s)} 
-                className={`w-full text-left flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition ${section === s || (s === 'products' && section === 'product-edit') ? 'gold-gradient text-primary font-bold' : 'text-white/80 hover:bg-white/10'}`}
-              >
-                <I className="w-4 h-4"/>{l}
+        <aside className="w-64 shrink-0 mesh-dark text-white p-4 hidden md:flex md:flex-col justify-between h-screen sticky top-0 z-30 overflow-y-auto">
+          <div>
+            <div className="mb-8">
+              <button onClick={() => router.push('/')} className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl gold-gradient flex items-center justify-center font-display font-extrabold text-primary">AK</div>
+                <div className="text-left">
+                  <div className="font-display font-extrabold">AK Admin</div>
+                  <div className="text-xs text-white/60">Control Panel</div>
+                </div>
               </button>
-            ))}
-            <button onClick={logout} className="w-full text-left flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-white/80 hover:bg-white/10 mt-6"><LogOut className="w-4 h-4"/>Sign out</button>
-          </nav>
+            </div>
+            <nav className="space-y-1">
+              {[
+                ['dashboard','Dashboard',LayoutDashboard],
+                ['customer-pricing','Customer Pricing',ShieldCheck],
+                ['orders','Orders',ClipboardList],
+                ['inventory','Stock Inventory',Package],
+                ['vendors','Vendor Partners',Truck],
+                ['billing','Billing & Invoices',FileText],
+                ['products','Products',Grid3x3],
+                ['product-new','Add Product',Plus],
+                ['reports','Sales Reports',TrendingUp],
+                ['settings','Settings',Settings]
+              ].map(([s,l,I]) => {
+                const isActive = section === s || 
+                  (s === 'products' && section === 'product-edit') ||
+                  (s === 'product-new' && section === 'csv') ||
+                  (s === 'settings' && ['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners'].includes(section))
+
+                return (
+                  <button 
+                    key={s} 
+                    onClick={() => router.push('/admin/' + s)} 
+                    className={`w-full text-left flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition ${isActive ? 'gold-gradient text-primary font-bold shadow-soft' : 'text-white/80 hover:bg-white/10'}`}
+                  >
+                    <I className="w-4 h-4"/>{l}
+                  </button>
+                )
+              })}
+            </nav>
+          </div>
+          <button onClick={logout} className="w-full text-left flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-white/80 hover:bg-white/10 mt-6 mb-2"><LogOut className="w-4 h-4"/>Sign out</button>
         </aside>
-        <main className="flex-1 p-4 md:p-8 overflow-x-hidden page-transition" key={section + (id || '')}>
+        <main className="flex-1 min-w-0 p-4 md:p-8 overflow-x-hidden page-transition" key={section + (id || '')}>
           {/* Top Header */}
           <div className="flex justify-between items-center mb-8 bg-card px-4 md:px-6 py-4 rounded-2xl shadow-soft border">
             <div className="flex items-center gap-3">
@@ -260,7 +480,13 @@ export function AdminApp() {
                 <Menu className="w-5 h-5 text-foreground" />
               </button>
               <div>
-                <h2 className="font-display font-extrabold text-xl md:text-2xl capitalize">{section.replace('-', ' ')}</h2>
+                <h2 className="font-display font-extrabold text-xl md:text-2xl capitalize">
+                  {section === 'product-new' || section === 'csv'
+                    ? 'Add Product'
+                    : ['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'settings'].includes(section)
+                    ? 'Settings'
+                    : section.replace('-', ' ')}
+                </h2>
                 <p className="text-[10px] md:text-xs text-muted-foreground">Welcome back, Admin</p>
               </div>
             </div>
@@ -269,67 +495,212 @@ export function AdminApp() {
                 <span className="w-2 h-2 bg-emerald-500 rounded-full" />
                 Live
               </div>
-              <div className="relative">
-                <button 
-                  onClick={() => setShowNotifications(!showNotifications)} 
-                  className="w-10 h-10 rounded-full border flex items-center justify-center hover:bg-secondary/50 transition relative"
-                >
-                  {unreadOrders.length > 0 ? (
-                    <>
-                      <BellRing className="w-5 h-5 text-accent animate-bounce" />
-                      <span className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground text-[10px] font-bold rounded-full flex items-center justify-center">
-                        {unreadOrders.length}
-                      </span>
-                    </>
-                  ) : (
-                    <Bell className="w-5 h-5 text-muted-foreground" />
-                  )}
-                </button>
-                {showNotifications && (
-                  <div className="absolute right-0 mt-2 w-80 bg-card border rounded-2xl shadow-elevated z-50 p-4 divide-y">
-                    <div className="pb-2 flex justify-between items-center">
-                      <span className="font-display font-bold text-sm">Notifications</span>
-                      {unreadOrders.length > 0 && (
-                        <button onClick={() => setUnreadOrders([])} className="text-xs text-muted-foreground hover:text-primary transition">Clear all</button>
-                      )}
-                    </div>
-                    <div className="pt-2 max-h-60 overflow-y-auto space-y-2">
-                      {unreadOrders.length === 0 ? (
-                        <p className="text-xs text-muted-foreground text-center py-4">No new notifications</p>
-                      ) : (
-                        unreadOrders.map((ord, idx) => (
-                          <div key={idx} className="text-xs py-2 flex flex-col gap-0.5">
-                            <div className="flex justify-between font-bold">
-                              <span>Order #{ord.order_number}</span>
-                              <span className="text-accent">₹{ord.total}</span>
-                            </div>
-                            <p className="text-muted-foreground font-medium">Placed by {ord.customerName || 'Customer'}</p>
-                            <p className="text-[10px] text-muted-foreground/60">{new Date(ord.placed_at).toLocaleTimeString()}</p>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <AdminHeaderNotifications />
             </div>
           </div>
 
-          {section === 'dashboard' && <AdminDashboard refreshTrigger={refreshTrigger}/>}
-          {section === 'products' && <AdminProducts router={router}/>}
-          {section === 'product-new' && <AdminProductForm router={router}/>}
-          {section === 'product-edit' && <AdminProductForm router={router} editId={id}/>}
-          {section === 'csv' && <AdminCSV/>}
-          {section === 'orders' && (id ? <AdminOrderDetail orderId={id}/> : <AdminOrders refreshTrigger={refreshTrigger} router={router}/>)}
-          {section === 'banners' && <AdminBanners/>}
-          {section === 'clients' && <AdminClients/>}
-          {section === 'faqs' && <AdminFAQs/>}
-          {section === 'chat-logs' && <AdminChatLogs/>}
-          {section === 'reports' && <AdminReports/>}
-          {section === 'customers' && <AdminCustomers/>}
-          {section === 'product-qa' && <AdminQA/>}
-          {section === 'settings' && <AdminSettings setSettings={setSettings}/>}
+          {/* Sections Render Switch wrapped in ErrorBoundary */}
+          <AdminErrorBoundary>
+            {section === 'dashboard' && <AdminDashboard refreshTrigger={refreshTrigger}/>}
+            {section === 'customer-pricing' && <CustomerPricingManager />}
+            {section === 'products' && <AdminProducts router={router}/>}
+            {(section === 'product-new' || section === 'csv') && (
+              <AdminAddProductSection router={router} defaultTab={section === 'csv' ? 'csv' : 'single'} />
+            )}
+            {section === 'product-edit' && <AdminProductForm router={router} editId={id}/>}
+            {section === 'orders' && (id ? <AdminOrderDetail orderId={id}/> : <AdminOrders refreshTrigger={refreshTrigger} router={router}/>)}
+            {section === 'inventory' && <InventoryManager />}
+            {section === 'vendors' && <VendorManager />}
+            {section === 'billing' && <BillingManager />}
+            {section === 'reports' && <AdminReports/>}
+            {['settings', 'faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners'].includes(section) && (
+              <AdminSettingsSection
+                setSettings={setSettings}
+                defaultTab={['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners'].includes(section) ? section : 'site'}
+              />
+            )}
+            {/* Centered New Order Notification Popup */}
+            {activeOrderPopup && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in zoom-in duration-200 pointer-events-auto">
+                <div className="bg-card text-foreground border border-border/80 rounded-3xl p-6 shadow-2xl max-w-md w-full relative overflow-hidden text-left">
+                  {/* Animated 5s Countdown Progress Bar */}
+                  <div 
+                    className="absolute top-0 left-0 h-1.5 gold-gradient transition-all duration-1000 ease-linear"
+                    style={{ width: `${(popupCountdown / 5) * 100}%` }}
+                  />
+
+                  <button 
+                    onClick={() => setActiveOrderPopup(null)} 
+                    className="absolute top-4 right-4 p-2 rounded-full hover:bg-secondary text-muted-foreground hover:text-foreground transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-12 h-12 rounded-2xl gold-gradient flex items-center justify-center font-bold text-primary shrink-0 shadow-glow">
+                      <ShoppingBag className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <Badge className="bg-emerald-500/20 text-emerald-600 border-emerald-500/30 text-[10px] uppercase font-extrabold px-2 py-0.5">
+                        🎉 New Order Received!
+                      </Badge>
+                      <h3 className="font-display font-extrabold text-xl text-foreground">
+                        Order #{activeOrderPopup.order_number}
+                      </h3>
+                    </div>
+                  </div>
+
+                  <div className="bg-secondary/40 p-4 rounded-2xl border mb-5 space-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Customer:</span>
+                      <span className="font-bold text-foreground">{activeOrderPopup.customerName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Order Total:</span>
+                      <span className="font-extrabold text-accent text-sm">₹{Number(activeOrderPopup.total || 0).toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Placed At:</span>
+                      <span className="font-medium text-foreground">{new Date(activeOrderPopup.placed_at).toLocaleTimeString('en-IN')}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <Button 
+                      onClick={() => {
+                        router.push(`/admin/orders/${activeOrderPopup.id}`)
+                        setActiveOrderPopup(null)
+                      }} 
+                      className="flex-1 rounded-xl gold-gradient text-primary font-extrabold text-xs h-10 shadow-glow"
+                    >
+                      View Order Details
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setActiveOrderPopup(null)} 
+                      className="rounded-xl text-xs h-10 px-4"
+                    >
+                      Dismiss ({popupCountdown}s)
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* Realtime Floating Toast Notification */}
+            <AdminToastFeed activePopup={activeOrderPopup} onDismiss={() => setActiveOrderPopup(null)} />
+          </AdminErrorBoundary>
         </main>
+      </div>
+    </div>
+  )
+}
+
+function AdminAddProductSection({ router, defaultTab = 'single' }) {
+  const [activeTab, setActiveTab] = useState(defaultTab)
+
+  useEffect(() => {
+    setActiveTab(defaultTab)
+  }, [defaultTab])
+
+  return (
+    <div className="w-full max-w-5xl mx-auto space-y-6 slide-up text-left">
+      {/* Header and Tab Toggle */}
+      <div className="bg-card p-6 radius-lg shadow-soft border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-extrabold text-foreground">Add Product & Catalog Import</h1>
+          <p className="text-xs text-muted-foreground mt-1">Add individual products manually or import bulk items using a CSV file.</p>
+        </div>
+
+        <div className="flex bg-secondary p-1 rounded-2xl border shrink-0">
+          <button
+            onClick={() => setActiveTab('single')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+              activeTab === 'single'
+                ? 'gold-gradient text-primary shadow-soft'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Plus className="w-4 h-4" /> Add Single Product
+          </button>
+          <button
+            onClick={() => setActiveTab('csv')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+              activeTab === 'csv'
+                ? 'gold-gradient text-primary shadow-soft'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Upload className="w-4 h-4" /> Bulk Import via CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'single' ? (
+        <AdminProductForm router={router} />
+      ) : (
+        <AdminCSV />
+      )}
+    </div>
+  )
+}
+
+function AdminSettingsSection({ setSettings, defaultTab = 'site' }) {
+  const [activeTab, setActiveTab] = useState(defaultTab)
+
+  useEffect(() => {
+    setActiveTab(defaultTab)
+  }, [defaultTab])
+
+  const settingsTabs = [
+    { id: 'site', label: 'Site Settings', icon: Settings },
+    { id: 'banners', label: 'Hero Banners', icon: ImageIcon },
+    { id: 'faqs', label: 'FAQ Manager', icon: FileText },
+    { id: 'chat-logs', label: 'Chat Logs', icon: MessageSquare },
+    { id: 'customers', label: 'VIP / Customers', icon: Users },
+    { id: 'product-qa', label: 'Product Q&A', icon: MessageSquare },
+    { id: 'clients', label: 'Client Logos', icon: Building2 },
+  ]
+
+  return (
+    <div className="space-y-6 slide-up text-left">
+      {/* Settings Sub-Navigation Header Tabs */}
+      <div className="bg-card px-6 pt-6 rounded-2xl shadow-soft border">
+        <div className="mb-4">
+          <h1 className="font-display text-2xl font-extrabold text-foreground">Settings & Configurations</h1>
+          <p className="text-xs text-muted-foreground mt-1">Manage global website settings, homepage hero banners, FAQs, support logs, customer profiles, Q&A, and partner logos.</p>
+        </div>
+        <div className="flex border-b border-border/60 overflow-x-auto space-x-1 sm:space-x-2 scrollbar-none">
+          {settingsTabs.map(t => {
+            const Icon = t.icon
+            const isActive = activeTab === t.id
+            return (
+              <button
+                key={t.id}
+                onClick={() => setActiveTab(t.id)}
+                className={`pb-3 px-3 sm:px-4 text-xs sm:text-sm font-bold whitespace-nowrap transition border-b-2 flex items-center gap-2 ${
+                  isActive
+                    ? 'border-primary text-primary font-extrabold'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                {t.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Settings Active Tab Component */}
+      <div>
+        {activeTab === 'site' && <AdminSettings setSettings={setSettings} />}
+        {activeTab === 'banners' && <AdminBanners />}
+        {activeTab === 'faqs' && <AdminFAQs />}
+        {activeTab === 'chat-logs' && <AdminChatLogs />}
+        {activeTab === 'customers' && <AdminCustomers />}
+        {activeTab === 'product-qa' && <AdminQA />}
+        {activeTab === 'clients' && <AdminClients />}
       </div>
     </div>
   )
@@ -337,34 +708,129 @@ export function AdminApp() {
 
 function AdminDashboard({ refreshTrigger }) {
   const [s, setS] = useState(null)
+  
+  let liveCustomersState = { onlineCount: 1, onlineUsers: [] }
+  try {
+    const res = useLiveCustomers()
+    if (res) liveCustomersState = res
+  } catch (e) {}
+
+  const onlineCount = liveCustomersState?.onlineCount || 1
+
   useEffect(() => { 
     fetch('/api/stats', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
-      .then(r => r.json())
-      .then(setS)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && typeof data === 'object' && !data.error) {
+          setS(data)
+        } else {
+          setS(null)
+        }
+      })
       .catch(() => setS(null)) 
   }, [refreshTrigger])
-  if (!s) return <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{Array(4).fill(0).map((_,i) => <div key={i} className="h-24 skeleton"/>)}</div>
-  const cards = [['Products',s.products,Grid3x3],['Orders',s.orders,Package],['Pending',s.pending,ClipboardList],['Revenue',formatINR(s.revenue),TrendingUp]]
-  const max = Math.max(1, ...Object.values(s.byDay))
+
+  if (!s || typeof s !== 'object') return <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">{Array(5).fill(0).map((_,i) => <div key={i} className="h-24 skeleton"/>)}</div>
+
+  const safeOnlineCount = Number(onlineCount || 1)
+  const safeOrders = Number(s.orders || 0)
+  const safeRevenue = Number(s.revenue || 0)
+  const safePending = Number(s.pending || 0)
+  const byDayData = (s.byDay && typeof s.byDay === 'object') ? s.byDay : {}
+  const lowStockData = Array.isArray(s.lowStock) ? s.lowStock : []
+
+  const cards = [
+    ['Online Customers', safeOnlineCount, Users, 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20'],
+    ['Active Sessions', Math.max(1, safeOnlineCount), Activity, 'text-blue-600 bg-blue-500/10 border-blue-500/20'],
+    ['Orders Today', safeOrders, Package, 'text-purple-600 bg-purple-500/10 border-purple-500/20'],
+    ['Revenue Today', formatINR(safeRevenue), TrendingUp, 'text-amber-600 bg-amber-500/10 border-amber-500/20'],
+    ['Pending Orders', safePending, ClipboardList, 'text-red-600 bg-red-500/10 border-red-500/20']
+  ]
+
+  const dayValues = Object.values(byDayData).map(v => Number(v || 0))
+  const max = Math.max(1, ...dayValues)
+
   return (
-    <div className="slide-up">
-      <h1 className="font-display text-4xl font-extrabold mb-8">Dashboard</h1>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        {cards.map(([l,v,I],i) => (
-          <Card key={l} className="radius-lg shadow-soft card-lift overflow-hidden relative slide-up" style={{ animationDelay: `${i * 80}ms` }}>
+    <div className="slide-up text-left space-y-8">
+      <div>
+        <h1 className="font-display text-3xl font-extrabold text-foreground">Live Operations Dashboard</h1>
+        <p className="text-xs text-muted-foreground mt-1">Real-time status of online customers, active sessions, sales revenue, and incoming orders.</p>
+      </div>
+
+      {/* 5 Real-Time Metric Cards */}
+      <GlobalErrorBoundary compact fallbackTitle="Metric Cards Unavailable">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          {cards.map(([l, v, Icon, badgeStyle]) => (
+            <Card key={l} className="radius-lg shadow-soft card-lift overflow-hidden relative border border-border/80">
+              <CardContent className="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className={`p-2.5 rounded-xl border ${badgeStyle}`}>
+                    <Icon className="w-5 h-5" />
+                  </div>
+                  {l === 'Online Customers' && (
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                  )}
+                </div>
+                <p className="font-display text-2xl md:text-3xl font-extrabold text-foreground">{v}</p>
+                <p className="text-xs text-muted-foreground font-semibold mt-1">{l}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </GlobalErrorBoundary>
+
+      {/* Real-time Order Trend & Low Stock Alerts */}
+      <div className="grid md:grid-cols-2 gap-6">
+        <GlobalErrorBoundary compact fallbackTitle="Order Volume Chart">
+          <Card className="radius-lg shadow-soft border border-border/80">
             <CardContent className="pt-6">
-              <div className="absolute top-0 right-0 w-24 h-24 gold-gradient opacity-10 rounded-full -mr-8 -mt-8"/>
-              <I className="w-5 h-5 text-accent mb-3"/>
-              <p className="font-display text-3xl font-extrabold">{v}</p>
-              <p className="text-sm text-muted-foreground">{l}</p>
+              <h3 className="font-display font-extrabold text-base mb-4 text-foreground">Order Volume — Last 7 Days</h3>
+              <div className="flex items-end gap-2 h-40">
+                {Object.entries(byDayData).map(([k, v]) => (
+                  <div key={k} className="flex-1 flex flex-col items-center gap-1">
+                    <div 
+                      className="w-full gold-gradient rounded-t-lg transition-all shadow-soft" 
+                      style={{ height: `${(v / max) * 100}%`, minHeight: '4px' }}
+                    />
+                    <span className="text-[10px] text-muted-foreground font-semibold">{k.slice(5)}</span>
+                    <span className="text-xs font-bold text-foreground">{v}</span>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
-        ))}
+        </GlobalErrorBoundary>
+
+        <GlobalErrorBoundary compact fallbackTitle="Stock Alerts">
+          <Card className="radius-lg shadow-soft border border-border/80">
+            <CardContent className="pt-6">
+              <h3 className="font-display font-extrabold text-base mb-4 flex items-center gap-2 text-foreground">
+                <AlertTriangle className="w-4.5 h-4.5 text-destructive" />
+                Low Stock Alert
+              </h3>
+              {lowStockData.length === 0 ? (
+                <p className="text-xs text-muted-foreground">All inventory items are well-stocked.</p>
+              ) : (
+                <div className="space-y-2">
+                  {lowStockData.map((p, i) => (
+                    <div key={i} className="flex justify-between items-center text-xs p-2 rounded-xl bg-secondary/50">
+                      <span className="font-semibold text-foreground line-clamp-1">{p.name}</span>
+                      <Badge variant={p.stock_quantity === 0 ? 'destructive' : 'secondary'}>
+                        {p.stock_quantity} left
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </GlobalErrorBoundary>
       </div>
-      <div className="grid md:grid-cols-2 gap-4">
-        <Card className="radius-lg shadow-soft"><CardContent className="pt-6"><h3 className="font-display font-extrabold mb-4">Orders — Last 7 days</h3><div className="flex items-end gap-2 h-40">{Object.entries(s.byDay).map(([k,v]) => (<div key={k} className="flex-1 flex flex-col items-center gap-1"><div className="w-full gold-gradient rounded-t-lg transition-all shadow-soft" style={{ height: `${(v / max) * 100}%`, minHeight: '4px' }}/><span className="text-[10px] text-muted-foreground">{k.slice(5)}</span><span className="text-xs font-bold">{v}</span></div>))}</div></CardContent></Card>
-        <Card className="radius-lg shadow-soft"><CardContent className="pt-6"><h3 className="font-display font-extrabold mb-4 flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-destructive"/>Low Stock Alert</h3>{s.lowStock.length === 0 ? <p className="text-sm text-muted-foreground">All well-stocked.</p> : <div className="space-y-2">{s.lowStock.map((p,i) => (<div key={i} className="flex justify-between text-sm slide-up" style={{ animationDelay: `${i * 40}ms` }}><span className="line-clamp-1">{p.name}</span><Badge variant={p.stock_quantity === 0 ? 'destructive' : 'secondary'}>{p.stock_quantity} left</Badge></div>))}</div>}</CardContent></Card>
-      </div>
+
+      {/* Real-time Activity Feed Stream (Component Error Isolated) */}
+      <GlobalErrorBoundary compact fallbackTitle="Live Activity Feed">
+        <AdminLiveActivityFeed />
+      </GlobalErrorBoundary>
     </div>
   )
 }
@@ -372,8 +838,18 @@ function AdminDashboard({ refreshTrigger }) {
 function AdminProducts({ router }) {
   const [list, setList] = useState(null)
   const [q, setQ] = useState('')
-  const load = () => fetch('/api/products').then(r=>r.json()).then(setList)
+  const load = () => {
+    fetch('/api/products', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) setList(data)
+        else if (data && Array.isArray(data.products)) setList(data.products)
+        else setList([])
+      })
+      .catch(() => setList([]))
+  }
   useEffect(() => { load() }, [])
+
   const del = async id => { 
     if (!confirm('Delete product?')) return; 
     try { 
@@ -382,30 +858,103 @@ function AdminProducts({ router }) {
       load() 
     } catch (e) { toast.error(e.message) } 
   }
+
   const toggle = async p => { 
     try { 
       await fetch('/api/products/' + p.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify({ is_active: !p.is_active }) })
       load() 
     } catch {} 
   }
-  const filtered = list?.filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase())) || []
+
+  const filtered = (Array.isArray(list) ? list : []).filter(p => !q || (p?.name || '').toLowerCase().includes(q.toLowerCase()))
+
   return (
-    <div className="slide-up">
-      <div className="flex justify-between items-center mb-6"><h1 className="font-display text-4xl font-extrabold">Products <span className="text-muted-foreground text-lg">({list?.length || 0})</span></h1><Button onClick={() => router.push('/admin/product-new')} className="rounded-full btn-shine"><Plus className="w-4 h-4 mr-1"/>Add Product</Button></div>
-      <Input placeholder="Search products..." value={q} onChange={e => setQ(e.target.value)} className="mb-4 max-w-sm h-11 rounded-xl"/>
-      <Card className="radius-lg shadow-soft"><CardContent className="p-0 overflow-x-auto"><table className="w-full text-sm min-w-[800px]">
-        <thead className="bg-secondary"><tr><th className="text-left p-3">Product</th><th className="text-left p-3">Price</th><th className="text-left p-3">Stock</th><th className="text-left p-3">Media</th><th className="text-left p-3">Status</th><th className="text-right p-3">Actions</th></tr></thead>
-        <tbody>{!list ? <tr><td colSpan="6" className="p-8 text-center">Loading...</td></tr> : filtered.map(p => (
-          <tr key={p.id} className="border-t hover:bg-secondary/50 transition">
-            <td className="p-3"><div className="flex items-center gap-2"><Image src={p.images?.[0]} width={40} height={48} className="w-10 h-12 object-cover rounded-lg" alt="" loading="lazy"/><span className="line-clamp-1 max-w-xs">{p.name}</span></div></td>
-            <td className="p-3 font-semibold">{formatINR(p.price)}</td>
-            <td className="p-3"><Badge variant={p.stock_quantity < 10 ? 'destructive' : 'secondary'}>{p.stock_quantity}</Badge></td>
-            <td className="p-3"><div className="flex gap-1 items-center text-xs"><ImageIcon className="w-3 h-3"/>{p.images?.length || 0}{p.videos?.length > 0 && <><Video className="w-3 h-3 ml-1"/>{p.videos.length}</>}</div></td>
-            <td className="p-3"><button onClick={() => toggle(p)}><Badge variant={p.is_active ? 'default' : 'secondary'} className="rounded-full">{p.is_active ? 'Active' : 'Inactive'}</Badge></button></td>
-            <td className="p-3 text-right space-x-1"><Button size="sm" variant="outline" onClick={() => router.push('/admin/product-edit/' + p.id)} className="rounded-full">Edit</Button><Button size="sm" variant="ghost" onClick={() => del(p.id)} className="rounded-full"><Trash2 className="w-4 h-4 text-destructive"/></Button></td>
-          </tr>
-        ))}</tbody>
-      </table></CardContent></Card>
+    <div className="slide-up text-left">
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
+        <div>
+          <h1 className="font-display text-3xl font-extrabold text-foreground">
+            Products <span className="text-muted-foreground text-sm font-semibold ml-1">({list?.length || 0} total)</span>
+          </h1>
+          <p className="text-xs text-muted-foreground mt-1">Manage catalog items, pricing, inventory stock, and visibility status.</p>
+        </div>
+        <Button onClick={() => router.push('/admin/product-new')} className="rounded-xl gold-gradient text-primary font-bold text-xs shadow-soft">
+          <Plus className="w-4 h-4 mr-1.5"/> Add Product
+        </Button>
+      </div>
+
+      <div className="flex items-center gap-3 mb-6">
+        <Input placeholder="Search products by name..." value={q} onChange={e => setQ(e.target.value)} className="max-w-sm h-10 rounded-xl text-xs bg-card"/>
+      </div>
+
+      <Card className="radius-lg shadow-soft overflow-hidden">
+        <CardContent className="p-0 overflow-x-auto">
+          <table className="w-full text-xs text-left min-w-[800px]">
+            <thead className="bg-secondary/60 text-muted-foreground uppercase font-bold text-[10px] tracking-wider border-b">
+              <tr>
+                <th className="p-3.5">Product</th>
+                <th className="p-3.5">Price</th>
+                <th className="p-3.5">Stock</th>
+                <th className="p-3.5">Media</th>
+                <th className="p-3.5">Status</th>
+                <th className="p-3.5 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {!list ? (
+                <tr><td colSpan="6" className="p-12 text-center text-muted-foreground">Loading products...</td></tr>
+              ) : filtered.length === 0 ? (
+                <tr><td colSpan="6" className="p-12 text-center text-muted-foreground">No products found.</td></tr>
+              ) : (
+                filtered.map(p => (
+                  <tr key={p.id} className="hover:bg-secondary/30 transition">
+                    <td className="p-3.5">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={p.images?.[0] || p.image_url || '/placeholder-product.png'}
+                          onError={(e) => { e.currentTarget.src = '/placeholder-product.png' }}
+                          className="w-10 h-12 object-cover rounded-lg shrink-0 border bg-secondary/20 shadow-sm"
+                          alt=""
+                        />
+                        <div>
+                          <p className="font-semibold text-foreground leading-snug line-clamp-1 max-w-xs">{p.name || 'Untitled Product'}</p>
+                          <p className="text-[10px] text-muted-foreground uppercase font-mono">{p.sku || 'NO-SKU'}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="p-3.5 font-mono font-extrabold text-sm">{formatINR(p.price)}</td>
+                    <td className="p-3.5">
+                      <Badge variant={p.stock_quantity < 10 ? 'destructive' : 'secondary'} className="font-mono font-bold text-[10px]">
+                        {p.stock_quantity ?? 0}
+                      </Badge>
+                    </td>
+                    <td className="p-3.5">
+                      <div className="flex gap-2 items-center text-[11px] text-muted-foreground">
+                        <span className="flex items-center gap-1"><ImageIcon className="w-3.5 h-3.5"/>{p.images?.length || 0}</span>
+                        {p.videos?.length > 0 && <span className="flex items-center gap-1"><Video className="w-3.5 h-3.5 text-blue-600"/>{p.videos.length}</span>}
+                      </div>
+                    </td>
+                    <td className="p-3.5">
+                      <button onClick={() => toggle(p)}>
+                        <Badge variant={p.is_active ? 'default' : 'secondary'} className="rounded-full text-[10px] font-bold uppercase">
+                          {p.is_active ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </button>
+                    </td>
+                    <td className="p-3.5 text-right space-x-1">
+                      <Button size="sm" variant="outline" onClick={() => router.push('/admin/product-edit/' + p.id)} className="rounded-xl text-xs h-8">
+                        Edit
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => del(p.id)} className="rounded-xl text-xs h-8 hover:bg-destructive/10 text-destructive">
+                        <Trash2 className="w-3.5 h-3.5"/>
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -461,8 +1010,8 @@ function AdminProductForm({ router, editId }) {
   const removeImg = i => setF({ ...f, images: f.images.filter((_, idx) => idx !== i) })
   const removeVid = i => setF({ ...f, videos: f.videos.filter((_, idx) => idx !== i) })
   return (
-    <div className="max-w-4xl slide-up">
-      <h1 className="font-display text-4xl font-extrabold mb-6">{editId ? 'Edit' : 'Add'} Product</h1>
+    <div className="w-full max-w-5xl mx-auto slide-up text-left">
+      <h1 className="font-display text-3xl font-extrabold mb-6 text-foreground">{editId ? 'Edit Product' : 'Add Product'}</h1>
       <form onSubmit={save} className="space-y-6">
         <Card className="radius-lg shadow-soft"><CardContent className="pt-6 space-y-4">
           <h3 className="font-display font-extrabold flex items-center gap-2 text-lg"><FileText className="w-5 h-5"/>Basic Info</h3>
@@ -545,10 +1094,15 @@ function AdminOrders({ refreshTrigger, router }) {
   useEffect(() => { load() }, [status, refreshTrigger])
   const updateStatus = async (id, newStatus) => { 
     try { 
-      await fetch('/api/orders/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify({ status: newStatus }) })
-      toast.success('Updated'); 
-      load(); 
-      setSelected(null) 
+      const res = await fetch('/api/orders/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify({ status: newStatus }) })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success(`Order status updated to ${newStatus.toUpperCase()}`)
+        load()
+        setSelected(null)
+      } else {
+        toast.error(data.error || 'Failed to update status')
+      }
     } catch (e) { toast.error(e.message) } 
   }
   const statuses = ['pending', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled']
@@ -1378,15 +1932,25 @@ function AdminOrderDetail({ orderId }) {
         },
         body: JSON.stringify({ status: newStatus })
       })
+      const data = await res.json().catch(() => ({}))
       if (res.ok) {
-        toast.success('Status updated successfully')
+        toast.success(`Status updated to ${newStatus.toUpperCase()}`)
         load()
       } else {
-        toast.error('Failed to update status')
+        toast.error(data.error || 'Failed to update status')
       }
     } catch (e) {
       toast.error(e.message)
     }
+  }
+
+  const handleDownloadInvoice = () => {
+    import('@/lib/invoice').then(({ downloadInvoice }) => {
+      downloadInvoice(order)
+    }).catch(err => {
+      console.error(err)
+      toast.error('Failed to generate invoice')
+    })
   }
 
   const handlePrint = () => {
@@ -1461,7 +2025,7 @@ function AdminOrderDetail({ orderId }) {
           <Button onClick={handlePrint} variant="outline" className="rounded-full">
             Print Invoice
           </Button>
-          <Button onClick={handlePrint} className="rounded-full">
+          <Button onClick={handleDownloadInvoice} className="rounded-full">
             Download Invoice (PDF)
           </Button>
         </div>

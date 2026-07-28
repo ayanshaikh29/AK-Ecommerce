@@ -98,6 +98,11 @@ export function CheckoutView() {
   const shipping = cartTotal > 1999 ? 0 : 99
   const couponDiscount = appliedCoupon?.discount_amount || 0
   const total = cartTotal - couponDiscount + shipping
+  
+  const totalUnits = cart.reduce((s, i) => s + (i.quantity || 0), 0)
+  const minOrderQty = 6000
+  const isBelowMOQ = totalUnits < minOrderQty
+  const unitsNeeded = minOrderQty - totalUnits
 
   const applyCoupon = async () => {
     if (!couponCode.trim()) return
@@ -147,6 +152,10 @@ export function CheckoutView() {
   }
 
   const placeOrder = async () => {
+    if (isBelowMOQ) {
+      toast.error(`Minimum order quantity is 6,000 units. You currently have ${totalUnits} units — please add ${unitsNeeded} more units to place an order.`)
+      return
+    }
     for (const k of ['full_name', 'phone', 'line1', 'city', 'state', 'pincode']) {
       if (!address[k]) { toast.error('Please complete your address'); return }
     }
@@ -184,8 +193,22 @@ export function CheckoutView() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 md:px-6 py-8 md:py-12">
-      <h1 className="font-display text-3xl md:text-4xl font-extrabold mb-6">Checkout</h1>
+    <div className="max-w-6xl mx-auto px-4 md:px-6 py-8 md:py-12 text-left">
+      <h1 className="font-display text-3xl md:text-4xl font-extrabold mb-4">Checkout</h1>
+      
+      {isBelowMOQ && (
+        <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-700 dark:text-amber-300 text-xs font-semibold flex items-center justify-between gap-3">
+          <div>
+            <p className="font-bold text-sm">⚠️ Minimum Order Quantity Warning</p>
+            <p className="mt-0.5">
+              Minimum order quantity is <strong>6,000 units</strong>. You have <strong>{totalUnits.toLocaleString()} units</strong> in your cart. Add <strong>{unitsNeeded.toLocaleString()} more units</strong> to place order.
+            </p>
+          </div>
+          <Button size="sm" onClick={() => router.push('/cart')} variant="outline" className="border-amber-500/40 text-amber-800 dark:text-amber-200 shrink-0 font-bold">
+            Add Units
+          </Button>
+        </div>
+      )}
       <div className="grid lg:grid-cols-3 gap-6 md:gap-8">
         <div className="lg:col-span-2 space-y-5">
 
@@ -363,11 +386,11 @@ export function CheckoutView() {
             )}
             <Button
               onClick={(e) => { addRipple(e); placeOrder() }}
-              disabled={loading}
-              className="w-full rounded-full h-12 btn-shine ripple font-semibold"
+              disabled={loading || isBelowMOQ}
+              className="w-full rounded-full h-12 btn-shine ripple font-semibold disabled:opacity-50"
               size="lg"
             >
-              {loading ? <><span className="btn-spinner mr-2" />Placing order...</> : 'Place Order'}
+              {loading ? <><span className="btn-spinner mr-2" />Placing order...</> : (isBelowMOQ ? 'MOQ (6,000 units) Required' : 'Place Order')}
             </Button>
           </CardContent>
         </Card>

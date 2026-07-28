@@ -60,7 +60,7 @@ export default async function RootLayout({ children }) {
           <div className="min-h-screen flex flex-col">
             <TopMarquee settings={settings} />
             <Navbar settings={settings} />
-            <main className="flex-1 page-transition pb-16 md:pb-0">
+            <main className="flex-1 page-transition pb-32 md:pb-0">
               {children}
             </main>
             <Footer settings={settings} />

@@ -4,12 +4,13 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Plus, Minus, Star, PlayCircle, Heart, ShoppingBag, Truck, Package, Shield, Zap, ChevronRight, FileText } from 'lucide-react'
+import { Plus, Minus, Star, PlayCircle, Heart, ShoppingBag, Truck, Package, Shield, Zap, ChevronRight, FileText, Lock, MessageCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
+import { Badge } from '@/components/ui/badge'
 import { useAppContext } from '@/components/providers/AppProvider'
 import { ProductCard } from '@/components/ui/ProductCard'
 import { RecentlyViewed } from '@/components/product/RecentlyViewed'
@@ -39,7 +40,59 @@ function useScrollReveal(deps = []) {
   }, deps)
 }
 
-export function ProductDetailView({ initialProduct }) {
+class ProductDetailErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('ProductDetailErrorBoundary caught error:', error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="max-w-4xl mx-auto my-16 p-8 text-center bg-card border border-border/80 rounded-3xl shadow-soft">
+          <Badge className="mb-4 bg-amber-500/20 text-amber-600 border-amber-500/30 px-3 py-1 text-xs uppercase font-extrabold">
+            Notice
+          </Badge>
+          <h2 className="font-display text-2xl md:text-4xl font-extrabold mb-4 text-foreground">
+            Product Detail Unavailable
+          </h2>
+          <p className="text-muted-foreground text-sm max-w-lg mx-auto mb-8 leading-relaxed">
+            We encountered an issue loading this product detail page. Please try refreshing or return to the shop catalog.
+          </p>
+          <div className="flex items-center justify-center gap-4">
+            <Button onClick={() => window.location.reload()} className="rounded-full px-6 gold-gradient text-primary font-bold">
+              Refresh Page
+            </Button>
+            <Link href="/products">
+              <Button variant="outline" className="rounded-full px-6 border-border">
+                Back to Shop Catalog
+              </Button>
+            </Link>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+export function ProductDetailView(props) {
+  return (
+    <ProductDetailErrorBoundary>
+      <ProductDetailViewContent {...props} />
+    </ProductDetailErrorBoundary>
+  )
+}
+
+function ProductDetailViewContent({ initialProduct }) {
   const router = useRouter()
   const { user, addToCart } = useAppContext()
   const [product, setProduct] = useState(initialProduct)
@@ -56,6 +109,12 @@ export function ProductDetailView({ initialProduct }) {
   const [qaList, setQaList] = useState([])
   const [questionText, setQuestionText] = useState('')
   const [qaLoading, setQaLoading] = useState(false)
+
+  // Customer Access & Custom Price State
+  const [accessState, setAccessState] = useState({
+    loading: user?.role === 'customer',
+    denied: false
+  })
 
   const imgRef = useRef(null)
 
@@ -74,27 +133,141 @@ export function ProductDetailView({ initialProduct }) {
         slug: product.slug,
         price: product.price,
         mrp: product.mrp,
-        image: product.images?.[0] || '/placeholder.png'
+        image: product.images?.[0] || product.image_url || '/placeholder.png'
       })
       if (list.length > 10) list.pop()
       localStorage.setItem('recently_viewed', JSON.stringify(list))
     } catch (e) {
       console.error('Error tracking recently viewed:', e)
     }
-  }, [product?.id])
+  }, [product?.id, product?.name, product?.slug, product?.price, product?.mrp, product?.images, product?.image_url])
 
   // Load Q&A questions
+  useEffect(() => {
+    if (!product?.id) return
+    fetch(`/api/products/${product.id}/qa`)
+      .then(r => r.json())
+      .then(data => setQaList(Array.isArray(data) ? data : []))
+      .catch(console.error)
+  }, [product?.id])
+
+  // Check customer pricing access & custom price from API
+  useEffect(() => {
+    if (user === undefined) return
+    if (user?.role !== 'customer') {
+      setAccessState({ loading: false, denied: false })
+      return
+    }
+
+    let isMounted = true
+    async function checkCustomerAccess() {
+      setAccessState({ loading: true, denied: false })
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      const targetSlug = initialProduct?.slug || initialProduct?.id
+      if (!targetSlug) return
+
+      try {
+        const res = await fetch(`/api/products/${targetSlug}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store'
+        })
+        if (res.ok) {
+          const freshData = await res.json()
+          if (!isMounted) return
+          setProduct(prev => ({ ...prev, ...freshData }))
+          setAccessState({ loading: false, denied: false })
+        } else if (res.status === 403 || res.status === 401) {
+          if (isMounted) setAccessState({ loading: false, denied: true })
+        } else {
+          if (isMounted) setAccessState({ loading: false, denied: false })
+        }
+      } catch (err) {
+        if (isMounted) setAccessState({ loading: false, denied: false })
+      }
+    }
+
+    checkCustomerAccess()
+    return () => { isMounted = false }
+  }, [user, initialProduct?.slug, initialProduct?.id])
+
+  // Check wishlist status on mount
+  useEffect(() => {
+    if (!user || !product?.id) return
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    if (!token) return
+    fetch('/api/wishlist', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(items => {
+        if (Array.isArray(items)) {
+          setWishlisted(items.some(i => i.product?.id === product.id))
+        }
+      })
+      .catch(() => {})
+  }, [user, product?.id])
+
+  // Compute media URLs and main display image
+  const allMedia = [
+    ...(product?.images || []).map(u => ({ type: 'image', url: u })),
+    ...(product?.videos || []).map(u => ({ type: 'video', url: u }))
+  ]
+  const current = allMedia[imgIdx]
+  const mainImgUrl = current?.url || product?.images?.[0] || product?.image_url || '/placeholder.png'
+  const [mainImgSrc, setMainImgSrc] = useState(mainImgUrl)
+
+  useEffect(() => {
+    setMainImgSrc(mainImgUrl)
+  }, [mainImgUrl])
+
+  // ========================================================
+  // ALL HOOKS FINISHED ABOVE - CONDITIONAL RENDERINGS BELOW
+  // ========================================================
+
+  if (!product) return <div className="text-center py-20">Product not found</div>
+
+  // Access Denied Screen for unauthorized customers
+  if (user?.role === 'customer' && !accessState.loading && accessState.denied) {
+    const displayName = user?.full_name || user?.email || 'Customer'
+    const whatsappUrl = `https://wa.me/918308860894?text=${encodeURIComponent(`Hello AK Enterprises, I would like to request catalog access for product: ${product?.name || 'this item'} (${user?.email}).`)}`
+    return (
+      <div className="max-w-md mx-auto px-4 py-24 text-center">
+        <div className="bg-card border border-border/80 rounded-3xl p-6 sm:p-10 shadow-elevated overflow-hidden">
+          <div className="w-16 h-16 gold-gradient rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-glow">
+            <Lock className="w-8 h-8 text-primary" />
+          </div>
+
+          <h1 className="font-display text-2xl md:text-3xl font-extrabold mb-3 text-foreground">
+            Access Restricted
+          </h1>
+
+          <p className="text-muted-foreground text-sm leading-relaxed mb-8 mx-auto">
+            You don't have access to this product, <strong className="text-foreground">{displayName}</strong>. This item is not included in your assigned corporate catalog.
+          </p>
+
+          <div className="flex flex-col gap-3 w-full">
+            <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
+              <Button size="lg" className="rounded-full h-12 gold-gradient text-primary font-bold text-sm shadow-glow w-full">
+                <MessageCircle className="w-4 h-4 mr-2 shrink-0" />
+                Request Access on WhatsApp
+              </Button>
+            </a>
+            <Link href="/products">
+              <Button size="lg" variant="outline" className="rounded-full h-12 border-border text-foreground font-semibold text-sm w-full">
+                Back to Shop Catalog
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const loadQa = () => {
     if (!product?.id) return
     fetch(`/api/products/${product.id}/qa`)
       .then(r => r.json())
-      .then(setQaList)
+      .then(data => setQaList(Array.isArray(data) ? data : []))
       .catch(console.error)
   }
-
-  useEffect(() => {
-    loadQa()
-  }, [product?.id])
 
   const submitQuestion = async () => {
     if (!user) { toast.error('Please sign in to ask a question'); return }
@@ -121,19 +294,6 @@ export function ProductDetailView({ initialProduct }) {
     }
   }
 
-  // Check wishlist status on mount
-  useEffect(() => {
-    if (!user || !product?.id) return
-    const token = localStorage.getItem('token')
-    if (!token) return
-    fetch('/api/wishlist', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(items => {
-        setWishlisted(items.some(i => i.product?.id === product.id))
-      })
-      .catch(() => {})
-  }, [user, product?.id])
-
   const toggleWishlist = async () => {
     if (!user) { router.push('/login'); return }
     if (wishlistLoading) return
@@ -150,7 +310,7 @@ export function ProductDetailView({ initialProduct }) {
         setWishlisted(data.status === 'added')
         toast.success(data.status === 'added' ? 'Added to wishlist' : 'Removed from wishlist')
       } else {
-        setWishlisted(prev => !prev) // revert
+        setWishlisted(prev => !prev)
       }
     } catch {
       setWishlisted(prev => !prev)
@@ -171,7 +331,6 @@ export function ProductDetailView({ initialProduct }) {
       })
       if (!res.ok) throw new Error('Failed to post review')
       
-      // Optimistically add to reviews list
       const newReview = {
         id: Date.now().toString(),
         user_name: user.full_name || user.email,
@@ -181,7 +340,6 @@ export function ProductDetailView({ initialProduct }) {
       }
       setLocalReviews(prev => [newReview, ...prev])
       
-      // Update product rating display (optimistic)
       const newCount = (product.rating_count || 0) + 1
       const newAvg = ((product.rating_avg || 0) * (product.rating_count || 0) + reviewRating) / newCount
       setProduct(prev => ({ ...prev, rating_avg: +newAvg.toFixed(1), rating_count: newCount }))
@@ -196,14 +354,7 @@ export function ProductDetailView({ initialProduct }) {
     }
   }
 
-  if (!product) return <div className="text-center py-20">Product not found</div>
-
-  const lowStock = product.stock_quantity < 10 && product.stock_quantity > 0
-  const allMedia = [
-    ...(product.images || []).map(u => ({ type: 'image', url: u })),
-    ...(product.videos || []).map(u => ({ type: 'video', url: u }))
-  ]
-  const current = allMedia[imgIdx]
+  const lowStock = (product.stock_quantity ?? 0) < 10 && (product.stock_quantity ?? 0) > 0
 
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-6 py-8 md:py-12">
@@ -229,7 +380,16 @@ export function ProductDetailView({ initialProduct }) {
           <div className="relative aspect-square radius-xl overflow-hidden bg-secondary mb-4 shadow-soft">
             {current?.type === 'video' ?
               <video src={current.url} controls autoPlay className="w-full h-full object-cover" /> :
-              <Image ref={imgRef} src={current?.url || '/placeholder.png'} alt={product.name} fill className="object-cover" priority sizes="(max-width: 768px) 100vw, 50vw" />
+              <Image 
+                ref={imgRef} 
+                src={mainImgSrc} 
+                alt={product.name || 'Product'} 
+                fill 
+                onError={() => setMainImgSrc('/placeholder.png')}
+                className="object-cover" 
+                priority 
+                sizes="(max-width: 768px) 100vw, 50vw" 
+              />
             }
             {product.discount_percent > 0 && <div className="absolute top-6 left-6 gold-gradient text-primary rounded-full px-4 py-1.5 text-sm font-extrabold shadow-glow">{product.discount_percent}% OFF</div>}
 
@@ -261,20 +421,20 @@ export function ProductDetailView({ initialProduct }) {
 
         {/* Product Info */}
         <div className="slide-in-right">
-          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-3">{product.category?.name} • {product.subcategory}</p>
+          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-3">{product.category?.name} {product.subcategory ? `• ${product.subcategory}` : ''}</p>
           <h1 className="font-display text-3xl md:text-4xl lg:text-5xl font-extrabold mb-4 text-balance leading-[1.05]">{product.name}</h1>
           <div className="flex items-center gap-2 mb-6">
             <div className="flex">
-              {[1, 2, 3, 4, 5].map(i => <Star key={i} className={`w-4 h-4 ${i <= Math.round(product.rating_avg) ? 'fill-accent text-accent' : 'text-muted-foreground'}`} />)}
+              {[1, 2, 3, 4, 5].map(i => <Star key={i} className={`w-4 h-4 ${i <= Math.round(product.rating_avg || 4.5) ? 'fill-accent text-accent' : 'text-muted-foreground'}`} />)}
             </div>
-            <span className="text-sm text-muted-foreground">{product.rating_avg} · {product.rating_count} reviews</span>
+            <span className="text-sm text-muted-foreground">{product.rating_avg || 4.5} · {product.rating_count || 0} reviews</span>
           </div>
           <div className="flex items-baseline gap-3 mb-2">
             <span className="font-display text-4xl md:text-5xl font-extrabold text-primary">{formatINR(product.price)}</span>
             {product.mrp > product.price && (
               <>
                 <span className="text-lg text-muted-foreground line-through">{formatINR(product.mrp)}</span>
-                <span className="text-accent font-extrabold">{product.discount_percent}% off</span>
+                <span className="text-accent font-extrabold">{product.discount_percent || Math.round(((product.mrp - product.price) / product.mrp) * 100)}% off</span>
               </>
             )}
           </div>
@@ -304,7 +464,7 @@ export function ProductDetailView({ initialProduct }) {
             <Button
               size="lg"
               variant="outline"
-              onClick={() => router.push(`/bulk-quote?product=${encodeURIComponent(product.name)}`)}
+              onClick={() => router.push(`/bulk-quote?product=${encodeURIComponent(product.name || '')}`)}
               className="w-full rounded-full h-14 font-semibold border-2 flex items-center justify-center gap-2 text-sm sm:text-base px-6"
             >
               <FileText className="w-5 h-5" /> Request Bulk Quote
@@ -328,11 +488,11 @@ export function ProductDetailView({ initialProduct }) {
       </div>
 
       <Tabs defaultValue="desc" className="mb-16 reveal">
-        <TabsList className="rounded-full h-11 p-1 flex-wrap">
-          <TabsTrigger value="desc" className="rounded-full">Description</TabsTrigger>
-          <TabsTrigger value="specs" className="rounded-full">Specifications</TabsTrigger>
-          <TabsTrigger value="reviews" className="rounded-full">Reviews ({localReviews.length})</TabsTrigger>
-          <TabsTrigger value="qa" className="rounded-full">Q&A ({qaList.length})</TabsTrigger>
+        <TabsList className="rounded-full h-11 p-1 flex-nowrap overflow-x-auto no-scrollbar justify-start w-full">
+          <TabsTrigger value="desc" className="rounded-full shrink-0">Description</TabsTrigger>
+          <TabsTrigger value="specs" className="rounded-full shrink-0">Specifications</TabsTrigger>
+          <TabsTrigger value="reviews" className="rounded-full shrink-0">Reviews ({localReviews.length})</TabsTrigger>
+          <TabsTrigger value="qa" className="rounded-full shrink-0">Q&A ({qaList.length})</TabsTrigger>
         </TabsList>
         <TabsContent value="desc" className="pt-6 text-muted-foreground leading-relaxed max-w-3xl text-lg">{product.description}</TabsContent>
         <TabsContent value="specs" className="pt-6 max-w-2xl">
@@ -341,8 +501,8 @@ export function ProductDetailView({ initialProduct }) {
               {[
                 ['SKU', product.sku],
                 ['Category', product.category?.name],
-                ['Sub-category', product.subcategory],
-                ['Availability', product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'],
+                ['Sub-category', product.subcategory || 'Standard'],
+                ['Availability', (product.stock_quantity ?? 0) > 0 ? `${product.stock_quantity} in stock` : 'Out of stock'],
                 ['Payment', 'COD, Bank Transfer'],
                 ['Shipping', 'Pan India — 1-5 days']
               ].map(([k, v]) => (

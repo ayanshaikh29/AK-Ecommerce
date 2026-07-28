@@ -1,5 +1,6 @@
 'use client'
 import React, { useState, useEffect, useRef } from 'react'
+import { usePathname } from 'next/navigation'
 import { MessageSquare, X, Send, ArrowRight, Loader2, MessageCircle } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -118,6 +119,11 @@ function inlineStyles(rawStr) {
 }
 
 export function SupportChatbot({ settings }) {
+  const pathname = usePathname()
+  if (pathname?.startsWith('/admin') || pathname?.includes('/admin') || pathname?.startsWith('/vendor') || pathname?.includes('/vendor')) {
+    return null
+  }
+
   const [mounted, setMounted] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
   const [hasBadge, setHasBadge] = useState(false)

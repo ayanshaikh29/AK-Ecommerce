@@ -48,10 +48,20 @@ export function CartDrawer() {
                       </h4>
                       <p className="text-accent font-bold mt-1">{formatINR(item.price_snapshot)}</p>
                     </div>
-                    <div className="flex items-center gap-3 bg-secondary w-fit rounded-lg px-2 py-1 mt-2">
-                      <button onClick={() => updateQty(item.product_id, item.quantity - 1)} className="p-1 hover:text-primary transition"><Minus className="w-3.5 h-3.5"/></button>
-                      <span className="text-sm font-semibold w-4 text-center">{item.quantity}</span>
-                      <button onClick={() => updateQty(item.product_id, item.quantity + 1)} className="p-1 hover:text-primary transition"><Plus className="w-3.5 h-3.5"/></button>
+                    <div className="flex items-center border rounded-xl overflow-hidden bg-background w-fit mt-2">
+                      <button onClick={() => updateQty(item.product_id, item.quantity - 1)} className="p-1.5 hover:bg-secondary transition shrink-0"><Minus className="w-3.5 h-3.5"/></button>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min="1"
+                        value={item.quantity}
+                        onChange={e => {
+                          const val = parseInt(e.target.value, 10)
+                          if (!isNaN(val)) updateQty(item.product_id, val)
+                        }}
+                        className="w-14 text-center font-bold text-xs bg-transparent border-0 focus:outline-none focus:ring-0 p-0 text-foreground font-mono"
+                      />
+                      <button onClick={() => updateQty(item.product_id, item.quantity + 1)} className="p-1.5 hover:bg-secondary transition shrink-0"><Plus className="w-3.5 h-3.5"/></button>
                     </div>
                   </div>
                 </div>

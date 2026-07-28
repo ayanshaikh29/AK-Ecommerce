@@ -4,13 +4,14 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ArrowRight, ArrowUpRight, Truck, Award, Shield, Zap, TrendingUp, Building2, Sparkles, Grid3x3, Heart, ShoppingBag, Star, PlayCircle, FileText, BatteryCharging } from 'lucide-react'
+import { ArrowRight, ArrowUpRight, Truck, Award, Shield, Zap, TrendingUp, Building2, Sparkles, Grid3x3, Heart, ShoppingBag, Star, PlayCircle, FileText, BatteryCharging, Clock, PackageCheck, AlertCircle, CheckCircle2, RotateCcw, MessageCircle, ChevronRight, ChevronLeft, Lock, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useAppContext } from '@/components/providers/AppProvider'
 import { ProductCard } from '@/components/ui/ProductCard'
 import { RecentlyViewed } from '@/components/product/RecentlyViewed'
+import { CatalogAccessPendingCard } from '@/components/ui/CatalogAccessPendingCard'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 const catIcon = { 'office-stationery': FileText, 'housekeeping': Sparkles, 'ups-solutions': BatteryCharging }
@@ -39,8 +40,17 @@ function useScrollReveal(deps = []) {
 }
 
 export function HomeView({ initialFeatured, initialCats, initialTrending, initialBanners, initialClients }) {
+  const { user } = useAppContext()
   const router = useRouter()
   useScrollReveal([initialFeatured, initialCats, initialTrending, initialBanners, initialClients])
+
+  if (!user) {
+    return <LoggedOutHomeView initialClients={initialClients || []} />
+  }
+
+  if (user.role === 'customer') {
+    return <LoggedInCustomerHomeView user={user} />
+  }
 
   const now = new Date()
   const activeBanners = (initialBanners || []).filter(b => {
@@ -55,21 +65,21 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
       name: 'Office Stationery',
       slug: 'office-stationery',
       description: 'Pens, files, notebooks, office devices & more',
-      image_url: 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=800&auto=format&fit=crop&q=80'
+      image_url: '/category-stationery.jpg'
     },
     {
       id: 'cat-housekeeping',
       name: 'Housekeeping Supplies',
       slug: 'housekeeping',
       description: 'Cleaning chemicals, garbage bags, tissues & floor tools',
-      image_url: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&auto=format&fit=crop&q=80'
+      image_url: '/category-housekeeping.jpg'
     },
     {
       id: 'cat-ups',
       name: 'UPS & Power Solutions',
       slug: 'ups-solutions',
       description: 'UPS systems, backup batteries & industrial supplies',
-      image_url: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=800&auto=format&fit=crop&q=80'
+      image_url: '/category-ups.jpg'
     }
   ]
 
@@ -427,6 +437,655 @@ function Newsletter() {
         </form>}
     </section>
   )
+}
+
+function HeroSlider({ whatsappUrl }) {
+  const [currentSlide, setCurrentSlide] = useState(0)
+  const [isPaused, setIsPaused] = useState(false)
+
+  const slides = [
+    {
+      image: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?q=80&w=1600&auto=format&fit=crop',
+      badge: '🔒 Private B2B Procurement Portal',
+      title: <>Corporate Supply & Procurement for <span className="gold-shine">Leading Enterprises</span></>,
+      subtext: 'AK Enterprises is an invite-only B2B ordering portal. We provide contract-based wholesale pricing, itemized GST invoices, and dedicated logistics for corporate partners.'
+    },
+    {
+      image: 'https://images.unsplash.com/photo-1497366216548-37526070297c?q=80&w=1600&auto=format&fit=crop',
+      badge: '🚚 Pan-India Bulk Delivery & Contract Pricing',
+      title: <>Premium Office & Stationery Solutions for <span className="gold-shine">Corporate Hubs</span></>,
+      subtext: 'Streamline your monthly corporate supply chain with guaranteed SLA fulfillment, automated invoicing, and dedicated account management.'
+    },
+    {
+      image: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?q=80&w=1600&auto=format&fit=crop',
+      badge: '✨ Commercial Grade Housekeeping & Cleaning',
+      title: <>Bulk Industrial Housekeeping & Facility <span className="gold-shine">Sanitation Supplies</span></>,
+      subtext: 'High-performance chemical concentrates, janitorial equipment, and paper products at wholesale contracted rates for facilities and campuses.'
+    },
+    {
+      image: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?q=80&w=1600&auto=format&fit=crop',
+      badge: '⚡ Commercial UPS & Power Equipment',
+      title: <>Heavy Duty Industrial Power Backup & <span className="gold-shine">UPS Systems</span></>,
+      subtext: 'Ensure zero downtime for data centers, offices, and manufacturing units with certified power infrastructure and direct enterprise support.'
+    }
+  ]
+
+  useEffect(() => {
+    if (isPaused) return
+    const timer = setInterval(() => {
+      setCurrentSlide(prev => (prev + 1) % slides.length)
+    }, 4500)
+    return () => clearInterval(timer)
+  }, [isPaused, slides.length])
+
+  const nextSlide = () => setCurrentSlide((currentSlide + 1) % slides.length)
+  const prevSlide = () => setCurrentSlide((currentSlide - 1 + slides.length) % slides.length)
+
+  return (
+    <section 
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      className="relative min-h-[78vh] sm:min-h-[82vh] flex items-center justify-center text-white px-4 py-16 overflow-hidden select-none"
+    >
+      {/* Background Image Slides */}
+      {slides.map((slide, idx) => (
+        <div
+          key={idx}
+          className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
+            idx === currentSlide ? 'opacity-100 z-10' : 'opacity-0 z-0'
+          }`}
+        >
+          <img
+            src={slide.image}
+            alt="Hero B2B Procurement"
+            className="w-full h-full object-cover transform scale-105 transition-transform duration-10000"
+          />
+          {/* Heavy Dark Overlay for Maximum Contrast & Readability */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/80 to-black/60" />
+          <div className="absolute inset-0 mesh-dark opacity-60 mix-blend-overlay" />
+        </div>
+      ))}
+
+      {/* Main Content Container */}
+      <div className="max-w-5xl mx-auto text-center relative z-20 px-2 sm:px-4 py-8">
+        <Badge className="mb-6 bg-amber-400/20 text-amber-300 border-amber-400/40 px-4 py-1.5 text-xs font-extrabold uppercase tracking-widest backdrop-blur-md inline-flex items-center gap-1.5 shadow-lg">
+          {slides[currentSlide].badge}
+        </Badge>
+
+        <h1 className="font-display text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold mb-6 leading-tight text-balance text-white drop-shadow-md">
+          {slides[currentSlide].title}
+        </h1>
+
+        <p className="text-base sm:text-lg md:text-xl text-white/90 max-w-3xl mx-auto mb-10 leading-relaxed font-medium drop-shadow-sm">
+          {slides[currentSlide].subtext}
+        </p>
+
+        {/* Action Buttons */}
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-lg mx-auto">
+          <Link href="/login" className="w-full sm:w-auto">
+            <Button size="lg" className="w-full sm:w-auto rounded-full px-8 h-14 gold-gradient text-primary hover:opacity-95 font-extrabold text-base shadow-glow">
+              Login to Account <ArrowRight className="ml-2 w-5 h-5" />
+            </Button>
+          </Link>
+
+          <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto">
+            <button className="w-full sm:w-auto rounded-full px-8 h-14 border-2 border-amber-400/80 text-amber-300 hover:text-white bg-black/50 hover:bg-amber-500/20 font-extrabold text-base backdrop-blur-md transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer">
+              <MessageCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+              Contact Procurement Team
+            </button>
+          </a>
+        </div>
+
+        {/* Pricing Notice */}
+        <div className="mt-8 p-3 bg-white/10 border border-white/15 rounded-2xl inline-block text-xs text-white/80 backdrop-blur-xs font-medium">
+          🔒 Prices and product catalog are visible only to verified logged-in corporate partners.
+        </div>
+      </div>
+
+      {/* Slider Left Arrow */}
+      <button
+        onClick={prevSlide}
+        aria-label="Previous Slide"
+        className="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 z-30 w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/40 hover:bg-amber-500/30 text-white border border-white/20 hover:border-amber-400/60 backdrop-blur-md flex items-center justify-center transition-all hover:scale-110 shadow-2xl cursor-pointer"
+      >
+        <ChevronLeft className="w-6 h-6" />
+      </button>
+
+      {/* Slider Right Arrow */}
+      <button
+        onClick={nextSlide}
+        aria-label="Next Slide"
+        className="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 z-30 w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-black/40 hover:bg-amber-500/30 text-white border border-white/20 hover:border-amber-400/60 backdrop-blur-md flex items-center justify-center transition-all hover:scale-110 shadow-2xl cursor-pointer"
+      >
+        <ChevronRight className="w-6 h-6" />
+      </button>
+
+      {/* Slider Pagination Dots (Flipkart Style) */}
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/15">
+        {slides.map((_, idx) => (
+          <button
+            key={idx}
+            onClick={() => setCurrentSlide(idx)}
+            aria-label={`Go to slide ${idx + 1}`}
+            className={`transition-all duration-300 rounded-full cursor-pointer ${
+              idx === currentSlide
+                ? 'w-7 h-2.5 bg-gradient-to-r from-amber-300 to-amber-500 shadow-glow'
+                : 'w-2.5 h-2.5 bg-white/40 hover:bg-white/80'
+            }`}
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function LoggedOutHomeView({ initialClients }) {
+  const whatsappUrl = `https://wa.me/918308860894?text=${encodeURIComponent('Hello AK Enterprises, I would like to request catalog access and custom pricing for my corporate account.')}`
+
+  return (
+    <div>
+      {/* Interactive Hero Slider */}
+      <HeroSlider whatsappUrl={whatsappUrl} />
+
+      {/* Product Categories Section (Visual Only, NOT Clickable) */}
+      <section className="max-w-7xl mx-auto px-4 md:px-6 py-24">
+        <div className="text-center max-w-3xl mx-auto mb-16">
+          <p className="text-xs font-bold tracking-[0.2em] uppercase text-accent mb-3">— Core Categories</p>
+          <h2 className="font-display text-3xl md:text-5xl font-extrabold text-foreground mb-4">
+            Our Business Solutions
+          </h2>
+          <p className="text-muted-foreground text-base">
+            Overview of our main supply categories. Individual product listings and custom prices are unlocked after login.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-8">
+          {[
+            {
+              title: 'Office Stationery',
+              desc: 'Premium printing papers, writing instruments, files, folders & desktop accessories',
+              img: '/category-stationery.jpg',
+              badge: 'Visual Overview Only'
+            },
+            {
+              title: 'Housekeeping Supplies',
+              desc: 'Disinfectant cleaners, floor care chemicals, tissue rolls & sanitation gear',
+              img: '/category-housekeeping.jpg',
+              badge: 'Visual Overview Only'
+            },
+            {
+              title: 'UPS & Power Solutions',
+              desc: 'Industrial UPS units, backup batteries, surge protection & power accessories',
+              img: '/category-ups.jpg',
+              badge: 'Visual Overview Only'
+            }
+          ].map((cat, idx) => (
+            <div key={idx} className="group relative radius-xl overflow-hidden shadow-soft border border-border bg-card">
+              <div className="relative aspect-[4/3] overflow-hidden bg-secondary">
+                <Image src={cat.img} alt={cat.title} fill className="object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                <div className="absolute top-4 left-4 bg-primary/90 text-primary-foreground text-[10px] uppercase font-bold tracking-widest px-3 py-1 rounded-full border border-white/20">
+                  {cat.badge}
+                </div>
+              </div>
+              <div className="p-6 text-left">
+                <h3 className="font-display text-2xl font-extrabold mb-2 text-foreground">{cat.title}</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">{cat.desc}</p>
+                <div className="mt-4 pt-3 border-t border-border/50 text-[11px] text-accent font-semibold flex items-center justify-between">
+                  <span>Non-clickable category overview</span>
+                  <Shield className="w-3.5 h-3.5" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Representative Demo Product Images (Visual Only, NOT Clickable, NO Links, NO Prices) */}
+      <section className="bg-secondary/30 border-y border-border/50 py-24">
+        <div className="max-w-7xl mx-auto px-4 md:px-6">
+          <div className="text-center max-w-2xl mx-auto mb-14">
+            <p className="text-xs font-bold tracking-[0.2em] uppercase text-accent mb-3">— Visual Demos</p>
+            <h2 className="font-display text-3xl md:text-5xl font-extrabold text-foreground mb-4">
+              Representative Product Visuals
+            </h2>
+            <p className="text-muted-foreground text-sm">
+              Illustrative product visual samples. (Non-clickable demo showcase — no pricing or catalog browsing)
+            </p>
+          </div>
+
+          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-6">
+            {[
+              {
+                title: 'Kangaroo Heavy-Duty Plier Stapler HP-45',
+                tag: 'Stationery Sample',
+                img: '/uploads/kangaroo-hp-45-plier-stapler.webp',
+                note: 'Illustrative visual — log in to view assigned prices'
+              },
+              {
+                title: 'Lizol Disinfectant Surface Cleaner 1L',
+                tag: 'Housekeeping Sample',
+                img: '/uploads/lizol-floor-cleaner-1-litre.webp',
+                note: 'Illustrative visual — log in to view assigned prices'
+              },
+              {
+                title: 'Dettol Liquid Hand Wash Pouch 675ml',
+                tag: 'Housekeeping Sample',
+                img: '/uploads/dettol-liquid-hand-wash-pouch-675ml.webp',
+                note: 'Illustrative visual — log in to view assigned prices'
+              },
+              {
+                title: 'Apsara HB Writing Pencils Box',
+                tag: 'Stationery Sample',
+                img: 'https://xgxqremmwxnwplhpvtux.supabase.co/storage/v1/object/public/product-images/demo-visual-1785143613076-51.jpg',
+                note: 'Illustrative visual — log in to view assigned prices'
+              },
+              {
+                title: 'Fluorescent Desk Highlighters Set',
+                tag: 'Stationery Sample',
+                img: 'https://xgxqremmwxnwplhpvtux.supabase.co/storage/v1/object/public/product-images/demo-visual-1785143613984-178.jpg',
+                note: 'Illustrative visual — log in to view assigned prices'
+              },
+              {
+                title: 'Pik Sketch Pen Set 12 Colors',
+                tag: 'Stationery Sample',
+                img: 'https://xgxqremmwxnwplhpvtux.supabase.co/storage/v1/object/public/product-images/demo-visual-1785143626878-950.jpeg',
+                note: 'Illustrative visual — log in to view assigned prices'
+              },
+              {
+                title: 'Heavy Duty Rubber Protection Gloves',
+                tag: 'Housekeeping Sample',
+                img: 'https://xgxqremmwxnwplhpvtux.supabase.co/storage/v1/object/public/product-images/demo-visual-1785143614156-25.jpg',
+                note: 'Illustrative visual — log in to view assigned prices'
+              },
+              {
+                title: 'Commercial Disinfectant Toilet Cleaner 500ml',
+                tag: 'Housekeeping Sample',
+                img: 'https://xgxqremmwxnwplhpvtux.supabase.co/storage/v1/object/public/product-images/demo-visual-1785143614272-231.webp',
+                note: 'Illustrative visual — log in to view assigned prices'
+              }
+            ].map((demo, idx) => (
+              <div key={idx} className="bg-card rounded-2xl overflow-hidden border border-border/60 shadow-sm p-4 text-left">
+                <div className="relative aspect-square rounded-xl overflow-hidden bg-secondary mb-4">
+                  <Image src={demo.img} alt={demo.title} fill className="object-cover pointer-events-none" />
+                </div>
+                <div>
+                  <Badge variant="outline" className="text-[10px] uppercase font-bold text-accent mb-2">
+                    {demo.tag}
+                  </Badge>
+                  <h4 className="font-display font-extrabold text-sm text-foreground mb-1">{demo.title}</h4>
+                  <p className="text-[11px] text-muted-foreground italic">{demo.note}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Trust Features */}
+      <section className="max-w-7xl mx-auto px-4 md:px-6 py-24">
+        <div className="grid md:grid-cols-3 gap-8">
+          {[
+            { icon: Shield, title: 'Private Account Pricing', desc: 'Client-specific wholesale rate sheets configured and gated per corporate user session.' },
+            { icon: Truck, title: '6,000+ Units MOQ Logistics', desc: 'Direct warehouse dispatch enforcing minimum order quantities for optimum B2B freight rates.' },
+            { icon: Award, title: 'Itemized GST Invoices', desc: 'Official GST Tax Invoices generated with your corporate registration details on every order.' }
+          ].map((item, i) => (
+            <div key={i} className="p-8 bg-card border radius-xl shadow-soft text-left">
+              <div className="w-12 h-12 gold-gradient rounded-xl flex items-center justify-center mb-5">
+                <item.icon className="w-6 h-6 text-primary" />
+              </div>
+              <h3 className="font-display text-xl font-extrabold mb-2">{item.title}</h3>
+              <p className="text-muted-foreground text-xs leading-relaxed">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* CTA Box */}
+      <section className="max-w-5xl mx-auto px-4 pb-24 text-center">
+        <div className="mesh-hero radius-2xl p-10 md:p-16 text-primary-foreground">
+          <h2 className="font-display text-3xl md:text-5xl font-extrabold mb-4">Need Catalog Access for Your Business?</h2>
+          <p className="text-primary-foreground/80 text-base max-w-xl mx-auto mb-8">
+            Contact our procurement team to verify your company account and unlock your customized price list.
+          </p>
+          <div className="flex flex-wrap justify-center gap-4">
+            <Link href="/login">
+              <Button size="lg" className="rounded-full px-8 bg-accent text-accent-foreground font-bold hover:bg-accent/90 shadow-glow">
+                Login to Account
+              </Button>
+            </Link>
+            <Link href="/contact">
+              <Button size="lg" className="rounded-full px-8 border border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white font-bold transition-all shadow-soft backdrop-blur-xs">
+                Contact Procurement Team
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+import { useRealtimeOrders, useRealtimePricing, useRealtimeProducts } from '@/lib/hooks/useRealtime'
+
+function LoggedInCustomerHomeView({ user }) {
+  const { cart, addToCart } = useAppContext()
+  const router = useRouter()
+
+  const [loading, setLoading] = useState(true)
+  const [catalogLocked, setCatalogLocked] = useState(false)
+  const [assignedProducts, setAssignedProducts] = useState([])
+  const [orders, setOrders] = useState([])
+  const [moq, setMoq] = useState(6000)
+
+  const loadDashboardData = useCallback(async () => {
+    setLoading(true)
+    const token = localStorage.getItem('token')
+    try {
+      const [prodRes, orderRes, moqRes] = await Promise.all([
+        fetch('/api/products', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/orders', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/admin/moq')
+      ])
+
+      if (prodRes.ok) {
+        const pData = await prodRes.json()
+        if (pData.catalog_locked || !pData.products || pData.products.length === 0) {
+          setCatalogLocked(true)
+        } else {
+          setCatalogLocked(false)
+          setAssignedProducts(pData.products)
+        }
+      } else {
+        setCatalogLocked(true)
+      }
+
+      if (orderRes.ok) {
+        const oData = await orderRes.json()
+        setOrders(oData || [])
+      }
+      if (moqRes.ok) {
+        const mData = await moqRes.json()
+        if (mData.moq) setMoq(mData.moq)
+      }
+    } catch (e) {
+      console.error('Failed to load dashboard data:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useRealtimeOrders(loadDashboardData)
+  useRealtimePricing(loadDashboardData)
+  useRealtimeProducts(loadDashboardData)
+
+  useEffect(() => {
+    loadDashboardData()
+  }, [loadDashboardData])
+
+  // 7. If customer has 0 products assigned, show the WhatsApp Access Request screen
+  if (!loading && (catalogLocked || assignedProducts.length === 0)) {
+    return <HomeAccessPendingView user={user} />
+  }
+
+  // Order status counts
+  const pendingCount = orders.filter(o => o.status === 'pending').length
+  const confirmedCount = orders.filter(o => o.status === 'confirmed' || o.status === 'processing').length
+  const shippedCount = orders.filter(o => o.status === 'shipped' || o.status === 'out_for_delivery').length
+  const deliveredCount = orders.filter(o => o.status === 'delivered').length
+
+  // Cart total quantity & MOQ check
+  const cartQty = cart.reduce((sum, item) => sum + (item.quantity || 1), 0)
+  const showMoqReminder = cartQty > 0 && cartQty < moq
+  const remainingMoq = Math.max(0, moq - cartQty)
+
+  // Fast reorder items from past orders
+  const reorderItemsMap = new Map()
+  orders.forEach(o => {
+    (o.order_items || []).forEach(item => {
+      if (!reorderItemsMap.has(item.product_id)) {
+        const matchedAssigned = assignedProducts.find(ap => ap.id === item.product_id)
+        if (matchedAssigned) {
+          reorderItemsMap.set(item.product_id, matchedAssigned)
+        }
+      }
+    })
+  })
+  const reorderList = Array.from(reorderItemsMap.values()).slice(0, 6)
+  const fastReorderProducts = reorderList.length > 0 ? reorderList : assignedProducts.slice(0, 6)
+
+  const whatsappRequestText = encodeURIComponent(`Hello AK Enterprises, my account is ${user.full_name || user.email} (${user.phone || ''}). I would like to request additional products added to my custom B2B catalog.`)
+  const whatsappRequestUrl = `https://wa.me/918308860894?text=${whatsappRequestText}`
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 md:px-6 py-12 space-y-8">
+        <div className="h-44 rounded-3xl skeleton" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Array(4).fill(0).map((_, i) => <div key={i} className="h-28 rounded-2xl skeleton" />)}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 md:px-6 py-8 space-y-10">
+      {/* 1. Personalized Welcome Section */}
+      <section className="mesh-hero rounded-3xl p-8 md:p-12 text-primary-foreground relative overflow-hidden shadow-elevated text-left">
+        <div className="relative z-10 max-w-3xl">
+          <Badge className="mb-4 bg-accent/20 text-accent border-accent/40 px-3.5 py-1 text-xs font-bold uppercase tracking-widest backdrop-blur">
+            🏢 B2B Corporate Portal
+          </Badge>
+          <h1 className="font-display text-3xl sm:text-5xl font-extrabold mb-4 leading-tight">
+            Welcome back, <span className="gold-shine">{user.full_name || user.email}</span>!
+          </h1>
+          <p className="text-primary-foreground/85 text-base md:text-lg mb-8 max-w-2xl leading-relaxed font-medium">
+            Manage your corporate rate sheets, instant reorders, and active shipments with Pan-India B2B fulfillment.
+          </p>
+
+          <div className="flex flex-wrap gap-4 text-xs font-semibold">
+            <div className="bg-white/10 backdrop-blur border border-white/15 px-4 py-2.5 rounded-2xl flex items-center gap-2">
+              <PackageCheck className="w-4 h-4 text-accent" />
+              <span>{assignedProducts.length} Products Assigned in Your Catalog</span>
+            </div>
+            <div className="bg-white/10 backdrop-blur border border-white/15 px-4 py-2.5 rounded-2xl flex items-center gap-2">
+              <Clock className="w-4 h-4 text-accent" />
+              <span>{pendingCount + confirmedCount + shippedCount} Orders in Progress</span>
+            </div>
+          </div>
+        </div>
+        <div className="absolute -right-16 -bottom-16 w-80 h-80 rounded-full bg-accent/15 blur-3xl pointer-events-none" />
+      </section>
+
+      {/* 6. MOQ Inline Reminder Banner */}
+      {showMoqReminder && (
+        <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-amber-500/5 border border-amber-500/30 rounded-2xl p-4 md:p-5 flex flex-wrap items-center justify-between gap-4 shadow-sm text-left">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-600 flex items-center justify-center shrink-0">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-bold text-sm text-foreground">
+                Minimum Order Quantity (MOQ) Notice
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Your cart currently has <strong className="text-foreground">{cartQty}</strong> units. Add <strong className="text-accent">{remainingMoq} more units</strong> to meet the required {moq} MOQ for checkout.
+              </p>
+            </div>
+          </div>
+          <Link href="/cart">
+            <Button size="sm" className="rounded-full gold-gradient text-primary font-bold text-xs h-9 px-5">
+              View Cart & Checkout
+            </Button>
+          </Link>
+        </div>
+      )}
+
+      {/* 2. Quick Action Cards */}
+      <section className="grid sm:grid-cols-3 gap-6">
+        <button
+          onClick={() => router.push('/products')}
+          className="group bg-card border border-border/80 rounded-2xl p-6 text-left hover:border-accent/50 transition-all duration-300 shadow-soft hover:shadow-glow"
+        >
+          <div className="w-12 h-12 gold-gradient rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform shadow-soft">
+            <Grid3x3 className="w-6 h-6 text-primary" />
+          </div>
+          <h3 className="font-display font-extrabold text-lg text-foreground mb-1 group-hover:text-accent transition-colors flex items-center justify-between">
+            Browse My Products <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </h3>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Access your custom rate card and assigned wholesale pricing.
+          </p>
+        </button>
+
+        <button
+          onClick={() => router.push('/orders')}
+          className="group bg-card border border-border/80 rounded-2xl p-6 text-left hover:border-accent/50 transition-all duration-300 shadow-soft hover:shadow-glow"
+        >
+          <div className="w-12 h-12 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+            <Clock className="w-6 h-6 text-accent" />
+          </div>
+          <h3 className="font-display font-extrabold text-lg text-foreground mb-1 group-hover:text-accent transition-colors flex items-center justify-between">
+            Track My Orders <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </h3>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Check active shipment status, invoices, and reorder history.
+          </p>
+        </button>
+
+        <a
+          href={whatsappRequestUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group bg-card border border-border/80 rounded-2xl p-6 text-left hover:border-emerald-500/50 transition-all duration-300 shadow-soft hover:shadow-glow"
+        >
+          <div className="w-12 h-12 bg-emerald-500/10 text-emerald-600 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+            <MessageCircle className="w-6 h-6" />
+          </div>
+          <h3 className="font-display font-extrabold text-lg text-foreground mb-1 group-hover:text-emerald-600 transition-colors flex items-center justify-between">
+            Request More Products <ArrowUpRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </h3>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Request additional products added to your custom B2B rate card.
+          </p>
+        </a>
+      </section>
+
+      {/* 5. Order Status Summary Widget */}
+      <section className="bg-card border border-border/70 rounded-3xl p-6 shadow-sm text-left">
+        <div className="flex items-center justify-between mb-6 pb-4 border-b border-border/50">
+          <div>
+            <h3 className="font-display font-extrabold text-xl text-foreground">Order Status Summary</h3>
+            <p className="text-xs text-muted-foreground">Click any card to filter your orders page by status</p>
+          </div>
+          <Link href="/orders" className="text-xs font-bold text-accent hover:underline flex items-center gap-1">
+            View All Orders ({orders.length}) <ChevronRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: 'Pending Approval', count: pendingCount, icon: Clock, status: 'pending', color: 'text-amber-500 bg-amber-500/10' },
+            { label: 'Confirmed / Active', count: confirmedCount, icon: PackageCheck, status: 'confirmed', color: 'text-blue-500 bg-blue-500/10' },
+            { label: 'Shipped & En Route', count: shippedCount, icon: Truck, status: 'shipped', color: 'text-purple-500 bg-purple-500/10' },
+            { label: 'Delivered Orders', count: deliveredCount, icon: CheckCircle2, status: 'delivered', color: 'text-emerald-500 bg-emerald-500/10' }
+          ].map((item, i) => {
+            const Icon = item.icon
+            return (
+              <button
+                key={i}
+                onClick={() => router.push(`/orders?status=${item.status}`)}
+                className="flex items-center gap-3 p-4 rounded-2xl border border-border/60 bg-secondary/20 hover:bg-secondary/60 hover:border-accent/40 transition text-left"
+              >
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${item.color}`}>
+                  <Icon className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xl font-display font-extrabold text-foreground">{item.count}</div>
+                  <div className="text-[11px] font-medium text-muted-foreground">{item.label}</div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* 3. Fast Reorder Section */}
+      {fastReorderProducts.length > 0 && (
+        <section className="space-y-4 text-left">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold tracking-[0.2em] uppercase text-accent mb-1">— Repeat Ordering</p>
+              <h2 className="font-display text-2xl md:text-3xl font-extrabold text-foreground">
+                Reorder B2B Essentials
+              </h2>
+            </div>
+            <Link href="/products" className="text-xs font-bold text-accent hover:underline flex items-center gap-1">
+              View Catalog <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar">
+            {fastReorderProducts.map(p => (
+              <div key={p.id} className="w-64 shrink-0 bg-card border border-border/70 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="relative aspect-square rounded-xl overflow-hidden bg-secondary mb-3">
+                    <Image src={p.images?.[0] || p.image_url || '/placeholder.png'} alt={p.name} fill className="object-cover" />
+                  </div>
+                  <Badge variant="outline" className="text-[9px] uppercase font-bold text-accent mb-1.5">
+                    Contract Rate
+                  </Badge>
+                  <h4 className="font-display font-extrabold text-sm text-foreground line-clamp-2 mb-1">{p.name}</h4>
+                  <div className="font-mono font-extrabold text-base text-primary mb-3">
+                    {formatINR(p.price)}
+                  </div>
+                </div>
+
+                <Button
+                  size="sm"
+                  onClick={e => { addRipple(e); addToCart(p, 1); }}
+                  className="w-full rounded-xl gold-gradient text-primary font-bold text-xs h-9"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 mr-1.5" /> Quick Reorder
+                </Button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 4. Assigned Products Preview Strip */}
+      <section className="space-y-6 text-left">
+        <div className="flex items-center justify-between border-b border-border/50 pb-4">
+          <div>
+            <p className="text-xs font-bold tracking-[0.2em] uppercase text-accent mb-1">— Your Rate Card</p>
+            <h2 className="font-display text-2xl md:text-3xl font-extrabold text-foreground">
+              Your Available Products
+            </h2>
+          </div>
+          <Link href="/products">
+            <Button variant="outline" size="sm" className="rounded-full text-xs font-bold px-4 border-border">
+              View All ({assignedProducts.length}) <ChevronRight className="w-3.5 h-3.5 ml-1" />
+            </Button>
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
+          {assignedProducts.slice(0, 8).map(p => (
+            <ProductCard key={p.id} product={p} />
+          ))}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function CatalogAccessPendingView({ user }) {
+  return <CatalogAccessPendingCard user={user} />
+}
+
+function HomeAccessPendingView({ user }) {
+  return <CatalogAccessPendingCard user={user} />
 }
 
 

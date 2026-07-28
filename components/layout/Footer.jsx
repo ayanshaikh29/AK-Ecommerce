@@ -1,8 +1,12 @@
+'use client'
 import React from 'react'
 import Link from 'next/link'
 import { MapPin, Phone, Mail } from 'lucide-react'
+import { usePathname } from 'next/navigation'
 
 export function Footer({ settings }) {
+  const pathname = usePathname()
+  if (pathname?.startsWith('/admin') || pathname?.startsWith('/vendor')) return null
   return (
     <footer className="bg-primary text-primary-foreground/80 py-16 border-t border-white/10">
       <div className="max-w-7xl mx-auto px-4 md:px-6 grid md:grid-cols-4 gap-12">

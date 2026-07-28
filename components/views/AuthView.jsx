@@ -5,8 +5,10 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Label } from '@/components/ui/label'
 import { useAppContext } from '@/components/providers/AppProvider'
+import { GoogleSignInButton } from '@/components/ui/GoogleSignInButton'
 
 function addRipple(e) {
   const btn = e.currentTarget; if (!btn) return
@@ -39,18 +41,25 @@ export function AuthView({ mode }) {
       })
       
       if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.message || 'Authentication failed')
+        const errData = await res.json()
+        throw new Error(errData.error || errData.message || 'Authentication failed')
       }
       
       const data = await res.json()
       
       localStorage.setItem('token', data.token)
       localStorage.setItem('user', JSON.stringify(data.user))
+      document.cookie = `user_role=${data.user.role}; path=/; max-age=31536000`
       setUser(data.user)
       
       toast.success(mode === 'login' ? 'Welcome back' : 'Account created')
-      window.location.href = data.user.role === 'admin' ? '/admin' : '/'
+      if (data.user.role === 'admin') {
+        window.location.href = '/admin'
+      } else if (data.user.role === 'vendor') {
+        window.location.href = '/vendor'
+      } else {
+        window.location.href = '/products'
+      }
     } catch (e) { 
       toast.error(e.message) 
     } finally { 
@@ -79,8 +88,19 @@ export function AuthView({ mode }) {
               <Input required type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="h-11 rounded-xl"/>
             </div>
             <div>
-              <Label>Password</Label>
-              <Input required type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} className="h-11 rounded-xl"/>
+              <div className="flex justify-between items-center mb-1">
+                <Label>Password</Label>
+                {mode === 'login' && (
+                  <button 
+                    type="button" 
+                    onClick={() => router.push('/forgot-password')} 
+                    className="text-xs text-accent font-semibold hover:underline cursor-pointer"
+                  >
+                    Forgot password?
+                  </button>
+                )}
+              </div>
+              <PasswordInput required value={form.password} onChange={e => setForm({...form, password: e.target.value})} className="h-11 rounded-xl"/>
             </div>
             {mode === 'signup' && (
               <div>
@@ -88,10 +108,26 @@ export function AuthView({ mode }) {
                 <Input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} className="h-11 rounded-xl"/>
               </div>
             )}
+
             <Button type="submit" disabled={loading} onClick={addRipple} className="w-full h-12 rounded-full btn-shine ripple font-semibold" size="lg">
               {loading ? <span className="btn-spinner"/> : (mode === 'login' ? 'Sign In' : 'Create Account')}
             </Button>
           </form>
+
+          {/* Divider */}
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border/70" />
+            </div>
+            <div className="relative flex justify-center text-[11px] uppercase">
+              <span className="bg-card px-3 text-muted-foreground font-extrabold tracking-wider">
+                Or Continue With
+              </span>
+            </div>
+          </div>
+
+          {/* Google OAuth Button */}
+          <GoogleSignInButton text={mode === 'login' ? 'Sign in with Google' : 'Sign up with Google'} />
           <p className="text-sm text-center text-muted-foreground mt-6">
             {mode === 'login' ? (
               <>New here? <button onClick={() => router.push('/signup')} className="text-accent font-bold hover:underline">Create account</button></>

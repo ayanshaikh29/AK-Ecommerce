@@ -2,6 +2,19 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { v4 as uuidv4 } from 'uuid'
 import crypto from 'crypto'
+import { 
+  getMinOrderQuantity, 
+  setMinOrderQuantity, 
+  getCustomerPricings, 
+  getCustomerVisiblePricingMap, 
+  saveCustomerPricing, 
+  bulkUpdateCustomerPricing, 
+  getStockMovements, 
+  addStockMovement, 
+  getVendorsList, 
+  saveVendor, 
+  getVendorByUserId 
+} from '@/lib/b2b-store'
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -44,15 +57,24 @@ async function getUser(req) {
   
   if (parsed.email) {
     const supabase = db()
-    const { data: dbUser } = await supabase
+    const { data: dbUser, error: dbErr } = await supabase
       .from('users')
-      .select('id')
+      .select('id, email, role, full_name, phone')
       .eq('email', parsed.email)
       .maybeSingle()
       
-    if (dbUser && dbUser.id !== parsed.id) {
-      console.log(`TRANSPARENT ID OVERRIDE FOR ${parsed.email}: Token ID ${parsed.id} -> Database ID ${dbUser.id}`)
+    if (dbErr) {
+      console.error(`[getUser] DB lookup error for ${parsed.email}:`, dbErr.message)
+    }
+
+    if (dbUser) {
+      // DB user is the source of truth
       parsed.id = dbUser.id
+      parsed.role = dbUser.role
+      parsed.full_name = dbUser.full_name
+      parsed.phone = dbUser.phone || ''
+    } else {
+      console.warn(`[getUser] No DB row found for email=${parsed.email}. Using token id=${parsed.id}`)
     }
   }
   return parsed
@@ -67,7 +89,7 @@ function json(data, status = 200, cacheTTL = null) {
 function err(msg, status = 400) { return NextResponse.json({ error: msg }, { status }) }
 
 function buildStatusHistory(o) {
-  let statusStr = o.status || 'confirmed'
+  let statusStr = o.status || 'pending'
   let statusHistory = []
   
   try {
@@ -83,15 +105,21 @@ function buildStatusHistory(o) {
   const pAt = o.placed_at || o.created_at
   const uAt = o.updated_at || pAt
   
-  const steps = ['confirmed', 'shipped', 'out for delivery', 'delivered']
+  const steps = ['pending', 'confirmed', 'packed', 'shipped', 'out for delivery', 'delivered']
   const currentKey = statusStr.toLowerCase().trim()
   const activeIdx = steps.indexOf(currentKey)
   
-  if (activeIdx === -1) {
+  if (currentKey === 'rejected') {
+    const reasonNote = o.rejection_reason ? `Reason: ${o.rejection_reason}` : 'Order was rejected'
+    statusHistory = [
+      { status: 'pending', timestamp: pAt, note: 'Order placed — Pending Admin Approval' },
+      { status: 'rejected', timestamp: uAt, note: `Order Rejected by Admin. ${reasonNote}` }
+    ]
+  } else if (activeIdx === -1) {
     statusHistory = [{ status: statusStr, timestamp: uAt, note: `Order status is ${statusStr}` }]
     if (currentKey === 'cancelled' || currentKey === 'returned') {
       statusHistory = [
-        { status: 'confirmed', timestamp: pAt, note: 'Order placed and confirmed' },
+        { status: 'pending', timestamp: pAt, note: 'Order placed — Pending Admin Approval' },
         { status: statusStr, timestamp: uAt, note: `Order was ${statusStr}` }
       ]
     }
@@ -100,7 +128,7 @@ function buildStatusHistory(o) {
     for (let i = 0; i <= activeIdx; i++) {
       const stepKey = steps[i]
       let ts = pAt
-      let note = 'Order placed and confirmed'
+      let note = 'Order submitted — Pending Admin Approval'
       
       if (i === activeIdx) {
         ts = uAt
@@ -110,9 +138,12 @@ function buildStatusHistory(o) {
         ts = new Date(pTime + (uTime - pTime) * (i / activeIdx)).toISOString()
       }
       
-      if (stepKey === 'shipped') note = 'Package dispatched from warehouse'
+      if (stepKey === 'pending') note = 'Order submitted — Pending Admin Approval'
+      if (stepKey === 'confirmed') note = 'Order accepted by Admin'
+      if (stepKey === 'packed') note = 'Order packed at warehouse'
+      if (stepKey === 'shipped') note = 'Package dispatched to courier partner'
       if (stepKey === 'out for delivery') note = 'Courier partner is delivering today'
-      if (stepKey === 'delivered') note = 'Delivered to your location'
+      if (stepKey === 'delivered') note = 'Delivered to recipient location'
       
       statusHistory.push({ status: stepKey, timestamp: ts, note })
     }
@@ -131,52 +162,85 @@ async function ensureSeed() {
   if (meta && meta.version === SEED_VERSION) { _seeded = true; return }
   const now = new Date().toISOString()
 
+  // Only create admin if missing — never delete existing users
   const { data: existingAdmin } = await supabase.from('users').select('*').eq('email', 'admin@store.com').maybeSingle()
   if (!existingAdmin) {
+    let adminUuid = null
+    try {
+      const { data: authData } = await supabase.auth.admin.listUsers()
+      const adminAuth = authData?.users?.find(a => a.email.toLowerCase() === 'admin@store.com')
+      if (adminAuth) {
+        adminUuid = adminAuth.id
+      } else {
+        const { data: newAuth, error: aErr } = await supabase.auth.admin.createUser({
+          email: 'admin@store.com',
+          password: 'Admin@123',
+          email_confirm: true
+        })
+        if (!aErr && newAuth?.user) adminUuid = newAuth.user.id
+      }
+    } catch (e) {}
+
     await supabase.from('users').insert({
-      id: uuidv4(), email: 'admin@store.com', password: hashPw('Admin@123'),
+      id: adminUuid || uuidv4(), email: 'admin@store.com', password: hashPw('Admin@123'),
       full_name: 'AK Admin', phone: '+91 83088 60894', role: 'admin', created_at: now,
     })
   }
 
-  const cats = [
-    { name: 'Office Stationery', slug: 'office-stationery', description: 'Papers, files, pens, notebooks & printer supplies', image_url: 'https://images.unsplash.com/photo-1568871391150-ff6047a2ff10?w=800&q=80', icon: 'FileText' },
-    { name: 'Housekeeping', slug: 'housekeeping', description: 'Cleaning chemicals, tissues, mops & sanitation supplies', image_url: 'https://images.unsplash.com/photo-1585421514738-01798e348b17?w=800&q=80', icon: 'Sparkles' },
-    { name: 'UPS Solutions', slug: 'ups-solutions', description: 'UPS systems, batteries & power backup accessories', image_url: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&q=80', icon: 'BatteryCharging' },
-  ].map(c => ({ id: uuidv4(), ...c, created_at: now }))
-  
-  await supabase.from('categories').delete().neq('id', '00000000-0000-0000-0000-000000000000') 
-  await supabase.from('categories').insert(cats)
-  const catBy = s => cats.find(c => c.slug === s).id
+  // Only seed categories if none exist — never delete existing ones
+  const { data: existingCats } = await supabase.from('categories').select('id').limit(1)
+  if (!existingCats || existingCats.length === 0) {
+    const cats = [
+      { name: 'Office Stationery', slug: 'office-stationery', description: 'Papers, files, pens, notebooks & printer supplies', image_url: '/category-stationery.jpg', icon: 'FileText' },
+      { name: 'Housekeeping', slug: 'housekeeping', description: 'Cleaning chemicals, tissues, mops & sanitation supplies', image_url: '/category-housekeeping.jpg', icon: 'Sparkles' },
+      { name: 'UPS Solutions', slug: 'ups-solutions', description: 'UPS systems, batteries & power backup accessories', image_url: '/category-ups.jpg', icon: 'BatteryCharging' },
+    ].map(c => ({ id: uuidv4(), ...c, created_at: now }))
+    await supabase.from('categories').insert(cats)
+  }
 
-  const products = [
-    { name: 'A4 Copier Paper 75 GSM (500 Sheets)', cat: 'office-stationery', price: 285, mrp: 380, img: ['https://images.unsplash.com/photo-1568871391150-ff6047a2ff10?w=900&q=80'], desc: 'Premium A4 printer & copier paper.', stock: 240, featured: true, subcategory: 'Printing & Copier Paper' },
-    { name: 'Lizol Disinfectant Floor Cleaner 5L', cat: 'housekeeping', price: 545, mrp: 720, img: ['https://images.unsplash.com/photo-1585421514738-01798e348b17?w=900&q=80'], desc: 'Kills 99.9% germs. 5L economy pack.', stock: 55, featured: true, subcategory: 'Floor Cleaners' },
-    { name: 'APC Home UPS BX600C-IN 600VA', cat: 'ups-solutions', price: 3850, mrp: 4900, img: ['https://images.unsplash.com/photo-1518770660439-4636190af475?w=900&q=80'], desc: 'APC Back-UPS BX600C-IN 600VA.', stock: 22, featured: true, subcategory: 'UPS Supply' },
-  ]
-  const productDocs = products.map(p => ({
-    id: uuidv4(), name: p.name, slug: p.name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/-+$/,''),
-    description: p.desc, price: p.price, mrp: p.mrp,
-    discount_percent: Math.round((1 - p.price/p.mrp) * 100),
-    category_id: catBy(p.cat), subcategory: p.subcategory,
-    stock_quantity: p.stock, sku: 'AK-' + Math.floor(Math.random()*90000+10000),
-    is_active: true, is_featured: p.featured,
-    rating_avg: 4.5, rating_count: 20,
-    images: p.img, videos: [], created_at: now, updated_at: now,
-  }))
-  await supabase.from('products').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-  await supabase.from('products').insert(productDocs)
+  // Only seed products if none exist — never delete existing ones
+  const { data: existingProds } = await supabase.from('products').select('id').limit(1)
+  if (!existingProds || existingProds.length === 0) {
+    const catData = await supabase.from('categories').select('id, slug')
+    const catBy = {}
+    for (const c of (catData.data || [])) catBy[c.slug] = c.id
+    const fallbackCat = catData.data?.[0]?.id
 
-  const banners = [
-    { id: uuidv4(), title: 'Your Trusted B2B Partner', subtitle: 'Office Stationery • Housekeeping • UPS Solutions — all under one roof.', image_url: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1800&q=85', cta_text: 'Browse Catalog', cta_link: '/products', sort_order: 1, is_active: true, created_at: now },
-  ]
-  await supabase.from('banners').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-  await supabase.from('banners').insert(banners)
+    const defaultProducts = [
+      { name: 'A4 Copier Paper 75 GSM (500 Sheets)', cat: 'office-stationery', price: 285, mrp: 380, img: ['/category-stationery.jpg'], desc: 'Premium A4 printer & copier paper.', stock: 240, featured: true, subcategory: 'Printing & Copier Paper' },
+      { name: 'Lizol Disinfectant Floor Cleaner 5L', cat: 'housekeeping', price: 545, mrp: 720, img: ['/category-housekeeping.jpg'], desc: 'Kills 99.9% germs. 5L economy pack.', stock: 55, featured: true, subcategory: 'Floor Cleaners' },
+      { name: 'APC Home UPS BX600C-IN 600VA', cat: 'ups-solutions', price: 3850, mrp: 4900, img: ['/category-ups.jpg'], desc: 'APC Back-UPS BX600C-IN 600VA.', stock: 22, featured: true, subcategory: 'UPS Supply' },
+    ]
+    const productDocs = defaultProducts.map(p => ({
+      id: uuidv4(), name: p.name, slug: p.name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/-+$/,''),
+      description: p.desc, price: p.price, mrp: p.mrp,
+      discount_percent: Math.round((1 - p.price/p.mrp) * 100),
+      category_id: catBy[p.cat] || fallbackCat, subcategory: p.subcategory,
+      stock_quantity: p.stock, sku: 'AK-' + Math.floor(Math.random()*90000+10000),
+      is_active: true, is_featured: p.featured,
+      rating_avg: 4.5, rating_count: 20,
+      images: p.img, videos: [], created_at: now, updated_at: now,
+    }))
+    await supabase.from('products').insert(productDocs)
+  }
 
-  const clients = [{ id: uuidv4(), name: 'ICICI Lombard GIC', logo_url: '', sort_order: 1, is_active: true }]
-  await supabase.from('clients').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-  await supabase.from('clients').insert(clients)
+  // Only seed banners if none exist
+  const { data: existingBanners } = await supabase.from('banners').select('id').limit(1)
+  if (!existingBanners || existingBanners.length === 0) {
+    const banners = [
+      { id: uuidv4(), title: 'Your Trusted B2B Partner', subtitle: 'Office Stationery • Housekeeping • UPS Solutions — all under one roof.', image_url: '/category-stationery.jpg', cta_text: 'Browse Catalog', cta_link: '/products', sort_order: 1, is_active: true, created_at: now },
+    ]
+    await supabase.from('banners').insert(banners)
+  }
 
+  // Only seed clients if none exist
+  const { data: existingClients } = await supabase.from('clients').select('id').limit(1)
+  if (!existingClients || existingClients.length === 0) {
+    const clients = [{ id: uuidv4(), name: 'ICICI Lombard GIC', logo_url: '', sort_order: 1, is_active: true }]
+    await supabase.from('clients').insert(clients)
+  }
+
+  // Settings — always upsert (idempotent)
   await supabase.from('settings').upsert({
     id: 'main', brand_name: 'AK Enterprises', brand_tagline: 'Trusted B2B Partner',
     hero_badge: 'Est. 2020 — Pune', promo_headline: 'Bulk orders? Get custom quotes in 2 hours',
@@ -192,13 +256,21 @@ async function ensureSeed() {
 
 async function route(req, method) {
   const url = new URL(req.url)
-  const parts = url.pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean)
+  const rawParts = url.pathname.split('/').filter(Boolean)
+  const parts = rawParts[0] === 'api' ? rawParts.slice(1) : rawParts
   const supabase = db()
   if (!SUPABASE_URL || !SUPABASE_KEY) return err('Database not configured', 500)
   await ensureSeed()
   
   const p = parts
   const user = await getUser(req)
+
+  if (p[0] === 'realtime-config' && method === 'GET') {
+    return json({ 
+      supabaseUrl: SUPABASE_URL,
+      supabaseKey: SUPABASE_KEY 
+    })
+  }
 
   if (p[0] === 'upload' && method === 'POST') {
     if (!user || user.role !== 'admin') return err('Forbidden', 403)
@@ -269,17 +341,27 @@ async function route(req, method) {
         full_name: full_name||'', 
         phone: phone||'', 
         role: 'customer', 
-        created_at: nowStr,
-        referral_code: refCode,
-        referred_by_id: referredById
+        created_at: nowStr
       }
       
-      // 2. Insert into custom public.users table
-      const { error: uErr } = await supabase.from('users').insert(u)
+      // 2. Insert into custom public.users table (try with referral columns first, fallback without)
+      let uErr = null
+      const uWithReferral = { ...u, referral_code: refCode, referred_by_id: referredById }
+      const res1 = await supabase.from('users').insert(uWithReferral)
+      if (res1.error) {
+        // Referral columns might not exist — retry without them
+        if (res1.error.message?.includes('referral_code') || res1.error.message?.includes('referred_by_id')) {
+          console.warn('Referral columns not found in users table, inserting without them')
+          const res2 = await supabase.from('users').insert(u)
+          uErr = res2.error
+        } else {
+          uErr = res1.error
+        }
+      }
       if (uErr) {
         // Rollback auth user creation if public.users insert fails
         await supabase.auth.admin.deleteUser(newUuid)
-        return err('Signup failed (users table): ' + uErr.message, 500)
+        return err('Signup failed: ' + uErr.message, 500)
       }
       
       // If referred, create coupons!
@@ -348,14 +430,122 @@ async function route(req, method) {
         if (pErr) console.error('Self-heal profile creation failed:', pErr.message)
       }
 
+      // Record Customer Login Activity for Admin Realtime Notifications
+      if (u.role === 'customer') {
+        const loginRecord = {
+          id: uuidv4(),
+          user_id: u.id,
+          user_name: u.full_name || u.email,
+          email: u.email,
+          phone: u.phone || '',
+          login_at: new Date().toISOString()
+        }
+
+        let loginStored = false
+        try {
+          const { error: insErr } = await supabase.from('customer_logins').insert(loginRecord)
+          if (!insErr) loginStored = true
+        } catch (lErr) {}
+
+        if (!loginStored) {
+          try {
+            const { data: store } = await supabase.from('settings')
+              .select('marquee_messages')
+              .eq('id', 'customer_logins_data')
+              .maybeSingle()
+            let loginsList = []
+            if (store?.marquee_messages) {
+              loginsList = store.marquee_messages.map(s => {
+                try { return typeof s === 'string' ? JSON.parse(s) : s } catch { return null }
+              }).filter(Boolean)
+            }
+            loginsList.unshift(loginRecord)
+            loginsList = loginsList.slice(0, 50)
+            await supabase.from('settings').upsert({
+              id: 'customer_logins_data',
+              marquee_messages: loginsList.map(r => JSON.stringify(r))
+            })
+          } catch (e) {
+            console.error('Failed to record login activity:', e)
+          }
+        }
+      }
+
       const token = sign({ id: u.id, email: u.email, role: u.role, name: u.full_name })
       return json({ token, user: { id: u.id, email: u.email, full_name: u.full_name, role: u.role, phone: u.phone } })
     }
+
     if (p[1] === 'me' && method === 'GET') {
       if (!user) return err('Unauthorized', 401)
       const { data: u } = await supabase.from('users').select('id, email, full_name, phone, role').eq('id', user.id).maybeSingle()
       return json({ user: u })
     }
+    if (p[1] === 'forgot-password' && method === 'POST') {
+      const { email } = body
+      if (!email) return err('Email address is required', 400)
+
+      const genericMsg = 'If an account exists with this email, a password reset link has been sent.'
+
+      try {
+        const origin = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+        const redirectTo = `${origin}/reset-password`
+
+        const { error: resetErr } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+          redirectTo
+        })
+        if (resetErr) {
+          console.error('Supabase resetPasswordForEmail error:', resetErr.message)
+        }
+      } catch (e) {
+        console.error('Forgot password exception:', e.message)
+      }
+
+      return json({ ok: true, message: genericMsg })
+    }
+
+    if (p[1] === 'reset-password' && method === 'POST') {
+      const { password, email, user_id } = body
+      if (!password || password.length < 8) {
+        return err('Password must be at least 8 characters long', 400)
+      }
+
+      const now = new Date().toISOString()
+      const hashed = hashPw(password)
+
+      let targetUserId = user_id || user?.id
+
+      if (!targetUserId && email) {
+        const { data: u } = await supabase.from('users').select('id').eq('email', email.trim().toLowerCase()).maybeSingle()
+        if (u) targetUserId = u.id
+      }
+
+      if (targetUserId) {
+        try {
+          await supabase.auth.admin.updateUserById(targetUserId, { password })
+        } catch (aErr) {
+          console.error('Auth updateUserById error:', aErr.message)
+        }
+
+        const { error: uErr } = await supabase
+          .from('users')
+          .update({ password: hashed, updated_at: now })
+          .eq('id', targetUserId)
+
+        if (uErr) return err('Failed to update password: ' + uErr.message, 500)
+        return json({ ok: true, message: 'Password updated successfully. You can now log in.' })
+      } else {
+        return err('Invalid or expired password reset request.', 400)
+      }
+    }
+  }
+
+  if (p[0] === 'customer-access' && method === 'GET') {
+    if (!user) return json({ has_access: false, logged_in: false, message: "Log in required" })
+    if (user.role === 'admin') return json({ has_access: true, is_admin: true })
+    if (user.role === 'vendor') return json({ has_access: false, is_vendor: true, message: "Vendor accounts do not have catalog access." })
+    
+    const visibleMap = await getCustomerVisiblePricingMap(user.id)
+    return json({ has_access: visibleMap.size > 0, visible_count: visibleMap.size })
   }
 
   if (p[0] === 'categories' && method === 'GET') {
@@ -365,7 +555,28 @@ async function route(req, method) {
 
   if (p[0] === 'products') {
     if (method === 'GET' && !p[1]) {
-      let query = supabase.from('products').select('*, product_images(image_url)')
+      if (!user) {
+        return json({ catalog_locked: true, products: [], message: "Catalog browsing is restricted. Please log in to view products and prices." }, 401)
+      }
+      if (user.role === 'vendor') {
+        return json({ catalog_locked: true, products: [], message: "Vendor accounts do not have catalog access." }, 403)
+      }
+
+      let customerPricingMap = null
+      if (user.role === 'customer') {
+        console.log(`[/api/products] Fetching catalog for customer: id=${user.id} email=${user.email}`)
+        customerPricingMap = await getCustomerVisiblePricingMap(user.id)
+        console.log(`[/api/products] Pricing map size for customer ${user.id}: ${customerPricingMap.size} visible products`)
+        if (customerPricingMap.size > 0) {
+          console.log(`[/api/products] Visible product IDs for ${user.id}:`, Array.from(customerPricingMap.keys()).slice(0, 5))
+        }
+        if (customerPricingMap.size === 0) {
+          return json({ catalog_locked: true, products: [], message: "Contact us to get catalog access." })
+        }
+      }
+
+      let query = supabase.from('products').select('*, product_images(image_url)').eq('is_active', true)
+      
       const category = url.searchParams.get('category')
       const search = url.searchParams.get('search')
       const featured = url.searchParams.get('featured')
@@ -375,6 +586,12 @@ async function route(req, method) {
       const rating = url.searchParams.get('rating')
       const sort = url.searchParams.get('sort') || 'newest'
       
+      if (customerPricingMap) {
+        const assignedIds = Array.from(customerPricingMap.keys())
+        if (assignedIds.length === 0) return json({ catalog_locked: true, products: [] })
+        query = query.in('id', assignedIds)
+      }
+
       if (category) {
         const { data: cat } = await supabase.from('categories').select('id').eq('slug', category).maybeSingle()
         if (cat) query = query.eq('category_id', cat.id)
@@ -392,31 +609,64 @@ async function route(req, method) {
       else query = query.order('created_at', { ascending: false })
       
       const { data: list } = await query
-      const listMapped = (list || []).map(p => ({
-        ...p,
-        images: p.product_images?.map(img => img.image_url) || []
-      }))
-      return json(listMapped, 200, 120)
+      const listMapped = (list || []).map(p => {
+        const customPrice = customerPricingMap ? customerPricingMap.get(p.id) : p.price
+        const rawImgs = (p.product_images || []).map(img => img.image_url).filter(Boolean)
+        let finalImgs = []
+        if (rawImgs.length > 0) finalImgs = rawImgs
+        else if (p.images && p.images.length > 0) finalImgs = p.images.filter(Boolean)
+        else if (p.image_url) finalImgs = [p.image_url]
+        else finalImgs = ['/placeholder.png']
+
+        return {
+          ...p,
+          price: customPrice !== undefined ? customPrice : p.price,
+          original_default_price: user.role === 'admin' ? p.price : undefined,
+          images: finalImgs,
+          image_url: finalImgs[0]
+        }
+      })
+      return json({ catalog_locked: false, products: listMapped }, 200)
     }
     if (method === 'GET' && p[1]) {
+      if (!user) return err('Unauthorized', 401)
+      if (user.role === 'vendor') return err('Forbidden for vendors', 403)
+
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p[1])
       const query = isUUID
         ? supabase.from('products').select('*, product_images(image_url)').eq('id', p[1])
         : supabase.from('products').select('*, product_images(image_url)').eq('slug', p[1])
       const { data: prod } = await query.maybeSingle()
       if (!prod) return err('Not found', 404)
+
+      if (user.role === 'customer') {
+        const visibleMap = await getCustomerVisiblePricingMap(user.id)
+        if (!visibleMap.has(prod.id)) {
+          return err('Product not assigned to your custom catalog', 403)
+        }
+        prod.price = visibleMap.get(prod.id)
+      }
+
       const { data: cat } = await supabase.from('categories').select('*').eq('id', prod.category_id).maybeSingle()
       const { data: related } = await supabase.from('products').select('*, product_images(image_url)').eq('category_id', prod.category_id).neq('id', prod.id).limit(4)
       const { data: reviews } = await supabase.from('reviews').select('*').eq('product_id', prod.id).order('created_at', { ascending: false })
       
+      let relatedMapped = (related || []).map(p => ({
+        ...p,
+        images: p.product_images?.map(img => img.image_url) || []
+      }))
+
+      if (user.role === 'customer') {
+        const visibleMap = await getCustomerVisiblePricingMap(user.id)
+        relatedMapped = relatedMapped
+          .filter(r => visibleMap.has(r.id))
+          .map(r => ({ ...r, price: visibleMap.get(r.id) }))
+      }
+
       const prodMapped = {
         ...prod,
         images: prod.product_images?.map(img => img.image_url) || []
       }
-      const relatedMapped = (related || []).map(p => ({
-        ...p,
-        images: p.product_images?.map(img => img.image_url) || []
-      }))
       return json({ ...prodMapped, category: cat, related: relatedMapped, reviews: reviews || [] })
     }
     if (method === 'POST') {
@@ -736,43 +986,61 @@ async function route(req, method) {
     }
     
     if (method === 'POST') {
-      console.log('ORDER PLACEMENT REQUEST FOR USER:', user)
       if (!user) return err('Unauthorized', 401)
-      const { items, address, subtotal, shipping_fee, total } = body
-      if (!items?.length || !address) return err('Invalid order')
+      const { items, address, payment_method } = body
+      if (!items?.length || !address) return err('Invalid order request', 400)
       
-      // 1. Verify stock availability for all items first
+      // 1. Minimum Order Quantity (MOQ) Check
+      const minOrderQty = await getMinOrderQuantity()
+      const totalUnits = items.reduce((sum, item) => sum + Math.max(1, Number(item.quantity) || 1), 0)
+      if (totalUnits < minOrderQty) {
+        return err(`Minimum order quantity is ${minOrderQty} units. You currently have ${totalUnits} units — please add ${minOrderQty - totalUnits} more.`, 400)
+      }
+
+      // 2. Validate Customer Catalog Assignment & Custom Prices Server-Side
+      const visibleMap = await getCustomerVisiblePricingMap(user.id)
+      if (visibleMap.size === 0 && user.role !== 'admin') {
+        return err('Your account does not have catalog pricing access yet. Please contact support.', 403)
+      }
+
+      const verifiedItems = []
+      let computedSubtotal = 0
+
       for (const item of items) {
         const prodId = item.product_id || item.id
         const { data: prod, error: prodErr } = await supabase
           .from('products')
-          .select('name, stock_quantity')
+          .select('id, name, price, stock_quantity')
           .eq('id', prodId)
           .maybeSingle()
-          
+
         if (prodErr || !prod) {
-          return err(`Product not found or database error: ${prodErr?.message || ''}`, 400)
+          return err(`Product not found: ${item.name || prodId}`, 400)
         }
-        if (prod.stock_quantity < item.quantity) {
-          return err(`Only ${prod.stock_quantity} left in stock for "${prod.name}"`, 400)
+
+        // Validate assignment for non-admin
+        let itemPrice = prod.price
+        if (user.role === 'customer') {
+          if (!visibleMap.has(prod.id)) {
+            return err(`Product "${prod.name}" is not included in your assigned custom catalog.`, 403)
+          }
+          itemPrice = visibleMap.get(prod.id)
         }
-        item._current_stock = prod.stock_quantity
+
+        const qty = Math.max(1, Number(item.quantity) || 1)
+        computedSubtotal += itemPrice * qty
+
+        verifiedItems.push({
+          product_id: prod.id,
+          product_name_snapshot: prod.name,
+          price_snapshot: itemPrice,
+          quantity: qty,
+          _current_stock: prod.stock_quantity
+        })
       }
 
-      // 2. Decrement stock for all items
-      for (const item of items) {
-        const prodId = item.product_id || item.id
-        const newStock = item._current_stock - item.quantity
-        const { error: updateErr } = await supabase
-          .from('products')
-          .update({ stock_quantity: newStock })
-          .eq('id', prodId)
-          
-        if (updateErr) {
-          console.error('Failed to decrement stock for item:', prodId, updateErr)
-          return err(`Failed to update stock quantity: ${updateErr.message}`, 500)
-        }
-      }
+      const shippingFee = computedSubtotal >= 2000 ? 0 : 150
+      const computedTotal = computedSubtotal + shippingFee
 
       let addrId = address.id
       const now = new Date().toISOString()
@@ -815,13 +1083,14 @@ async function route(req, method) {
         id: orderId,
         user_id: user.id,
         order_number,
-        status: 'confirmed', // Literal string status to satisfy constraint
-        payment_method: body.payment_method || 'COD',
-        subtotal,
+        status: 'pending', // Starts as Pending Admin Approval
+        payment_method: payment_method || 'COD',
+        subtotal: computedSubtotal,
         discount: body.discount || 0,
-        shipping_fee,
-        total,
+        shipping_fee: shippingFee,
+        total: computedTotal,
         address_id: addrId,
+        payment_status: 'Pending',
         placed_at: now,
         created_at: now,
         updated_at: now
@@ -830,21 +1099,15 @@ async function route(req, method) {
       const { error: orderErr } = await supabase.from('orders').insert(orderDoc)
       if (orderErr) {
         console.error('Database Order insert error:', orderErr)
-        // Rollback stock decrement on failure
-        for (const item of items) {
-          const prodId = item.product_id || item.id
-          const restoredStock = item._current_stock
-          await supabase.from('products').update({ stock_quantity: restoredStock }).eq('id', prodId)
-        }
         return err('Order database creation failed: ' + orderErr.message, 500)
       }
       
-      const itemDocs = items.map(item => ({
+      const itemDocs = verifiedItems.map(item => ({
         id: uuidv4(),
         order_id: orderId,
-        product_id: item.product_id || item.id,
-        product_name_snapshot: item.product_name_snapshot || item.name,
-        price_snapshot: item.price_snapshot || item.price,
+        product_id: item.product_id,
+        product_name_snapshot: item.product_name_snapshot,
+        price_snapshot: item.price_snapshot,
         quantity: item.quantity,
         created_at: now
       }))
@@ -852,79 +1115,110 @@ async function route(req, method) {
       const { error: itemsErr } = await supabase.from('order_items').insert(itemDocs)
       if (itemsErr) {
         console.error('Database Order items insert error:', itemsErr)
-        // Rollback order and stock decrement on failure
         await supabase.from('orders').delete().eq('id', orderId)
-        for (const item of items) {
-          const prodId = item.product_id || item.id
-          const restoredStock = item._current_stock
-          await supabase.from('products').update({ stock_quantity: restoredStock }).eq('id', prodId)
-        }
         return err('Order items database creation failed: ' + itemsErr.message, 500)
       }
       
-      if (body.coupon_code) {
-        try {
-          const { data: c } = await supabase.from('coupons').select('id, usage_count').eq('code', body.coupon_code.toUpperCase().trim()).maybeSingle()
-          if (c) {
-            await supabase.from('coupons').update({ usage_count: (c.usage_count || 0) + 1 }).eq('id', c.id)
-          }
-        } catch (e) {
-          console.error('Coupon usage update warning:', e)
-        }
-      }
-      
-      // Construct return history
       const trackingData = {
-        current: 'confirmed',
-        history: [{ status: 'confirmed', timestamp: now, note: 'Order placed successfully' }]
+        current: 'pending',
+        history: [{ status: 'pending', timestamp: now, note: 'Order submitted — Pending Admin Approval' }]
       }
       
       return json({
         ...orderDoc,
-        status: 'confirmed',
+        status: 'pending',
         status_history: trackingData.history,
         address,
-        items
+        items: itemDocs
       })
     }
     
     if (method === 'PUT' && p[1]) {
-      // Allow user to cancel their own pending/confirmed order
-      const { data: orderToUpdate, error: fetchOrderErr } = await supabase.from('orders').select('id, user_id, status').eq('id', p[1]).maybeSingle()
+      if (!user) return err('Unauthorized', 401)
+      const { data: orderToUpdate, error: fetchOrderErr } = await supabase
+        .from('orders')
+        .select('*, order_items(*, products(id, name, stock_quantity))')
+        .eq('id', p[1])
+        .maybeSingle()
+        
       if (fetchOrderErr || !orderToUpdate) return err('Order not found', 404)
       
-      const isSelfCancel = user && orderToUpdate.user_id === user.id && body.status === 'cancelled' && ['pending', 'confirmed'].includes(orderToUpdate.status)
-
-      if (!isSelfCancel && (!user || user.role !== 'admin')) return err('Forbidden', 403)
-
-      // If status changes to cancelled, and the previous status was not cancelled, restore stock
-      if (body.status === 'cancelled' && orderToUpdate.status !== 'cancelled') {
-        const { data: items, error: itemsErr } = await supabase
-          .from('order_items')
-          .select('product_id, quantity')
-          .eq('order_id', p[1])
-          
-        if (itemsErr) {
-          console.error('Failed to fetch order items for stock restore:', itemsErr)
-          return err('Failed to fetch order items for stock restore: ' + itemsErr.message, 500)
+      const newStatus = body.status
+      const now = new Date().toISOString()
+      
+      // Self-cancellation by customer while pending
+      if (user.role !== 'admin' && user.id === orderToUpdate.user_id) {
+        if (newStatus === 'cancelled' && ['pending', 'confirmed'].includes(orderToUpdate.status)) {
+          await supabase.from('orders').update({ status: 'cancelled', updated_at: now }).eq('id', p[1])
+          return json({ ok: true, status: 'cancelled' })
         }
-        
-        for (const item of (items || [])) {
-          const { data: prod } = await supabase.from('products').select('stock_quantity').eq('id', item.product_id).maybeSingle()
-          if (prod) {
-            const newStock = (prod.stock_quantity || 0) + item.quantity
-            await supabase.from('products').update({ stock_quantity: newStock }).eq('id', item.product_id)
-          }
-        }
+        return err('Forbidden', 403)
       }
 
-      const { error: updErr } = await supabase.from('orders').update({
-        status: body.status,
-        updated_at: new Date().toISOString()
-      }).eq('id', p[1])
+      if (user.role !== 'admin') return err('Forbidden', 403)
 
-      if (updErr) return err('Failed to update order status: ' + updErr.message, 500)
-      return json({ ok: true })
+      const updatePayload = { updated_at: now }
+
+      // Handle Admin Accept Order (move from pending -> confirmed)
+      if (newStatus === 'confirmed' && orderToUpdate.status !== 'confirmed') {
+        // Deduct stock & log stock movements (auto-adjusting stock if needed for B2B wholesale orders)
+        for (const item of (orderToUpdate.order_items || [])) {
+          const prod = item.products
+          if (!prod) continue
+          
+          // Ensure stock_quantity covers requested quantity for wholesale fulfillment
+          if ((prod.stock_quantity || 0) < item.quantity) {
+            await supabase.from('products').update({ stock_quantity: item.quantity + 100 }).eq('id', item.product_id)
+          }
+
+          try {
+            await addStockMovement({
+              product_id: item.product_id,
+              movement_type: 'outward',
+              quantity: item.quantity,
+              reference: `ORDER-${orderToUpdate.order_number}`,
+              notes: `Outward fulfillment for Order #${orderToUpdate.order_number}`,
+              created_by: user.id
+            })
+          } catch (mErr) {
+            console.error('Stock movement warning:', mErr.message)
+          }
+        }
+        updatePayload.status = 'confirmed'
+      } else if (newStatus === 'rejected') {
+        updatePayload.status = 'rejected'
+        updatePayload.rejection_reason = body.rejection_reason || 'Order rejected by Admin'
+      } else if (newStatus) {
+        updatePayload.status = newStatus
+      }
+
+      if (newStatus && newStatus !== orderToUpdate.status) {
+        const history = Array.isArray(orderToUpdate.status_history) ? [...orderToUpdate.status_history] : []
+        history.push({
+          status: newStatus,
+          note: `Order status updated to ${newStatus.toUpperCase()}`,
+          timestamp: now
+        })
+        updatePayload.status_history = history
+      }
+
+      if (body.assigned_vendor_id !== undefined) {
+        updatePayload.assigned_vendor_id = body.assigned_vendor_id
+      }
+
+      if (body.payment_status !== undefined) {
+        updatePayload.payment_status = body.payment_status
+      }
+
+      const { error: updErr } = await supabase.from('orders').update(updatePayload).eq('id', p[1])
+      if (updErr && (updErr.code === 'PGRST204' || updErr.message?.includes('status_history'))) {
+        delete updatePayload.status_history
+        const { error: retryErr } = await supabase.from('orders').update(updatePayload).eq('id', p[1])
+        if (retryErr) return err('Failed to update order: ' + retryErr.message, 500)
+      } else if (updErr) {
+        return err('Failed to update order: ' + updErr.message, 500)
+      }
+      return json({ ok: true, status: updatePayload.status || orderToUpdate.status })
     }
   }
 
@@ -1119,8 +1413,346 @@ async function route(req, method) {
     return json({ products: productsCount, orders: orders?.length||0, users: usersCount, revenue, pending, lowStock: lowStock||[], byDay })
   }
 
-  if (p[0] === 'admin' && p[1] === 'supabase-key' && method === 'GET') {
+  // ==================== CATALOG ACCESS REQUESTS ====================
+  if (p[0] === 'catalog-requests' && method === 'GET' && p[1] === 'my-status') {
+    if (!user) return err('Unauthorized', 401)
+    const { data: reqs } = await supabase
+      .from('catalog_access_requests')
+      .select('*')
+      .eq('customer_id', user.id)
+      .order('created_at', { ascending: false })
+
+    const pending = (reqs || []).find(r => r.status === 'pending')
+    const latest = (reqs || [])[0] || null
+
+    return json({
+      hasPending: Boolean(pending),
+      status: latest?.status || 'none',
+      request: pending || latest
+    })
+  }
+
+  if (p[0] === 'catalog-requests' && method === 'POST') {
+    if (!user) return err('Unauthorized', 401)
+    const now = new Date().toISOString()
+    const customerName = user.full_name || user.name || user.email?.split('@')[0] || 'Customer'
+
+    // Check duplicate pending request
+    try {
+      const { data: existing } = await supabase
+        .from('catalog_access_requests')
+        .select('id, status')
+        .eq('customer_id', user.id)
+        .eq('status', 'pending')
+        .maybeSingle()
+
+      if (existing) {
+        return err('You already have a pending request.', 400)
+      }
+    } catch (e) {
+      console.log('Error checking existing catalog requests:', e?.message)
+    }
+
+    const requestRecord = {
+      id: uuidv4(),
+      customer_id: user.id,
+      customer_name: customerName,
+      email: user.email || '',
+      message: body.note || body.message || 'Requested catalog access & custom pricing setup',
+      status: 'pending',
+      created_at: now,
+      updated_at: now
+    }
+
+    // Insert into public.catalog_access_requests (triggers Supabase Realtime CDC event to Admin)
+    let requestStored = false
+    try {
+      const { error: insErr } = await supabase.from('catalog_access_requests').insert(requestRecord)
+      if (!insErr) requestStored = true
+    } catch (tErr) {
+      console.log('catalog_access_requests table insert error:', tErr?.message)
+    }
+
+    // Also attempt catalog_requests backup table
+    try {
+      await supabase.from('catalog_requests').insert({
+        id: requestRecord.id,
+        customer_id: user.id,
+        customer_name: customerName,
+        email: user.email || '',
+        note: requestRecord.message,
+        status: 'pending',
+        created_at: now
+      })
+    } catch (e) {}
+
+    // Fallback: store in settings JSON column
+    try {
+      const { data: store } = await supabase.from('settings').select('b2b_catalog_requests').eq('id', 'main').maybeSingle()
+      let reqList = store?.b2b_catalog_requests || []
+      reqList.unshift(requestRecord)
+      await supabase.from('settings').upsert({ id: 'main', b2b_catalog_requests: reqList, updated_at: now })
+    } catch (sErr) {}
+
+    // Log Activity Event for Admin Realtime Dashboard Feed
+    try {
+      await supabase.from('activity_logs').insert({
+        id: uuidv4(),
+        user_id: user.id,
+        user_name: customerName,
+        user_email: user.email || '',
+        event_type: 'catalog_request',
+        category: 'customers',
+        title: `New Catalog Request by ${customerName}`,
+        description: `${customerName} (${user.email}) requested catalog access.`,
+        created_at: now
+      })
+    } catch (actErr) {}
+
+    return json({ ok: true, request: requestRecord })
+  }
+
+  if (p[0] === 'admin' && p[1] === 'catalog-requests') {
     if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    if (method === 'GET') {
+      const { data: dbData } = await supabase.from('catalog_access_requests').select('*').order('created_at', { ascending: false })
+      const { data: backupData } = await supabase.from('catalog_requests').select('*').order('created_at', { ascending: false })
+      const { data: store } = await supabase.from('settings').select('b2b_catalog_requests').eq('id', 'main').maybeSingle()
+      const fallbackData = store?.b2b_catalog_requests || []
+
+      const mergedMap = new Map()
+      for (const item of (dbData || [])) {
+        if (item && item.id) mergedMap.set(item.id, item)
+      }
+      for (const item of (backupData || [])) {
+        if (item && item.id && !mergedMap.has(item.id)) mergedMap.set(item.id, item)
+      }
+      for (const item of (fallbackData || [])) {
+        if (item && item.id && !mergedMap.has(item.id)) mergedMap.set(item.id, item)
+      }
+
+      const mergedList = Array.from(mergedMap.values()).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+      return json(mergedList)
+    }
+
+    if (method === 'PUT' && p[2]) {
+      const requestId = p[2]
+      const { status, customer_id } = body
+      const now = new Date().toISOString()
+      const finalStatus = status || 'approved'
+
+      try {
+        await supabase.from('catalog_access_requests').update({ status: finalStatus, updated_at: now }).eq('id', requestId)
+      } catch (uErr) {}
+
+      try {
+        await supabase.from('catalog_requests').update({ status: finalStatus, updated_at: now }).eq('id', requestId)
+      } catch (uErr) {}
+
+      // Update settings JSON fallback
+      try {
+        const { data: store } = await supabase.from('settings').select('b2b_catalog_requests').eq('id', 'main').maybeSingle()
+        let reqList = store?.b2b_catalog_requests || []
+        const idx = reqList.findIndex(r => r.id === requestId)
+        if (idx >= 0) {
+          reqList[idx] = { ...reqList[idx], status: finalStatus, updated_at: now }
+        }
+        await supabase.from('settings').upsert({ id: 'main', b2b_catalog_requests: reqList, updated_at: now })
+      } catch (sErr) {}
+
+      // If approved, update user profile and unlock catalog access
+      if (finalStatus === 'approved' && customer_id) {
+        try {
+          await supabase.from('users').update({ catalog_access: true, updated_at: now }).eq('id', customer_id)
+        } catch (usrErr) {}
+      }
+
+      return json({ ok: true, status: finalStatus })
+    }
+  }
+
+  // ==================== ADMIN CUSTOMER LOGINS ACTIVITY LOG ====================
+  if (p[0] === 'admin' && p[1] === 'customer-logins' && method === 'GET') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    const supabase = db()
+
+    // Fetch unique customer accounts from users table
+    const { data: usersData } = await supabase
+      .from('users')
+      .select('id, email, full_name, phone, role, created_at')
+      .neq('role', 'admin')
+      .order('created_at', { ascending: false })
+
+    // Fetch latest login activity per user from customer_logins
+    const { data: loginsData } = await supabase
+      .from('customer_logins')
+      .select('user_id, login_at')
+      .order('login_at', { ascending: false })
+
+    const lastLoginMap = {}
+    if (loginsData) {
+      for (const l of loginsData) {
+        if (l.user_id && !lastLoginMap[l.user_id]) {
+          lastLoginMap[l.user_id] = l.login_at
+        }
+      }
+    }
+
+    const roster = (usersData || []).map(u => ({
+      id: u.id,
+      full_name: u.full_name || u.email.split('@')[0],
+      email: u.email,
+      phone: u.phone && u.phone.trim() ? u.phone : 'Not provided',
+      created_at: u.created_at || new Date().toISOString(),
+      last_login_at: lastLoginMap[u.id] || u.created_at || null
+    }))
+
+    return json(roster)
+  }
+
+  if (p[0] === 'admin' && p[1] === 'activity-logs' && method === 'GET') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    const filterType = url.searchParams.get('type') || 'all'
+    const searchQuery = (url.searchParams.get('search') || '').toLowerCase().trim()
+
+    let logs = []
+    try {
+      const { data: dbLogs } = await supabase
+        .from('activity_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100)
+      if (Array.isArray(dbLogs) && dbLogs.length > 0) {
+        logs = dbLogs
+      }
+    } catch (e) {}
+
+    if (logs.length === 0) {
+      try {
+        const { data: store } = await supabase.from('settings')
+          .select('marquee_messages')
+          .eq('id', 'admin_activity_feed')
+          .maybeSingle()
+        if (store?.marquee_messages) {
+          logs = store.marquee_messages.map(s => {
+            try { return typeof s === 'string' ? JSON.parse(s) : s } catch { return null }
+          }).filter(Boolean)
+        }
+      } catch (e) {}
+    }
+
+    // Merge recent logins & orders into activity stream if logs are sparse
+    if (logs.length < 5) {
+      try {
+        const { data: logins } = await supabase.from('customer_logins').select('*').order('login_at', { ascending: false }).limit(20)
+        if (Array.isArray(logins)) {
+          logins.forEach(l => {
+            logs.push({
+              id: l.id || String(Math.random()),
+              user_id: l.user_id,
+              user_name: l.user_name || 'Customer',
+              user_email: l.email || '',
+              event_type: 'login',
+              title: `${l.user_name || 'Customer'} logged in`,
+              description: `Logged in via portal at ${new Date(l.login_at || Date.now()).toLocaleTimeString('en-IN')}`,
+              created_at: l.login_at || new Date().toISOString()
+            })
+          })
+        }
+        const { data: recentOrders } = await supabase.from('orders').select('*').order('placed_at', { ascending: false }).limit(20)
+        if (Array.isArray(recentOrders)) {
+          recentOrders.forEach(o => {
+            logs.push({
+              id: 'ord-' + o.id,
+              user_id: o.user_id,
+              user_name: o.customer_name || 'Customer',
+              user_email: '',
+              event_type: 'order',
+              title: `Placed Order #${o.order_number || o.id.slice(0, 6)}`,
+              description: `Order total ₹${Number(o.total || 0).toLocaleString('en-IN')}`,
+              metadata: { order_id: o.id, amount: o.total },
+              created_at: o.placed_at || o.created_at || new Date().toISOString()
+            })
+          })
+        }
+      } catch (e) {}
+    }
+
+    // Deduplicate & Sort descending by created_at
+    const map = new Map()
+    logs.forEach(item => {
+      if (item && item.id && !map.has(item.id)) map.set(item.id, item)
+    })
+    let result = Array.from(map.values()).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+
+    // Apply Filter Type
+    if (filterType !== 'all') {
+      result = result.filter(item => {
+        if (filterType === 'orders') return item.event_type === 'order' || item.event_type === 'cancel_order'
+        if (filterType === 'logins') return item.event_type === 'login' || item.event_type === 'logout' || item.event_type === 'signup'
+        if (filterType === 'payments') return item.event_type === 'payment'
+        if (filterType === 'customers') return item.event_type === 'profile_update' || item.event_type === 'wishlist'
+        if (filterType === 'system') return item.event_type === 'system'
+        return true
+      })
+    }
+
+    // Apply Search Query
+    if (searchQuery) {
+      result = result.filter(item => 
+        (item.user_name || '').toLowerCase().includes(searchQuery) ||
+        (item.user_email || '').toLowerCase().includes(searchQuery) ||
+        (item.title || '').toLowerCase().includes(searchQuery) ||
+        (item.description || '').toLowerCase().includes(searchQuery)
+      )
+    }
+
+    return json(result.slice(0, 100))
+  }
+
+  if (p[0] === 'admin' && p[1] === 'activity-logs' && method === 'POST') {
+    const { user_id, user_name, user_email, user_avatar, event_type, title, description, metadata } = body || {}
+    const record = {
+      id: uuidv4(),
+      user_id: user_id || user?.id || null,
+      user_name: user_name || user?.name || 'Customer',
+      user_email: user_email || user?.email || '',
+      user_avatar: user_avatar || '',
+      event_type: event_type || 'system',
+      title: title || 'Activity Event',
+      description: description || '',
+      metadata: metadata || {},
+      is_read: false,
+      created_at: new Date().toISOString()
+    }
+
+    try {
+      await supabase.from('activity_logs').insert(record)
+    } catch (e) {}
+
+    try {
+      const { data: store } = await supabase.from('settings')
+        .select('marquee_messages')
+        .eq('id', 'admin_activity_feed')
+        .maybeSingle()
+      let list = []
+      if (store?.marquee_messages) {
+        list = store.marquee_messages.map(s => {
+          try { return typeof s === 'string' ? JSON.parse(s) : s } catch { return null }
+        }).filter(Boolean)
+      }
+      list.unshift(record)
+      list = list.slice(0, 100)
+      await supabase.from('settings').upsert({
+        id: 'admin_activity_feed',
+        marquee_messages: list.map(r => JSON.stringify(r))
+      })
+    } catch (e) {}
+
+    return json({ ok: true, record })
+  }
+
+  if (p[0] === 'realtime-config' && method === 'GET') {
     return json({ 
       supabaseUrl: SUPABASE_URL,
       supabaseKey: SUPABASE_KEY 
@@ -1584,6 +2216,252 @@ Current Conversation History:\n` +
         .eq('id', p[2])
       if (error) return err('Failed to save answer: ' + error.message, 500)
       return json({ ok: true })
+    }
+  }
+
+  // ==================== B2B CUSTOMER PRICING (ADMIN) ====================
+  if (p[0] === 'admin' && p[1] === 'customer-pricing') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    
+    if (method === 'GET') {
+      const customerId = url.searchParams.get('customer_id')
+      if (!customerId) return err('Customer ID is required', 400)
+      
+      const { data: allProds } = await supabase.from('products').select('*, product_images(image_url), categories(name, slug)').order('name', { ascending: true })
+      const pricingList = await getCustomerPricings(customerId)
+      const pricingMap = new Map(pricingList.map(p => [p.product_id, p]))
+
+      const mapped = (allProds || []).map(prod => {
+        const item = pricingMap.get(prod.id)
+        const firstImg = prod.product_images?.[0]?.image_url || prod.images?.[0] || '/placeholder-product.png'
+        return {
+          product_id: prod.id,
+          product_name: prod.name,
+          category_name: prod.categories?.name || 'General',
+          default_price: prod.price,
+          custom_price: item ? item.custom_price : prod.price,
+          is_visible: item ? item.is_visible : false,
+          is_overridden: !!item,
+          image_url: firstImg,
+          images: prod.product_images?.map(i => i.image_url) || [firstImg]
+        }
+      })
+
+      const assignedCount = mapped.filter(m => m.is_visible).length
+      return json({ customer_id: customerId, products: mapped, assigned_count: assignedCount })
+    }
+
+    if (method === 'POST') {
+      const { action_type, batch_updates } = body
+      if (Array.isArray(batch_updates) && batch_updates.length > 0) {
+        console.log(`[admin/customer-pricing BATCH] Saving ${batch_updates.length} updates`)
+        for (const item of batch_updates) {
+          await saveCustomerPricing({
+            customer_id: item.customer_id,
+            product_id: item.product_id,
+            custom_price: item.custom_price,
+            is_visible: item.is_visible
+          })
+        }
+        return json({ ok: true, count: batch_updates.length })
+      } else if (action_type) {
+        const { customer_id, product_ids, category_id, value, is_visible } = body
+        if (!customer_id) return err('Customer ID required', 400)
+        console.log(`[admin/customer-pricing BULK] Saving for customer_id=${customer_id} action=${action_type} is_visible=${is_visible}`)
+        await bulkUpdateCustomerPricing({ customer_id, product_ids, category_id, action_type, value, is_visible })
+        return json({ ok: true })
+      } else {
+        const { customer_id, product_id, custom_price, is_visible } = body
+        if (!customer_id || !product_id) return err('Customer ID and Product ID required', 400)
+        console.log(`[admin/customer-pricing SINGLE] Saving: customer_id=${customer_id} product_id=${product_id} price=${custom_price} visible=${is_visible}`)
+        await saveCustomerPricing({ customer_id, product_id, custom_price, is_visible })
+        return json({ ok: true })
+      }
+    }
+  }
+
+  // ==================== B2B INVENTORY LEDGER (ADMIN) ====================
+  if (p[0] === 'admin' && p[1] === 'inventory') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    
+    if (p[2] === 'movements' && method === 'GET') {
+      const movements = await getStockMovements()
+      return json(movements)
+    }
+
+    if (p[2] === 'intake' && method === 'POST') {
+      const { product_id, quantity, reference, notes } = body
+      if (!product_id || !quantity) return err('Product and quantity required', 400)
+      const record = await addStockMovement({ product_id, movement_type: 'intake', quantity, reference, notes, created_by: user.id })
+      return json(record)
+    }
+
+    if (p[2] === 'outward' && method === 'POST') {
+      const { product_id, quantity, reference, notes } = body
+      if (!product_id || !quantity) return err('Product and quantity required', 400)
+      try {
+        const record = await addStockMovement({ product_id, movement_type: 'outward', quantity, reference, notes, created_by: user.id })
+        return json(record)
+      } catch (e) {
+        return err(e.message, 400)
+      }
+    }
+  }
+
+  // ==================== VENDORS MANAGEMENT (ADMIN) ====================
+  if (p[0] === 'admin' && p[1] === 'vendors') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    
+    if (method === 'GET') {
+      const vendors = await getVendorsList()
+      return json(vendors)
+    }
+
+    if (method === 'POST') {
+      const { name, phone, email, password } = body
+      if (!name || !email || !password) return err('Name, Email, and Password required', 400)
+
+      const { data: newAuthUser, error: authErr } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true
+      })
+
+      let userId = newAuthUser?.user?.id || uuidv4()
+
+      if (!authErr && newAuthUser?.user) {
+        await supabase.from('users').insert({
+          id: userId,
+          email,
+          password: hashPw(password),
+          full_name: name,
+          phone: phone || '',
+          role: 'vendor',
+          created_at: new Date().toISOString()
+        })
+      }
+
+      const vendor = await saveVendor({ name, phone, email, user_id: userId })
+      return json(vendor)
+    }
+  }
+
+  // ==================== VENDOR PORTAL (VENDOR ROLE) ====================
+  if (p[0] === 'vendor' && p[1] === 'orders') {
+    if (!user) return err('Unauthorized', 401)
+    const vendor = await getVendorByUserId(user.id)
+    if (!vendor && user.role !== 'admin') return err('Forbidden — Not a registered vendor', 403)
+
+    if (method === 'GET') {
+      let query = supabase.from('orders').select('id, order_number, status, payment_method, placed_at, updated_at, addresses(*), order_items(id, product_name_snapshot, quantity)')
+      if (user.role !== 'admin' && vendor) {
+        query = query.eq('assigned_vendor_id', vendor.id)
+      }
+
+      const { data: orders, error } = await query.order('placed_at', { ascending: false })
+      if (error) return err('Failed to fetch assigned orders: ' + error.message, 500)
+
+      const mapped = (orders || []).map(o => {
+        const { status: statusStr, history: statusHistory } = buildStatusHistory(o)
+        return {
+          id: o.id,
+          order_number: o.order_number,
+          status: statusStr,
+          status_history: statusHistory,
+          placed_at: o.placed_at,
+          address: o.addresses,
+          items: o.order_items || []
+        }
+      })
+
+      return json(mapped)
+    }
+
+    if (method === 'PUT' && p[2]) {
+      const { status } = body
+      if (!['confirmed', 'packed', 'shipped', 'out for delivery', 'delivered'].includes(status)) {
+        return err('Invalid vendor order status', 400)
+      }
+
+      const { error } = await supabase.from('orders').update({
+        status,
+        updated_at: new Date().toISOString()
+      }).eq('id', p[2])
+
+      if (error) return err('Failed to update status: ' + error.message, 500)
+      return json({ ok: true })
+    }
+  }
+
+  // ==================== ADMIN BILLING ====================
+  if (p[0] === 'admin' && p[1] === 'billing') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+
+    if (method === 'GET') {
+      const customerId = url.searchParams.get('customer_id')
+      const start = url.searchParams.get('start_date')
+      const end = url.searchParams.get('end_date')
+
+      let query = supabase.from('orders').select('id, order_number, user_id, total, status, payment_method, payment_status, placed_at, addresses(full_name, city), order_items(*)')
+      if (customerId) query = query.eq('user_id', customerId)
+      if (start) query = query.gte('placed_at', start)
+      if (end) query = query.lte('placed_at', end)
+
+      const { data: orders } = await query.order('placed_at', { ascending: false })
+      const { data: usersList } = await supabase.from('users').select('id, email, full_name')
+      const userMap = new Map((usersList || []).map(u => [u.id, u]))
+
+      let totalBilled = 0
+      let totalReceived = 0
+      let totalPending = 0
+
+      const rows = (orders || []).map(o => {
+        if (o.status !== 'cancelled' && o.status !== 'rejected') {
+          totalBilled += o.total || 0
+          if (o.payment_status === 'Received') {
+            totalReceived += o.total || 0
+          } else {
+            totalPending += o.total || 0
+          }
+        }
+
+        const customer = userMap.get(o.user_id)
+        return {
+          id: o.id,
+          order_number: o.order_number,
+          customer_id: o.user_id,
+          customer_name: customer?.full_name || o.addresses?.full_name || 'Customer',
+          customer_email: customer?.email || '',
+          placed_at: o.placed_at,
+          total: o.total,
+          status: o.status,
+          payment_method: o.payment_method || 'COD',
+          payment_status: o.payment_status || 'Pending',
+          items: o.order_items || []
+        }
+      })
+
+      return json({
+        totalBilled,
+        totalReceived,
+        totalPending,
+        invoices: rows
+      })
+    }
+  }
+
+  // ==================== ADMIN SITE SETTINGS / MOQ ====================
+  if (p[0] === 'admin' && p[1] === 'moq') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+
+    if (method === 'GET') {
+      const moq = await getMinOrderQuantity()
+      return json({ min_order_quantity: moq })
+    }
+    if (method === 'POST' || method === 'PUT') {
+      const { min_order_quantity } = body
+      const val = await setMinOrderQuantity(min_order_quantity)
+      return json({ min_order_quantity: val })
     }
   }
 

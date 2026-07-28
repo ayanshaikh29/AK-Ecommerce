@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useAppContext } from '@/components/providers/AppProvider'
 import { useRouter } from 'next/navigation'
+import { GlobalErrorBoundary } from '@/components/ui/GlobalErrorBoundary'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
@@ -38,7 +39,7 @@ async function fetchWishlistGlobal() {
     const res = await fetch('/api/wishlist', { headers: { Authorization: `Bearer ${token}` } })
     if (res.ok) {
       const data = await res.json()
-      _wishlistCache = new Set(data.map(i => i.product?.id).filter(Boolean))
+      _wishlistCache = new Set((Array.isArray(data) ? data : []).map(i => i.product?.id).filter(Boolean))
     } else {
       _wishlistCache = new Set()
     }
@@ -49,6 +50,7 @@ async function fetchWishlistGlobal() {
 }
 
 export function ProductCard({ product }) {
+  if (!product) return null
   const { addToCart, user } = useAppContext()
   const router = useRouter()
   const [hover, setHover] = useState(false)
@@ -57,23 +59,23 @@ export function ProductCard({ product }) {
 
   // Subscribe to global wishlist cache
   useEffect(() => {
-    if (!user) { setWishlisted(false); return }
+    if (!user || !product?.id) { setWishlisted(false); return }
 
     const listener = (cache) => {
-      if (cache) setWishlisted(cache.has(product.id))
+      if (cache && product?.id) setWishlisted(cache.has(product.id))
     }
     _wishlistListeners.push(listener)
 
     if (_wishlistCache === null) {
       fetchWishlistGlobal()
-    } else {
+    } else if (product?.id) {
       setWishlisted(_wishlistCache.has(product.id))
     }
 
     return () => {
       _wishlistListeners = _wishlistListeners.filter(fn => fn !== listener)
     }
-  }, [user, product.id])
+  }, [user, product?.id])
 
   const add = (e) => {
     e.preventDefault()
@@ -125,6 +127,12 @@ export function ProductCard({ product }) {
   }
 
   const [compareChecked, setCompareChecked] = useState(false)
+  const defaultImg = product.images?.[hover && product.images[1] ? 1 : 0] || '/placeholder.png'
+  const [imgSrc, setImgSrc] = useState(defaultImg)
+
+  useEffect(() => {
+    setImgSrc(defaultImg)
+  }, [defaultImg])
 
   const checkCompareState = useCallback(() => {
     try {
@@ -139,9 +147,7 @@ export function ProductCard({ product }) {
   useEffect(() => {
     checkCompareState()
     window.addEventListener('compare-updated', checkCompareState)
-    return () => {
-      window.removeEventListener('compare-updated', checkCompareState)
-    }
+    return () => window.removeEventListener('compare-updated', checkCompareState)
   }, [checkCompareState])
 
   const toggleCompare = (e) => {
@@ -154,10 +160,10 @@ export function ProductCard({ product }) {
       
       if (exists) {
         list = list.filter(item => item.id !== product.id)
-        toast.success('Removed from comparison')
+        toast.info('Removed from comparison')
       } else {
         if (list.length >= 4) {
-          toast.error('You can compare a maximum of 4 products')
+          toast.error('You can compare maximum 4 products at a time')
           return
         }
         list.push({
@@ -166,9 +172,8 @@ export function ProductCard({ product }) {
           slug: product.slug,
           price: product.price,
           mrp: product.mrp,
-          image: product.images?.[0] || '/placeholder.png',
-          brand: product.brand || 'AK Quality',
-          rating_avg: product.rating_avg || 4.5,
+          images: product.images,
+          rating_avg: product.rating_avg,
           stock_quantity: product.stock_quantity,
           sku: product.sku
         })
@@ -189,9 +194,10 @@ export function ProductCard({ product }) {
     >
       <Link href={'/product/' + product.slug} className="block relative aspect-[4/3] w-full overflow-hidden bg-secondary/30 shrink-0 border-b border-border/40">
         <Image
-          src={product.images?.[hover && product.images[1] ? 1 : 0] || '/placeholder.png'}
-          alt={product.name}
+          src={imgSrc}
+          alt={product.name || 'Product'}
           fill
+          onError={() => setImgSrc('/placeholder.png')}
           className="object-cover group-hover:scale-105 transition-transform duration-500"
           loading="lazy"
           sizes="(max-width: 768px) 50vw, 25vw"
@@ -269,5 +275,13 @@ export function ProductCard({ product }) {
         </div>
       </div>
     </div>
+  )
+}
+
+export function ProductCardSafe(props) {
+  return (
+    <GlobalErrorBoundary compact fallbackTitle="Product Card Unavailable">
+      <ProductCard {...props} />
+    </GlobalErrorBoundary>
   )
 }

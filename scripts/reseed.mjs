@@ -31,9 +31,9 @@ async function run() {
   // 1. Seed categories (without 'description' or 'icon' columns as they don't exist in DB)
   console.log('Clearing and seeding categories...')
   const catsToInsert = [
-    { id: uuidv4(), name: 'Office Stationery', slug: 'office-stationery', image_url: 'https://images.unsplash.com/photo-1568871391150-ff6047a2ff10?w=800&q=80', created_at: now },
-    { id: uuidv4(), name: 'Housekeeping', slug: 'housekeeping', image_url: 'https://images.unsplash.com/photo-1585421514738-01798e348b17?w=800&q=80', created_at: now },
-    { id: uuidv4(), name: 'UPS Solutions', slug: 'ups-solutions', image_url: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&q=80', created_at: now },
+    { id: uuidv4(), name: 'Office Stationery', slug: 'office-stationery', image_url: '/category-stationery.jpg', created_at: now },
+    { id: uuidv4(), name: 'Housekeeping', slug: 'housekeeping', image_url: '/category-housekeeping.jpg', created_at: now },
+    { id: uuidv4(), name: 'UPS Solutions', slug: 'ups-solutions', image_url: '/category-ups.jpg', created_at: now },
   ]
   
   await supabase.from('categories').delete().neq('id', '00000000-0000-0000-0000-000000000000')

@@ -4,15 +4,16 @@ import { ProductsView } from '@/components/views/ProductsView'
 export default async function ProductsPage({ searchParams }) {
   const supabase = getSupabase()
   
-  // Need to await searchParams in Next.js 15
-  const categorySlug = searchParams?.category || ''
-  const search = searchParams?.search || ''
-  const featured = searchParams?.featured === '1'
-  const sort = searchParams?.sort || 'newest'
-  const minPrice = searchParams?.minPrice ? parseInt(searchParams.minPrice) : 0
-  const maxPrice = searchParams?.maxPrice ? parseInt(searchParams.maxPrice) : 15000
-  const brand = searchParams?.brand || ''
-  const rating = searchParams?.rating ? parseFloat(searchParams.rating) : 0
+  // Await searchParams in Next.js 15
+  const sp = (await searchParams) || {}
+  const categorySlug = sp.category || ''
+  const search = sp.search || ''
+  const featured = sp.featured === '1'
+  const sort = sp.sort || 'newest'
+  const minPrice = sp.minPrice ? parseInt(sp.minPrice) : 0
+  const maxPrice = sp.maxPrice ? parseInt(sp.maxPrice) : 15000
+  const brand = sp.brand || ''
+  const rating = sp.rating ? parseFloat(sp.rating) : 0
 
   // Parallel fetching
   const [{ data: cats }, { data: allProducts }] = await Promise.all([
@@ -40,10 +41,20 @@ export default async function ProductsPage({ searchParams }) {
     })()
   ])
 
-  const mappedProducts = (allProducts || []).map(p => ({
-    ...p,
-    images: p.product_images?.map(img => img.image_url) || []
-  }))
+  const mappedProducts = (allProducts || []).map(p => {
+    const rawImgs = (p.product_images || []).map(img => img.image_url).filter(Boolean)
+    let finalImgs = []
+    if (rawImgs.length > 0) finalImgs = rawImgs
+    else if (p.images && p.images.length > 0) finalImgs = p.images.filter(Boolean)
+    else if (p.image_url) finalImgs = [p.image_url]
+    else finalImgs = ['/placeholder.png']
+
+    return {
+      ...p,
+      images: finalImgs,
+      image_url: finalImgs[0]
+    }
+  })
 
   return (
     <ProductsView 

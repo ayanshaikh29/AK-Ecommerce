@@ -1,7 +1,12 @@
+'use client'
 import React from 'react'
 import { Megaphone } from 'lucide-react'
+import { usePathname } from 'next/navigation'
 
 export function TopMarquee({ settings }) {
+  const pathname = usePathname()
+  if (pathname?.startsWith('/admin') || pathname?.startsWith('/vendor')) return null
+
   const msgs = settings?.marquee_messages?.length ? settings.marquee_messages : ['🚚 Free Pan-India Delivery on Bulk Orders']
   return (
     <div className="maroon-gradient text-primary-foreground overflow-hidden py-2.5 text-xs relative">
