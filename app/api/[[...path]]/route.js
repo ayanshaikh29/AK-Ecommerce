@@ -105,15 +105,15 @@ function buildStatusHistory(o) {
   const pAt = o.placed_at || o.created_at
   const uAt = o.updated_at || pAt
   
-  const steps = ['pending', 'confirmed', 'packed', 'shipped', 'out for delivery', 'delivered']
-  const currentKey = statusStr.toLowerCase().trim()
+  const steps = ['pending', 'confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered']
+  const currentKey = statusStr.toLowerCase().trim().replace(/ /g, '_')
   const activeIdx = steps.indexOf(currentKey)
   
-  if (currentKey === 'rejected') {
+  if (currentKey === 'rejected' || currentKey === 'vendor_rejected') {
     const reasonNote = o.rejection_reason ? `Reason: ${o.rejection_reason}` : 'Order was rejected'
     statusHistory = [
       { status: 'pending', timestamp: pAt, note: 'Order placed — Pending Admin Approval' },
-      { status: 'rejected', timestamp: uAt, note: `Order Rejected by Admin. ${reasonNote}` }
+      { status: currentKey, timestamp: uAt, note: `Order Rejected. ${reasonNote}` }
     ]
   } else if (activeIdx === -1) {
     statusHistory = [{ status: statusStr, timestamp: uAt, note: `Order status is ${statusStr}` }]
@@ -140,9 +140,11 @@ function buildStatusHistory(o) {
       
       if (stepKey === 'pending') note = 'Order submitted — Pending Admin Approval'
       if (stepKey === 'confirmed') note = 'Order accepted by Admin'
+      if (stepKey === 'vendor_assigned') note = 'Vendor logistics partner assigned'
+      if (stepKey === 'vendor_accepted') note = 'Vendor accepted the assignment'
       if (stepKey === 'packed') note = 'Order packed at warehouse'
       if (stepKey === 'shipped') note = 'Package dispatched to courier partner'
-      if (stepKey === 'out for delivery') note = 'Courier partner is delivering today'
+      if (stepKey === 'out_for_delivery') note = 'Courier partner is delivering today'
       if (stepKey === 'delivered') note = 'Delivered to recipient location'
       
       statusHistory.push({ status: stepKey, timestamp: ts, note })
@@ -268,7 +270,7 @@ async function route(req, method) {
   if (p[0] === 'realtime-config' && method === 'GET') {
     return json({ 
       supabaseUrl: SUPABASE_URL,
-      supabaseKey: SUPABASE_KEY 
+      supabaseKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_KEY || SUPABASE_KEY 
     })
   }
 
@@ -364,38 +366,7 @@ async function route(req, method) {
         return err('Signup failed: ' + uErr.message, 500)
       }
       
-      // If referred, create coupons!
-      if (referredById) {
-        // Referrer coupon
-        const referrerCouponCode = 'REF-' + Math.random().toString(36).substring(2, 7).toUpperCase() + '-' + Math.random().toString(36).substring(2, 5).toUpperCase()
-        await supabase.from('coupons').insert({
-          id: uuidv4(),
-          code: referrerCouponCode,
-          discount_type: 'fixed',
-          discount_value: 50,
-          min_order_value: 0,
-          usage_limit: 1,
-          usage_count: 0,
-          expiry_date: null,
-          is_active: true,
-          created_at: nowStr
-        })
 
-        // New user coupon
-        const refereeCouponCode = 'WELCOME-' + Math.random().toString(36).substring(2, 7).toUpperCase() + '-' + Math.random().toString(36).substring(2, 5).toUpperCase()
-        await supabase.from('coupons').insert({
-          id: uuidv4(),
-          code: refereeCouponCode,
-          discount_type: 'fixed',
-          discount_value: 50,
-          min_order_value: 0,
-          usage_limit: 1,
-          usage_count: 0,
-          expiry_date: null,
-          is_active: true,
-          created_at: nowStr
-        })
-      }
       
       // 3. Insert into public.profiles table to satisfy foreign key constraints
       const { error: pErr } = await supabase.from('profiles').insert({
@@ -416,18 +387,21 @@ async function route(req, method) {
       const { data: u } = await supabase.from('users').select('*').eq('email', email).eq('password', hashPw(password)).maybeSingle()
       if (!u) return err('Invalid credentials', 401)
 
-      // Self-heal: ensure profiles row exists
-      const { data: prof } = await supabase.from('profiles').select('id').eq('id', u.id).maybeSingle()
-      if (!prof) {
-        const { error: pErr } = await supabase.from('profiles').insert({
-          id: u.id,
-          full_name: u.full_name,
-          phone: u.phone || '',
-          role: u.role,
-          created_at: u.created_at || new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        if (pErr) console.error('Self-heal profile creation failed:', pErr.message)
+      // Self-heal: ensure profiles row exists (only for roles allowed by profiles_role_check)
+      const PROFILE_ALLOWED_ROLES = ['customer', 'admin']
+      if (PROFILE_ALLOWED_ROLES.includes(u.role)) {
+        const { data: prof } = await supabase.from('profiles').select('id').eq('id', u.id).maybeSingle()
+        if (!prof) {
+          const { error: pErr } = await supabase.from('profiles').insert({
+            id: u.id,
+            full_name: u.full_name,
+            phone: u.phone || '',
+            role: u.role,
+            created_at: u.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          if (pErr) console.error('Self-heal profile creation failed:', pErr.message)
+        }
       }
 
       // Record Customer Login Activity for Admin Realtime Notifications
@@ -1141,7 +1115,10 @@ async function route(req, method) {
         .eq('id', p[1])
         .maybeSingle()
         
-      if (fetchOrderErr || !orderToUpdate) return err('Order not found', 404)
+      if (fetchOrderErr || !orderToUpdate) {
+        console.error('[Order Fetch Error]:', fetchOrderErr || 'Order not found')
+        return err('Order not found: ' + (fetchOrderErr?.message || 'ID does not exist'), 404)
+      }
       
       const newStatus = body.status
       const now = new Date().toISOString()
@@ -1159,8 +1136,14 @@ async function route(req, method) {
 
       const updatePayload = { updated_at: now }
 
+      // Normalize status to match PostgreSQL CHECK constraint
+      let targetStatus = newStatus
+      if (targetStatus === 'approved') targetStatus = 'confirmed'
+      if (targetStatus === 'out for delivery') targetStatus = 'out_for_delivery'
+      if (targetStatus === 'accepted') targetStatus = 'vendor_accepted'
+
       // Handle Admin Accept Order (move from pending -> confirmed)
-      if (newStatus === 'confirmed' && orderToUpdate.status !== 'confirmed') {
+      if (targetStatus === 'confirmed' && orderToUpdate.status !== 'confirmed') {
         // Deduct stock & log stock movements (auto-adjusting stock if needed for B2B wholesale orders)
         for (const item of (orderToUpdate.order_items || [])) {
           const prod = item.products
@@ -1185,25 +1168,51 @@ async function route(req, method) {
           }
         }
         updatePayload.status = 'confirmed'
-      } else if (newStatus === 'rejected') {
+      } else if (targetStatus === 'rejected') {
         updatePayload.status = 'rejected'
         updatePayload.rejection_reason = body.rejection_reason || 'Order rejected by Admin'
-      } else if (newStatus) {
-        updatePayload.status = newStatus
+      } else if (targetStatus) {
+        updatePayload.status = targetStatus
       }
 
-      if (newStatus && newStatus !== orderToUpdate.status) {
+      if (targetStatus && targetStatus !== orderToUpdate.status) {
         const history = Array.isArray(orderToUpdate.status_history) ? [...orderToUpdate.status_history] : []
         history.push({
-          status: newStatus,
-          note: `Order status updated to ${newStatus.toUpperCase()}`,
+          status: targetStatus,
+          note: `Order status updated to ${targetStatus.toUpperCase()}`,
           timestamp: now
         })
         updatePayload.status_history = history
       }
 
       if (body.assigned_vendor_id !== undefined) {
-        updatePayload.assigned_vendor_id = body.assigned_vendor_id
+        const vendorId = body.assigned_vendor_id
+        updatePayload.assigned_vendor_id = vendorId
+
+        // Look up vendor details to denormalize name/email into the order
+        const { data: vendorRecord, error: vendorFetchErr } = await supabase
+          .from('vendors')
+          .select('id, name, email, user_id')
+          .eq('id', vendorId)
+          .maybeSingle()
+
+        if (vendorFetchErr) {
+          console.error('[Vendor Lookup Error]:', vendorFetchErr)
+          return err('Failed to look up vendor: ' + vendorFetchErr.message, 500)
+        }
+
+        if (!vendorRecord) {
+          return err('Vendor not found for ID: ' + vendorId + '. Check that the vendor exists in the vendors table.', 404)
+        }
+
+        updatePayload.vendor_name = vendorRecord.name || ''
+        updatePayload.vendor_email = vendorRecord.email || ''
+        updatePayload.assigned_at = now
+        updatePayload.assigned_by = user.full_name || user.email || 'Admin'
+      }
+
+      if (body.internal_notes !== undefined) {
+        updatePayload.internal_notes = body.internal_notes
       }
 
       if (body.payment_status !== undefined) {
@@ -1211,103 +1220,108 @@ async function route(req, method) {
       }
 
       const { error: updErr } = await supabase.from('orders').update(updatePayload).eq('id', p[1])
-      if (updErr && (updErr.code === 'PGRST204' || updErr.message?.includes('status_history'))) {
-        delete updatePayload.status_history
-        const { error: retryErr } = await supabase.from('orders').update(updatePayload).eq('id', p[1])
-        if (retryErr) return err('Failed to update order: ' + retryErr.message, 500)
-      } else if (updErr) {
-        return err('Failed to update order: ' + updErr.message, 500)
+      if (updErr) {
+        const rawMsg = updErr.message || ''
+        const rawCode = updErr.code || ''
+        console.error('[Order Update DB Error]:', { code: rawCode, message: rawMsg, hint: updErr.hint, details: updErr.details })
+
+        const isColumnErr = rawCode === '42703' || rawMsg.includes('does not exist') || rawMsg.includes('column')
+        const isConstraintErr = rawCode === '23514' || rawMsg.includes('violates check constraint') || rawMsg.includes('violates foreign key constraint')
+        const isHistoryErr = rawCode === 'PGRST204' || rawMsg.includes('status_history')
+
+        if (isColumnErr || isHistoryErr) {
+          const safePayload = { ...updatePayload }
+          delete safePayload.status_history
+          delete safePayload.vendor_name
+          delete safePayload.vendor_email
+          delete safePayload.assigned_at
+          delete safePayload.assigned_by
+          const { error: retryErr } = await supabase.from('orders').update(safePayload).eq('id', p[1])
+          if (retryErr) {
+            console.error('[Order Update Retry Fail]:', retryErr)
+            return err('Database error after retry: ' + retryErr.message + ' (Code: ' + retryErr.code + ')', 500)
+          }
+        } else if (isConstraintErr) {
+          return err('Constraint violation: ' + rawMsg + ' (Code: ' + rawCode + '). The status value "' + (targetStatus || 'none') + '" may not be allowed. Run the vendor assignment fix migration.', 500)
+        } else {
+          return err('Database error: ' + rawMsg + ' (Code: ' + rawCode + ')', 500)
+        }
       }
+
+      // Post-assignment: create notifications for vendor, customer, admin
+      if (body.assigned_vendor_id !== undefined) {
+        const vendorId = body.assigned_vendor_id
+        const ordNum = orderToUpdate.order_number || p[1]
+        try {
+          const { data: vendorRecord } = await supabase.from('vendors').select('user_id, name, email').eq('id', vendorId).maybeSingle()
+          const notifications = []
+          const notifNow = new Date().toISOString()
+
+          // Admin notification
+          notifications.push({
+            id: uuidv4(), user_id: user.id,
+            title: 'Vendor Assigned Successfully',
+            message: `Vendor "${vendorRecord?.name || 'Partner'}" assigned to Order #${ordNum}.`,
+            type: 'vendor_assigned', is_read: false, created_at: notifNow
+          })
+
+          // Vendor notification
+          if (vendorRecord?.user_id) {
+            notifications.push({
+              id: uuidv4(), user_id: vendorRecord.user_id,
+              title: 'New Dispatch Assignment',
+              message: `You have been assigned Order #${ordNum}. Open your Vendor Portal to accept.`,
+              type: 'vendor_assigned', is_read: false, created_at: notifNow,
+              link: '/vendor'
+            })
+          }
+
+          // Customer notification
+          if (orderToUpdate.user_id) {
+            notifications.push({
+              id: uuidv4(), user_id: orderToUpdate.user_id,
+              title: 'Logistics Partner Assigned',
+              message: `Your order #${ordNum} has been assigned to a logistics partner and will be dispatched soon.`,
+              type: 'order_update', is_read: false, created_at: notifNow,
+              link: '/orders/' + p[1]
+            })
+          }
+
+          if (notifications.length > 0) {
+            const { error: notifInsErr } = await supabase.from('notifications').insert(notifications)
+            if (notifInsErr) {
+              // Notifications table may not exist yet — log warning
+              console.warn('[Notification Insert Error]:', notifInsErr.message, notifInsErr.code)
+            }
+          }
+
+          // Also log to activity_logs for admin feed
+          try {
+            await supabase.from('activity_logs').insert({
+              id: uuidv4(),
+              user_id: user.id,
+              user_name: user.full_name || 'Admin',
+              user_email: user.email,
+              event_type: 'order',
+              title: 'Vendor Assigned',
+              description: `Vendor "${vendorRecord?.name || 'Partner'}" assigned to Order #${ordNum}`,
+              metadata: { order_id: p[1], vendor_id: vendorId, order_number: ordNum },
+              created_at: notifNow
+            })
+          } catch (actErr) {
+            console.warn('[Activity Log Insert Error]:', actErr.message)
+          }
+        } catch (notifErr) {
+          console.warn('[Vendor Assignment Notification Fail]:', notifErr.message)
+        }
+      }
+
       return json({ ok: true, status: updatePayload.status || orderToUpdate.status })
     }
   }
 
   // ==================== COUPONS ====================
-  if (p[0] === 'coupons') {
-    const supabase = db()
 
-    // POST /api/coupons/validate — validate and calculate discount
-    if (method === 'POST' && p[1] === 'validate') {
-      const { code, order_total } = body
-      if (!code) return err('Coupon code required')
-      const { data: coupon, error } = await supabase
-        .from('coupons')
-        .select('*')
-        .eq('code', code.toUpperCase().trim())
-        .maybeSingle()
-      if (error) return err('Database error', 500)
-      if (!coupon) return err('Invalid coupon code', 404)
-      if (!coupon.is_active) return err('This coupon is no longer active', 400)
-      if (coupon.expiry_date && new Date(coupon.expiry_date) < new Date()) return err('This coupon has expired', 400)
-      if (coupon.min_order_value && order_total < coupon.min_order_value) {
-        return err(`Minimum order value of ₹${coupon.min_order_value} required for this coupon`, 400)
-      }
-      if (coupon.usage_limit !== null && coupon.usage_count >= coupon.usage_limit) {
-        return err('This coupon has reached its usage limit', 400)
-      }
-
-      let discount_amount = 0
-      if (coupon.discount_type === 'percent') {
-        discount_amount = Math.round((order_total * coupon.discount_value) / 100)
-      } else {
-        discount_amount = coupon.discount_value
-      }
-      discount_amount = Math.min(discount_amount, order_total)
-
-      return json({ valid: true, coupon, discount_amount })
-    }
-
-    // GET /api/coupons — list coupons (admin only)
-    if (method === 'GET') {
-      if (!user || user.role !== 'admin') return err('Forbidden', 403)
-      const { data, error } = await supabase.from('coupons').select('*').order('created_at', { ascending: false })
-      if (error) return err('Failed to fetch coupons: ' + error.message, 500)
-      return json(data || [])
-    }
-
-    // POST /api/coupons — create coupon (admin only)
-    if (method === 'POST' && !p[1]) {
-      if (!user || user.role !== 'admin') return err('Forbidden', 403)
-      const { code, discount_type, discount_value, min_order_value, usage_limit, expiry_date, is_active } = body
-      if (!code || !discount_type || !discount_value) return err('Missing required fields')
-      const { error } = await supabase.from('coupons').insert({
-        id: uuidv4(),
-        code: code.toUpperCase().trim(),
-        discount_type,
-        discount_value: +discount_value,
-        min_order_value: +(min_order_value || 0),
-        usage_limit: usage_limit ? +usage_limit : null,
-        usage_count: 0,
-        expiry_date: expiry_date || null,
-        is_active: is_active !== false,
-        created_at: new Date().toISOString()
-      })
-      if (error) return err('Failed to create coupon: ' + error.message, 500)
-      return json({ ok: true })
-    }
-
-    // PUT /api/coupons/[id] — update coupon (admin only)
-    if (method === 'PUT' && p[1]) {
-      if (!user || user.role !== 'admin') return err('Forbidden', 403)
-      const upd = {}
-      if (body.is_active !== undefined) upd.is_active = body.is_active
-      if (body.discount_value !== undefined) upd.discount_value = +body.discount_value
-      if (body.min_order_value !== undefined) upd.min_order_value = +body.min_order_value
-      if (body.expiry_date !== undefined) upd.expiry_date = body.expiry_date
-      if (body.usage_limit !== undefined) upd.usage_limit = body.usage_limit ? +body.usage_limit : null
-      if (body.code !== undefined) upd.code = body.code.toUpperCase().trim()
-      const { error } = await supabase.from('coupons').update(upd).eq('id', p[1])
-      if (error) return err('Failed to update coupon: ' + error.message, 500)
-      return json({ ok: true })
-    }
-
-    // DELETE /api/coupons/[id] — delete coupon (admin only)
-    if (method === 'DELETE' && p[1]) {
-      if (!user || user.role !== 'admin') return err('Forbidden', 403)
-      await supabase.from('coupons').delete().eq('id', p[1])
-      return json({ ok: true })
-    }
-  }
 
   // ==================== RETURN REQUESTS ====================
   if (p[0] === 'return-requests') {
@@ -2308,6 +2322,133 @@ Current Conversation History:\n` +
     }
   }
 
+  // ==================== ADMIN CREATE ACCOUNT (CUSTOMERS & VENDORS) ====================
+  if (p[0] === 'admin' && p[1] === 'create-account' && method === 'POST') {
+    if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
+
+    const { full_name, email, phone, password, role = 'customer' } = body
+    if (!full_name || !email || !password) return err('Full Name, Email, and Password required', 400)
+
+    const cleanEmail = email.trim().toLowerCase()
+
+    // Check if user already exists
+    const { data: existingUser } = await supabase.from('users').select('id').eq('email', cleanEmail).maybeSingle()
+    if (existingUser) return err('An account with this email address already exists', 409)
+
+    // 1. Create in Supabase Auth
+    const { data: newAuthUser, error: authErr } = await supabase.auth.admin.createUser({
+      email: cleanEmail,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name, role }
+    })
+
+    let newUuid = newAuthUser?.user?.id
+    if (authErr || !newUuid) {
+      console.error('[Admin Create Account Auth Fail]:', authErr)
+      return err('Failed to create authentication user: ' + (authErr?.message || 'Unknown error'), 500)
+    }
+
+    // 2. Insert into custom public.users table
+    const nowStr = new Date().toISOString()
+    const refCode = 'AKREF' + Math.random().toString(36).substring(2, 8).toUpperCase()
+
+    const baseUserPayload = {
+      id: newUuid,
+      email: cleanEmail,
+      password: hashPw(password),
+      full_name: full_name.trim(),
+      phone: phone ? phone.trim() : '',
+      role: role === 'vendor' ? 'vendor' : 'customer',
+      created_at: nowStr
+    }
+
+    let { error: dbErr } = await supabase.from('users').insert({
+      ...baseUserPayload,
+      status: 'active',
+      catalog_access: true,
+      referral_code: refCode
+    })
+
+    if (dbErr && (dbErr.message?.includes('catalog_access') || dbErr.message?.includes('status') || dbErr.message?.includes('referral_code') || dbErr.message?.includes('schema cache'))) {
+      console.warn('[Admin Create Account]: Retrying insert with core user fields')
+      const resFallback = await supabase.from('users').insert(baseUserPayload)
+      dbErr = resFallback.error
+    }
+
+    if (dbErr) {
+      console.error('[Admin Create Account DB Fail]:', dbErr)
+      await supabase.auth.admin.deleteUser(newUuid)
+      return err('Failed to create user database record: ' + dbErr.message, 500)
+    }
+
+    // 3. If role === 'vendor', also ensure entry in vendors table
+    if (role === 'vendor') {
+      await saveVendor({ name: full_name, phone: phone || '', email: cleanEmail, user_id: newUuid })
+    }
+
+    return json({
+      success: true,
+      user: {
+        id: newUuid,
+        full_name,
+        email: cleanEmail,
+        phone: phone || '',
+        role: role === 'vendor' ? 'vendor' : 'customer',
+        temporary_password: password
+      }
+    })
+  }
+
+  // ==================== ADMIN RESET & SHARE USER CREDENTIALS ====================
+  if (p[0] === 'admin' && p[1] === 'reset-password' && method === 'POST') {
+    if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
+
+    const { user_id, email, new_password } = body
+    if ((!user_id && !email) || !new_password) return err('User ID/Email and New Password required', 400)
+
+    let targetUserId = user_id
+    let targetEmail = email
+    let targetUserObj = null
+
+    if (!targetUserId && email) {
+      const { data: u } = await supabase.from('users').select('id, email, full_name, phone, role').eq('email', email.trim().toLowerCase()).maybeSingle()
+      if (!u) return err('User account not found', 404)
+      targetUserId = u.id
+      targetEmail = u.email
+      targetUserObj = u
+    } else if (targetUserId) {
+      const { data: u } = await supabase.from('users').select('id, email, full_name, phone, role').eq('id', targetUserId).maybeSingle()
+      if (u) {
+        targetEmail = u.email
+        targetUserObj = u
+      }
+    }
+
+    // 1. Update password in Supabase Auth
+    const { error: authErr } = await supabase.auth.admin.updateUserById(targetUserId, { password: new_password })
+    if (authErr) {
+      console.error('[Admin Reset Password Auth Fail]:', authErr)
+      return err('Failed to update authentication password: ' + authErr.message, 500)
+    }
+
+    // 2. Update password in custom public.users table
+    await supabase.from('users').update({ password: hashPw(new_password) }).eq('id', targetUserId)
+
+    return json({
+      success: true,
+      message: 'Password reset successfully',
+      user: {
+        id: targetUserId,
+        full_name: targetUserObj?.full_name || 'User',
+        email: targetEmail,
+        phone: targetUserObj?.phone || '',
+        role: targetUserObj?.role || 'customer',
+        temporary_password: new_password
+      }
+    })
+  }
+
   // ==================== VENDORS MANAGEMENT (ADMIN) ====================
   if (p[0] === 'admin' && p[1] === 'vendors') {
     if (!user || user.role !== 'admin') return err('Forbidden', 403)
@@ -2349,24 +2490,39 @@ Current Conversation History:\n` +
   // ==================== VENDOR PORTAL (VENDOR ROLE) ====================
   if (p[0] === 'vendor' && p[1] === 'orders') {
     if (!user) return err('Unauthorized', 401)
-    const vendor = await getVendorByUserId(user.id)
-    if (!vendor && user.role !== 'admin') return err('Forbidden — Not a registered vendor', 403)
+    const vendor = await getVendorByUserId(user.id, user.email)
+    
+    if (!vendor && user.role !== 'admin') {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`[Vendor Audit] User ${user.email} (ID: ${user.id}) has role=vendor but no record in vendors table yet. Returning empty orders list.`)
+      }
+      return json([])
+    }
 
     if (method === 'GET') {
-      let query = supabase.from('orders').select('id, order_number, status, payment_method, placed_at, updated_at, addresses(*), order_items(id, product_name_snapshot, quantity)')
+      // NOTE: vendor_accepted & vendor_accepted_at columns do NOT exist in DB.
+      // Derive vendor_accepted from status field instead.
+      let query = supabase.from('orders').select('id, order_number, status, total, payment_method, placed_at, updated_at, addresses(*), order_items(id, product_name_snapshot, quantity)')
       if (user.role !== 'admin' && vendor) {
         query = query.eq('assigned_vendor_id', vendor.id)
       }
 
       const { data: orders, error } = await query.order('placed_at', { ascending: false })
-      if (error) return err('Failed to fetch assigned orders: ' + error.message, 500)
+      if (error) {
+        console.error('[Vendor Orders Query Fail]:', { table: 'orders', code: error.code, message: error.message })
+        return err('Failed to fetch assigned orders: ' + error.message, 500)
+      }
 
+      const VENDOR_ACCEPTED_STATUSES = ['vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered']
       const mapped = (orders || []).map(o => {
         const { status: statusStr, history: statusHistory } = buildStatusHistory(o)
         return {
           id: o.id,
           order_number: o.order_number,
           status: statusStr,
+          vendor_accepted: VENDOR_ACCEPTED_STATUSES.includes(o.status),
+          vendor_accepted_at: null,
+          total_amount: o.total || 0,
           status_history: statusHistory,
           placed_at: o.placed_at,
           address: o.addresses,
@@ -2378,19 +2534,58 @@ Current Conversation History:\n` +
     }
 
     if (method === 'PUT' && p[2]) {
-      const { status } = body
-      if (!['confirmed', 'packed', 'shipped', 'out for delivery', 'delivered'].includes(status)) {
-        return err('Invalid vendor order status', 400)
+      const { status, action } = body
+      const nowStr = new Date().toISOString()
+      // NOTE: vendor_accepted / vendor_accepted_at do NOT exist as DB columns — status field tracks this
+      const updateData = { updated_at: nowStr }
+
+      if (action === 'accept' || status === 'accepted' || status === 'vendor_accepted') {
+        updateData.status = 'vendor_accepted'
+      } else if (status) {
+        let normStatus = status
+        if (normStatus === 'accepted') normStatus = 'vendor_accepted'
+        if (normStatus === 'out for delivery') normStatus = 'out_for_delivery'
+
+        if (!['confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'vendor_rejected', 'rejected'].includes(normStatus)) {
+          return err('Invalid vendor order status', 400)
+        }
+        updateData.status = normStatus
       }
 
-      const { error } = await supabase.from('orders').update({
-        status,
-        updated_at: new Date().toISOString()
-      }).eq('id', p[2])
-
-      if (error) return err('Failed to update status: ' + error.message, 500)
-      return json({ ok: true })
+      const { error } = await supabase.from('orders').update(updateData).eq('id', p[2])
+      if (error) {
+        console.error('[Vendor Order Update Fail]:', { table: 'orders', code: error.code, message: error.message })
+        return err('Failed to update status: ' + error.message, 500)
+      }
+      return json({ ok: true, ...updateData })
     }
+  }
+
+  // ==================== VENDOR INVENTORY (READ-ONLY) ====================
+  if (p[0] === 'vendor' && p[1] === 'inventory' && method === 'GET') {
+    if (!user || (user.role !== 'vendor' && user.role !== 'admin')) {
+      return err('Forbidden — Vendor access required', 403)
+    }
+
+    // NOTE: subcategory column does NOT exist in products table. Use category_id for display.
+    const { data: products, error } = await supabase
+      .from('products')
+      .select('id, name, sku, category_id, stock_quantity, is_active')
+      .order('name', { ascending: true })
+
+    if (error) {
+      console.error('[Vendor Inventory Fetch Fail]:', { table: 'products', code: error.code, message: error.message })
+      return json([])
+    }
+
+    const mappedProducts = (products || []).map(p => ({
+      ...p,
+      category: 'General',
+      status: p.is_active ? 'Active' : 'Inactive',
+      min_stock_alert: 5
+    }))
+
+    return json(mappedProducts)
   }
 
   // ==================== ADMIN BILLING ====================
@@ -2531,7 +2726,7 @@ Current Conversation History:\n` +
     
     const customerMap = {}
     for (const u of (usersList || [])) {
-      if (u.role === 'admin') continue
+      if (u.role !== 'customer') continue
       customerMap[u.id] = {
         id: u.id,
         email: u.email,

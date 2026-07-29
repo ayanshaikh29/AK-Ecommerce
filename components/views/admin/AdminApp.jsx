@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import Image from 'next/image'
 import { useRouter, useParams } from 'next/navigation'
 import { toast } from 'sonner'
@@ -30,6 +30,7 @@ import { AdminToastFeed } from './AdminToastFeed'
 import { AdminLiveActivityFeed } from './AdminLiveActivityFeed'
 import { GlobalErrorBoundary } from '@/components/ui/GlobalErrorBoundary'
 import { useLiveCustomers } from '@/lib/hooks/useAdminRealtime'
+import { useRealtimeOrders, useRealtimeDashboard } from '@/lib/hooks/useRealtime'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
@@ -388,7 +389,7 @@ export function AdminApp() {
               <nav className="space-y-1">
                 {[
                   ['dashboard','Dashboard',LayoutDashboard],
-                  ['customer-pricing','Customer Pricing',ShieldCheck],
+                  ['customer-pricing','Customers',ShieldCheck],
                   ['orders','Orders',ClipboardList],
                   ['inventory','Stock Inventory',Package],
                   ['vendors','Vendor Partners',Truck],
@@ -440,7 +441,7 @@ export function AdminApp() {
             <nav className="space-y-1">
               {[
                 ['dashboard','Dashboard',LayoutDashboard],
-                ['customer-pricing','Customer Pricing',ShieldCheck],
+                ['customer-pricing','Customers',ShieldCheck],
                 ['orders','Orders',ClipboardList],
                 ['inventory','Stock Inventory',Package],
                 ['vendors','Vendor Partners',Truck],
@@ -717,7 +718,7 @@ function AdminDashboard({ refreshTrigger }) {
 
   const onlineCount = liveCustomersState?.onlineCount || 1
 
-  useEffect(() => { 
+  const fetchStats = useCallback(() => {
     fetch('/api/stats', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -727,7 +728,13 @@ function AdminDashboard({ refreshTrigger }) {
           setS(null)
         }
       })
-      .catch(() => setS(null)) 
+      .catch(() => setS(null))
+  }, [])
+
+  useRealtimeDashboard(fetchStats)
+
+  useEffect(() => { 
+    fetchStats()
   }, [refreshTrigger])
 
   if (!s || typeof s !== 'object') return <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">{Array(5).fill(0).map((_,i) => <div key={i} className="h-24 skeleton"/>)}</div>
@@ -1092,6 +1099,7 @@ function AdminOrders({ refreshTrigger, router }) {
   const [orders, setOrders] = useState(null); const [status, setStatus] = useState('all'); const [selected, setSelected] = useState(null)
   const load = () => fetch('/api/orders' + (status !== 'all' ? `?status=${status}` : ''), { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(r=>r.json()).then(setOrders)
   useEffect(() => { load() }, [status, refreshTrigger])
+  useRealtimeOrders(load)
   const updateStatus = async (id, newStatus) => { 
     try { 
       const res = await fetch('/api/orders/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify({ status: newStatus }) })
@@ -1105,7 +1113,7 @@ function AdminOrders({ refreshTrigger, router }) {
       }
     } catch (e) { toast.error(e.message) } 
   }
-  const statuses = ['pending', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled']
+  const statuses = ['pending', 'confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled']
   return (
     <div className="slide-up">
       <div className="flex justify-between items-center mb-6"><h1 className="font-display text-4xl font-extrabold">Orders</h1>
@@ -1119,7 +1127,7 @@ function AdminOrders({ refreshTrigger, router }) {
             <td className="p-3">{new Date(o.placed_at).toLocaleDateString('en-IN')}</td>
             <td className="p-3">{o.address?.full_name}</td>
             <td className="p-3 font-bold">{formatINR(o.total)}</td>
-            <td className="p-3"><Badge className="capitalize rounded-full">{o.status}</Badge></td>
+            <td className="p-3"><Badge className="capitalize rounded-full">{(o.status || '').replace(/_/g, ' ')}</Badge></td>
             <td className="p-3"><Button size="sm" variant="outline" onClick={() => router.push(`/admin/orders/${o.id}`)} className="rounded-full">View</Button></td>
           </tr>
         ))}</tbody>
@@ -1899,6 +1907,10 @@ function AdminOrderDetail({ orderId }) {
   const router = useRouter()
   const [order, setOrder] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [vendors, setVendors] = useState([])
+  const [selectedVendor, setSelectedVendor] = useState('')
+  const [internalNote, setInternalNote] = useState('')
+  const [assigningLoading, setAssigningLoading] = useState(false)
 
   const load = async () => {
     try {
@@ -1908,6 +1920,8 @@ function AdminOrderDetail({ orderId }) {
       if (res.ok) {
         const d = await res.json()
         setOrder(d)
+        if (d.assigned_vendor_id) setSelectedVendor(d.assigned_vendor_id)
+        if (d.internal_notes) setInternalNote(d.internal_notes)
       } else {
         toast.error('Failed to load order details')
       }
@@ -1920,9 +1934,13 @@ function AdminOrderDetail({ orderId }) {
 
   useEffect(() => {
     load()
+    fetch('/api/admin/vendors', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      .then(r => r.json())
+      .then(d => setVendors(Array.isArray(d) ? d : []))
+      .catch(() => {})
   }, [orderId])
 
-  const updateStatus = async (newStatus) => {
+  const updateStatus = async (newStatus, extraPayload = {}) => {
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
         method: 'PUT',
@@ -1930,7 +1948,7 @@ function AdminOrderDetail({ orderId }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({ status: newStatus })
+        body: JSON.stringify({ status: newStatus, ...extraPayload })
       })
       const data = await res.json().catch(() => ({}))
       if (res.ok) {
@@ -1941,6 +1959,56 @@ function AdminOrderDetail({ orderId }) {
       }
     } catch (e) {
       toast.error(e.message)
+    }
+  }
+
+  const handleAssignVendor = async () => {
+    if (!selectedVendor) { toast.error('Please select a vendor'); return }
+    setAssigningLoading(true)
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ assigned_vendor_id: selectedVendor, status: 'vendor_assigned' })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success('Vendor Assigned! Vendor notified in Realtime.')
+        load()
+      } else {
+        // Show the real error from the server, not a generic message
+        const errMsg = data?.error || data?.message || `Server error (${res.status})`
+        toast.error(`Vendor assignment failed: ${errMsg}`)
+        console.error('[Vendor Assignment Fail]:', data)
+      }
+    } catch (e) {
+      toast.error(`Network error: ${e.message}`)
+      console.error('[Vendor Assignment Exception]:', e)
+    } finally {
+      setAssigningLoading(false)
+    }
+  }
+
+  const handleSaveNotes = async () => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ internal_notes: internalNote })
+      })
+      if (res.ok) {
+        toast.success('Internal notes saved')
+      } else {
+        toast.error('Failed to save notes')
+      }
+    } catch {
+      toast.error('Failed to save notes')
     }
   }
 
@@ -1975,7 +2043,7 @@ function AdminOrderDetail({ orderId }) {
     )
   }
 
-  const statuses = ['pending', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled']
+  const statuses = ['pending', 'confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'rejected', 'cancelled', 'vendor_rejected']
   
   const totalVal = order.total || 0
   const subtotalVal = order.subtotal || totalVal
@@ -2031,8 +2099,8 @@ function AdminOrderDetail({ orderId }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 no-print">
-        <div className="lg:col-span-2 space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(340px,1fr)] gap-5 no-print">
+        <div className="min-w-0 space-y-5">
           <Card className="radius-xl shadow-soft border">
             <CardContent className="p-6">
               <h3 className="font-display font-extrabold text-lg mb-4">Order Items</h3>
@@ -2054,32 +2122,82 @@ function AdminOrderDetail({ orderId }) {
           <Card className="radius-xl shadow-soft border">
             <CardContent className="p-6">
               <h3 className="font-display font-extrabold text-lg mb-6">Tracking Timeline</h3>
-              <div className="relative pl-6 border-l-2 border-primary/20 space-y-6">
+              <div className="relative pl-6 border-l-2 border-primary/20 space-y-5">
                 {order.status_history?.map((step, idx) => (
                   <div key={idx} className="relative">
                     <div className="absolute -left-[31px] top-1 w-4 h-4 rounded-full bg-primary border-4 border-background" />
                     <div>
-                      <p className="text-sm font-bold text-foreground capitalize">{step.status}</p>
+                      <p className="text-sm font-bold text-foreground capitalize">{(step.status || '').replace(/_/g, ' ')}</p>
                       <p className="text-xs text-muted-foreground mt-0.5">{step.note}</p>
                       <span className="text-[10px] text-muted-foreground/60 block mt-1">{new Date(step.timestamp).toLocaleString('en-IN')}</span>
                     </div>
                   </div>
                 ))}
+                {(!order.status_history || order.status_history.length === 0) && (
+                  <p className="text-xs text-muted-foreground py-4">No status history available yet.</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="radius-xl shadow-soft border">
+            <CardContent className="p-6">
+              <h3 className="font-display font-extrabold text-lg flex items-center gap-2 mb-4">
+                <Activity className="w-5 h-5 text-accent" /> Order Activity
+              </h3>
+              <div className="text-xs space-y-3">
+                {order.status_history?.slice(-5).reverse().map((step, idx) => (
+                  <div key={idx} className="flex items-start gap-3 pb-3 border-b border-border/40 last:border-0">
+                    <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center shrink-0 mt-0.5">
+                      <div className="w-2 h-2 rounded-full bg-accent" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-foreground capitalize">{(step.status || '').replace(/_/g, ' ')}</p>
+                      <p className="text-muted-foreground mt-0.5">{step.note}</p>
+                      <span className="text-[10px] text-muted-foreground/50 block mt-0.5">{new Date(step.timestamp).toLocaleString('en-IN')}</span>
+                    </div>
+                  </div>
+                ))}
+                {(!order.status_history || order.status_history.length === 0) && (
+                  <p className="text-muted-foreground">No activity recorded yet.</p>
+                )}
               </div>
             </CardContent>
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-5 lg:sticky lg:top-24 lg:self-start">
+          {/* 1. Admin Review: Approve / Reject Controls */}
           <Card className="radius-xl shadow-soft border">
             <CardContent className="p-6 space-y-4">
-              <h3 className="font-display font-extrabold text-lg">Order Status</h3>
+              <h3 className="font-display font-extrabold text-lg flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-accent" /> Admin Decision & Approval
+              </h3>
               <div className="bg-secondary/30 p-3 rounded-xl border flex items-center justify-between">
-                <span className="text-xs text-muted-foreground uppercase font-bold">Current</span>
-                <Badge className="capitalize rounded-full font-bold">{order.status}</Badge>
+                <span className="text-xs text-muted-foreground uppercase font-bold">Current Status</span>
+                <Badge className="capitalize rounded-full font-bold">{(order.status || '').replace(/_/g, ' ')}</Badge>
               </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <Button
+                  onClick={() => updateStatus('confirmed')}
+                  disabled={order.status === 'confirmed'}
+                  className="rounded-xl h-10 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4" /> Approve Order
+                </Button>
+                <Button
+                  onClick={() => updateStatus('rejected')}
+                  disabled={order.status === 'rejected'}
+                  variant="outline"
+                  className="rounded-xl h-10 font-extrabold text-xs border-destructive/40 text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1.5"
+                >
+                  <XCircle className="w-4 h-4" /> Reject Order
+                </Button>
+              </div>
+
               <div>
-                <Label className="text-xs text-muted-foreground mb-2 block font-semibold">Change Status To</Label>
+                <Label className="text-xs text-muted-foreground mb-2 block font-semibold">Manual Status Override</Label>
                 <div className="grid grid-cols-2 gap-2">
                   {statuses.map(st => (
                     <Button
@@ -2089,11 +2207,66 @@ function AdminOrderDetail({ orderId }) {
                       size="sm"
                       className="capitalize rounded-full text-xs"
                     >
-                      {st}
+                      {st.replace(/_/g, ' ')}
                     </Button>
                   ))}
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* 2. Assign Vendor Logistics Partner Card */}
+          <Card className="radius-xl shadow-soft border">
+            <CardContent className="p-6 space-y-4">
+              <h3 className="font-display font-extrabold text-lg flex items-center gap-2">
+                <Truck className="w-5 h-5 text-accent" /> Assign Logistics Vendor
+              </h3>
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-xs font-bold text-foreground mb-1.5 block">Select Partner Unit</Label>
+                  <select
+                    value={selectedVendor}
+                    onChange={e => setSelectedVendor(e.target.value)}
+                    className="w-full h-11 rounded-xl bg-background border font-semibold text-xs px-3"
+                  >
+                    <option value="">Select Vendor Partner...</option>
+                    {vendors.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.name} ({v.email})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <Button
+                  onClick={handleAssignVendor}
+                  disabled={assigningLoading || !selectedVendor}
+                  className="w-full rounded-xl h-10 font-bold text-xs gold-gradient text-primary shadow-soft flex items-center justify-center gap-2"
+                >
+                  <Truck className="w-4 h-4" /> {assigningLoading ? 'Assigning...' : 'Confirm & Assign Vendor'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 3. Internal Admin Notes Card */}
+          <Card className="radius-xl shadow-soft border">
+            <CardContent className="p-6 space-y-3">
+              <h3 className="font-display font-extrabold text-lg">Internal Admin Notes</h3>
+              <Textarea
+                value={internalNote}
+                onChange={e => setInternalNote(e.target.value)}
+                placeholder="Add confidential fulfillment or verification notes..."
+                className="rounded-xl text-xs"
+                rows={3}
+              />
+              <Button
+                onClick={handleSaveNotes}
+                variant="outline"
+                size="sm"
+                className="w-full rounded-xl text-xs font-bold"
+              >
+                Save Internal Notes
+              </Button>
             </CardContent>
           </Card>
 

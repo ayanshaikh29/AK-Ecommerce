@@ -38,7 +38,7 @@ export function ReferView() {
   const getRefLink = () => {
     if (!stats?.referral_code) return ''
     if (typeof window === 'undefined') return ''
-    return `${window.location.origin}/signup?ref=${stats.referral_code}`
+    return `${window.location.origin}/login?ref=${stats.referral_code}`
   }
 
   const copyLink = () => {
@@ -73,17 +73,14 @@ export function ReferView() {
             <div className="absolute -right-10 -top-10 w-40 h-40 bg-accent/20 rounded-full blur-2xl" />
             <Gift className="w-16 h-16 text-accent mx-auto mb-4 animate-bounce" />
             <h1 className="font-display text-3xl font-extrabold mb-2">AK Refer & Earn</h1>
-            <p className="text-primary-foreground/80 max-w-md mx-auto text-sm">Introduce businesses and friends to AK Enterprises. Both of you receive a ₹50 discount coupon on signup!</p>
+            <p className="text-primary-foreground/80 max-w-md mx-auto text-sm">Introduce businesses and friends to AK Enterprises. Both of you receive a ₹50 discount coupon on your order!</p>
           </div>
           <CardContent className="p-8 text-center space-y-6">
             <h2 className="font-bold text-lg">Sign in to claim your referral code</h2>
             <p className="text-sm text-muted-foreground max-w-sm mx-auto">Generate your unique referral link to start sharing via WhatsApp, Email, or Slack and track your rewards in real-time.</p>
             <div className="flex justify-center gap-4">
               <Link href="/login">
-                <Button className="rounded-full px-8 h-11">Sign In</Button>
-              </Link>
-              <Link href="/signup">
-                <Button variant="outline" className="rounded-full px-8 h-11 border-primary text-primary hover:bg-primary/5">Create Account</Button>
+                <Button className="rounded-full px-8 h-11 font-semibold">Sign In to Continue</Button>
               </Link>
             </div>
           </CardContent>

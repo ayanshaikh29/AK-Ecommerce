@@ -79,33 +79,66 @@ export function RealtimeProvider({ children }) {
             playAlertSound()
             const orderNum = newRow.order_number || newRow.id?.slice(0, 8)
             toast.success(`New Order Received! #${orderNum}`, {
-              description: `Total: ₹${Number(newRow.total || 0).toLocaleString('en-IN')}`
+              description: `Total: ₹${Number(newRow.total || newRow.total_amount || 0).toLocaleString('en-IN')}`
             })
             setNotifications(prev => [{
               id: payload.commit_timestamp || Date.now().toString(),
               type: 'order_new',
               title: `New Order #${orderNum}`,
-              message: `Total ₹${newRow.total}`,
+              message: `Total ₹${newRow.total || newRow.total_amount}`,
               time: new Date().toISOString(),
               data: newRow
             }, ...prev])
             setUnreadCount(c => c + 1)
           }
         } else if (eventType === 'UPDATE') {
+          const orderNum = newRow.order_number || newRow.id?.slice(0, 8)
+
+          // 1. Notification for Admin
+          if (user?.role === 'admin') {
+            playAlertSound()
+            if (newRow.status === 'vendor_accepted' && oldRow?.status !== 'vendor_accepted') {
+              toast.success(`🟢 Vendor Accepted Order #${orderNum}`, {
+                description: `Logistics partner accepted dispatch assignment.`
+              })
+            } else if (newRow.assigned_vendor_id && !oldRow?.assigned_vendor_id) {
+              toast.info(`🚚 Assigned Order #${orderNum} to Vendor`)
+            } else {
+              toast.info(`Order #${orderNum} status: ${newRow.status?.toUpperCase()}`)
+            }
+          }
+
+          // 2. Notification for Customer
           if (user?.role === 'customer' && newRow.user_id === user.id) {
             playAlertSound()
-            toast.info(`Order Status Updated: ${newRow.status?.toUpperCase()}`, {
-              description: `Order #${newRow.order_number || newRow.id?.slice(0, 8)} is now ${newRow.status}`
-            })
+            if (newRow.status === 'vendor_accepted' && oldRow?.status !== 'vendor_accepted') {
+              toast.success(`🚚 Vendor Accepted Delivery for Order #${orderNum}`, {
+                description: `Your order is being prepared for dispatch.`
+              })
+            } else {
+              toast.info(`Order #${orderNum} status: ${newRow.status?.toUpperCase()}`, {
+                description: `Your package status is now ${newRow.status}`
+              })
+            }
             setNotifications(prev => [{
               id: Date.now().toString(),
               type: 'order_status',
               title: `Order Status: ${newRow.status}`,
-              message: `Order #${newRow.order_number || newRow.id?.slice(0, 8)} updated`,
+              message: `Order #${orderNum} updated`,
               time: new Date().toISOString(),
               data: newRow
             }, ...prev])
             setUnreadCount(c => c + 1)
+          }
+
+          // 3. Notification for Vendor — new assignment arrives in realtime
+          if (user?.role === 'vendor') {
+            playAlertSound()
+            if (newRow.status === 'vendor_assigned' && oldRow?.status !== 'vendor_assigned') {
+              toast.success(`📦 New Delivery Assigned! Order #${orderNum}`, {
+                description: `Please review and accept dispatch request.`
+              })
+            }
           }
         }
       }
@@ -163,7 +196,36 @@ export function RealtimeProvider({ children }) {
       }
     )
 
-    // 5. Catalog Requests table realtime changes
+    // 5. Notifications table realtime changes
+    channel.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'notifications' },
+      (payload) => {
+        const { eventType, new: newRow } = payload
+        if (eventType === 'INSERT' && newRow) {
+          if (user && newRow.user_id === user.id) {
+            playAlertSound()
+            setNotifications(prev => [{
+              id: newRow.id || Date.now().toString(),
+              type: newRow.type || 'notification',
+              title: newRow.title || 'Notification',
+              message: newRow.message || '',
+              time: newRow.created_at || new Date().toISOString(),
+              data: newRow,
+              is_read: newRow.is_read || false
+            }, ...prev])
+            setUnreadCount(c => c + 1)
+            if (newRow.type === 'vendor_assigned') {
+              toast.info(newRow.title, { description: newRow.message })
+            } else if (newRow.type === 'order_update') {
+              toast.success(newRow.title, { description: newRow.message })
+            }
+          }
+        }
+      }
+    )
+
+    // 6. Catalog Requests table realtime changes
     channel.on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'catalog_requests' },

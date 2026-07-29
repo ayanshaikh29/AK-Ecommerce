@@ -2,12 +2,14 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
-import { DollarSign, Eye, EyeOff, Search, Layers, RefreshCw, CheckCircle2, ShieldCheck, TrendingUp, Save, X, AlertCircle } from 'lucide-react'
+import { DollarSign, Eye, EyeOff, Search, Layers, RefreshCw, CheckCircle2, ShieldCheck, TrendingUp, Save, X, AlertCircle, UserPlus, Copy, MessageCircle, Check, Lock, Key } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 import { useRealtimePricing, useRealtimeCustomers } from '@/lib/hooks/useRealtime'
 import { useAdminCatalogRequests } from '@/lib/hooks/useCatalogAccessRealtime'
@@ -55,6 +57,54 @@ export function CustomerPricingManager() {
   const [bulkValue, setBulkValue] = useState('10')
   const [bulkVisibility, setBulkVisibility] = useState(true)
   const [bulkLoading, setBulkLoading] = useState(false)
+
+  // Admin Account Creation State (Customer & Vendor)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [newCustForm, setNewCustForm] = useState({ role: 'customer', full_name: '', email: '', phone: '', password: '' })
+  const [creatingCust, setCreatingCust] = useState(false)
+  const [createdCredentials, setCreatedCredentials] = useState(null)
+  const [copied, setCopied] = useState(false)
+
+  const handleCreateCustomer = async (e) => {
+    e.preventDefault()
+    if (!newCustForm.full_name || !newCustForm.email || !newCustForm.password) {
+      toast.error('Full Name, Email, and Password are required')
+      return
+    }
+    setCreatingCust(true)
+    try {
+      const res = await fetch('/api/admin/create-account', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          role: newCustForm.role || 'customer',
+          full_name: newCustForm.full_name,
+          email: newCustForm.email,
+          phone: newCustForm.phone,
+          password: newCustForm.password
+        })
+      })
+
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.error || errData.message || 'Failed to create account')
+      }
+
+      const data = await res.json()
+      toast.success(`${newCustForm.role === 'vendor' ? 'Vendor' : 'Customer'} account created successfully!`)
+      setCreateDialogOpen(false)
+      setCreatedCredentials({ ...data.user, role: newCustForm.role })
+      setNewCustForm({ role: 'customer', full_name: '', email: '', phone: '', password: '' })
+      fetchCustomerList()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setCreatingCust(false)
+    }
+  }
 
   const fetchCustomerList = useCallback(() => {
     fetch('/api/admin/customers', {
@@ -382,38 +432,44 @@ export function CustomerPricingManager() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b pb-4">
         <div>
           <h1 className="font-display text-2xl md:text-3xl font-extrabold flex items-center gap-2">
-            <ShieldCheck className="w-7 h-7 text-accent" /> Customer Catalog Access & Pricing
+            <ShieldCheck className="w-7 h-7 text-accent" /> Customers & B2B Rate Cards
           </h1>
           <p className="text-muted-foreground text-xs mt-1">
             Assign custom wholesale rate cards and control catalog product visibility per B2B client.
           </p>
         </div>
 
-        {/* Tab switcher */}
-        <div className="flex items-center gap-2 bg-secondary p-1 rounded-2xl border shrink-0">
-          <button
-            onClick={() => setActiveTab('pricing')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeTab === 'pricing' ? 'gold-gradient text-primary shadow-soft' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            Catalog & Pricing
-          </button>
-          <button
-            onClick={() => setActiveTab('requests')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition relative ${activeTab === 'requests' ? 'gold-gradient text-primary shadow-soft' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            Access Requests
-            {pendingReqsCount > 0 && (
-              <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-amber-500 text-white font-extrabold rounded-full animate-pulse">
-                {pendingReqsCount}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab('logins')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeTab === 'logins' ? 'gold-gradient text-primary shadow-soft' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            Client Logins ({customerLogins.length})
-          </button>
+        {/* Tab switcher & Create Customer Button */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => setCreateDialogOpen(true)} className="rounded-2xl h-10 px-4 font-bold text-xs gold-gradient text-primary shadow-soft flex items-center gap-2">
+            <UserPlus className="w-4 h-4" /> Create New Customer
+          </Button>
+
+          <div className="flex items-center gap-2 bg-secondary p-1 rounded-2xl border shrink-0">
+            <button
+              onClick={() => setActiveTab('pricing')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeTab === 'pricing' ? 'gold-gradient text-primary shadow-soft' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Catalog & Pricing
+            </button>
+            <button
+              onClick={() => setActiveTab('requests')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition relative ${activeTab === 'requests' ? 'gold-gradient text-primary shadow-soft' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Access Requests
+              {pendingReqsCount > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-amber-500 text-white font-extrabold rounded-full animate-pulse">
+                  {pendingReqsCount}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('logins')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeTab === 'logins' ? 'gold-gradient text-primary shadow-soft' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Client Logins ({customerLogins.length})
+            </button>
+          </div>
         </div>
       </div>
 
@@ -481,6 +537,7 @@ export function CustomerPricingManager() {
                     <th className="py-3 px-4">Phone</th>
                     <th className="py-3 px-4">Registered Date</th>
                     <th className="py-3 px-4">Last Login</th>
+                    <th className="py-3 px-4 text-right">Credentials</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -491,9 +548,37 @@ export function CustomerPricingManager() {
                       <tr key={c.id} className="hover:bg-secondary/30 transition">
                         <td className="py-3 px-4 font-semibold text-foreground">{c.full_name}</td>
                         <td className="py-3 px-4 font-mono">{c.email}</td>
-                        <td className="py-3 px-4 text-muted-foreground">{c.phone}</td>
+                        <td className="py-3 px-4 text-muted-foreground">{c.phone || '—'}</td>
                         <td className="py-3 px-4 text-muted-foreground">{regDate}</td>
                         <td className="py-3 px-4 font-mono text-[11px] text-accent font-bold">{lastLogin}</td>
+                        <td className="py-3 px-4 text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              const autoPw = 'AK' + Math.random().toString(36).substring(2, 8).toUpperCase() + '!'
+                              try {
+                                const res = await fetch('/api/admin/reset-password', {
+                                  method: 'POST',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                                  },
+                                  body: JSON.stringify({ user_id: c.id, email: c.email, new_password: autoPw })
+                                })
+                                if (!res.ok) throw new Error('Failed to generate credentials')
+                                const data = await res.json()
+                                setCreatedCredentials({ ...data.user, role: 'customer' })
+                                toast.success('Credentials ready to copy/share!')
+                              } catch (err) {
+                                toast.error(err.message)
+                              }
+                            }}
+                            className="rounded-xl h-7 text-[11px] font-bold text-accent border-accent/30 hover:bg-accent/10 px-2.5"
+                          >
+                            <Key className="w-3 h-3 mr-1" /> Copy / Share Credentials
+                          </Button>
+                        </td>
                       </tr>
                     )
                   })}
@@ -740,6 +825,167 @@ export function CustomerPricingManager() {
         </div>,
         document.body
       )}
+      {/* Create Account Dialog (Customer or Vendor) */}
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogContent className="max-w-md radius-xl p-6 text-left">
+          <DialogHeader>
+            <DialogTitle className="font-display font-bold text-xl flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-accent" /> {newCustForm.role === 'vendor' ? 'Create New Vendor Account' : 'Create New Customer Account'}
+            </DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreateCustomer} className="space-y-4 text-left mt-2">
+            <div>
+              <label className="text-xs font-bold block mb-1">Account Type *</label>
+              <select
+                value={newCustForm.role}
+                onChange={e => setNewCustForm({ ...newCustForm, role: e.target.value })}
+                className="w-full h-10 rounded-xl text-xs bg-card border border-border px-3 font-bold text-foreground focus:ring-accent"
+              >
+                <option value="customer">👥 B2B Customer Account</option>
+                <option value="vendor">🚚 Vendor / Logistics Partner Account</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-bold block mb-1">{newCustForm.role === 'vendor' ? 'Vendor / Company Name *' : 'Full Name / Business Name *'}</label>
+              <Input
+                required
+                placeholder={newCustForm.role === 'vendor' ? 'e.g. Swift Delivery or BlueDart' : 'e.g. Ayan Shaikh or Acme Corp'}
+                value={newCustForm.full_name}
+                onChange={e => setNewCustForm({ ...newCustForm, full_name: e.target.value })}
+                className="h-10 rounded-xl text-xs"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold block mb-1">Email Address *</label>
+              <Input
+                required
+                type="email"
+                placeholder={newCustForm.role === 'vendor' ? 'vendor@logistics.com' : 'client@company.com'}
+                value={newCustForm.email}
+                onChange={e => setNewCustForm({ ...newCustForm, email: e.target.value })}
+                className="h-10 rounded-xl text-xs"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold block mb-1">Phone Number (WhatsApp)</label>
+              <Input
+                placeholder="+91 9876543210"
+                value={newCustForm.phone}
+                onChange={e => setNewCustForm({ ...newCustForm, phone: e.target.value })}
+                className="h-10 rounded-xl text-xs"
+              />
+            </div>
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-xs font-bold block">Access Password *</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const prefix = newCustForm.role === 'vendor' ? 'VND' : 'AK'
+                    const autoPw = prefix + Math.random().toString(36).substring(2, 8).toUpperCase() + '!'
+                    setNewCustForm({ ...newCustForm, password: autoPw })
+                  }}
+                  className="text-[11px] text-accent font-bold hover:underline"
+                >
+                  ⚡ Auto-Generate
+                </button>
+              </div>
+              <PasswordInput
+                required
+                placeholder="••••••••"
+                value={newCustForm.password}
+                onChange={e => setNewCustForm({ ...newCustForm, password: e.target.value })}
+                className="h-10 rounded-xl text-xs"
+              />
+            </div>
+
+            <Button type="submit" disabled={creatingCust} className="w-full h-11 rounded-full gold-gradient text-primary font-bold text-xs mt-4">
+              {creatingCust ? 'Creating Account...' : (newCustForm.role === 'vendor' ? 'Create Vendor Account' : 'Create Customer Account')}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Created Credentials Modal with Copy & WhatsApp Share */}
+      <Dialog open={!!createdCredentials} onOpenChange={() => setCreatedCredentials(null)}>
+        <DialogContent className="max-w-md radius-xl p-6 text-left">
+          <DialogHeader>
+            <DialogTitle className="font-display font-bold text-xl flex items-center gap-2 text-emerald-600">
+              <CheckCircle2 className="w-6 h-6 text-emerald-600" /> {createdCredentials?.role === 'vendor' ? 'Vendor Account Created' : 'Customer Account Created'}
+            </DialogTitle>
+          </DialogHeader>
+
+          {createdCredentials && (
+            <div className="space-y-4 mt-2">
+              <p className="text-xs text-muted-foreground">
+                Share these login credentials directly with <strong>{createdCredentials.full_name}</strong> via WhatsApp or Email:
+              </p>
+
+              <div className="bg-secondary/40 p-4 rounded-2xl border space-y-2 text-xs">
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Account Name</span>
+                  <span className="font-bold text-foreground">{createdCredentials.full_name}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Login URL</span>
+                  <span className="font-mono font-bold text-accent">
+                    {typeof window !== 'undefined' ? `${window.location.origin}${createdCredentials.role === 'vendor' ? '/vendor/login' : '/login'}` : (createdCredentials.role === 'vendor' ? '/vendor/login' : '/login')}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Email Address</span>
+                  <span className="font-mono font-bold text-foreground">{createdCredentials.email}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Temporary Password</span>
+                  <span className="font-mono font-bold text-accent">{createdCredentials.temporary_password}</span>
+                </div>
+                {createdCredentials.phone && (
+                  <div>
+                    <span className="text-muted-foreground block text-[10px] uppercase font-bold">Phone Number</span>
+                    <span className="font-mono font-bold text-foreground">{createdCredentials.phone}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <Button
+                  onClick={() => {
+                    const loginUrl = `${window.location.origin}${createdCredentials.role === 'vendor' ? '/vendor/login' : '/login'}`
+                    const text = createdCredentials.role === 'vendor'
+                      ? `Hello ${createdCredentials.full_name},\n\nYour AK Enterprises Vendor Fulfillment Account has been created!\n\nVendor Portal Login: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\n\nPlease sign in to access assigned delivery orders and stock inventory.`
+                      : `Hello ${createdCredentials.full_name},\n\nYour AK Enterprises Customer Account has been created!\n\nWebsite Login: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\n\nPlease sign in to view your assigned product catalog and custom pricing.`
+                    navigator.clipboard.writeText(text)
+                    setCopied(true)
+                    toast.success('Credentials copied to clipboard!')
+                    setTimeout(() => setCopied(false), 2000)
+                  }}
+                  variant="outline"
+                  className="rounded-xl h-11 text-xs font-bold"
+                >
+                  {copied ? <Check className="w-4 h-4 mr-1.5 text-emerald-600" /> : <Copy className="w-4 h-4 mr-1.5" />}
+                  {copied ? 'Copied!' : 'Copy Credentials'}
+                </Button>
+
+                <Button
+                  onClick={() => {
+                    const loginUrl = `${window.location.origin}${createdCredentials.role === 'vendor' ? '/vendor/login' : '/login'}`
+                    const text = createdCredentials.role === 'vendor'
+                      ? `Hello ${createdCredentials.full_name},\n\nYour AK Enterprises Vendor Fulfillment Account has been created!\n\nVendor Portal Login: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\n\nPlease sign in to access assigned delivery orders and stock inventory.`
+                      : `Hello ${createdCredentials.full_name},\n\nYour AK Enterprises Customer Account has been created!\n\nWebsite Login: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\n\nPlease sign in to view your assigned product catalog and custom pricing.`
+                    const phone = createdCredentials.phone?.replace(/[^0-9]/g, '')
+                    const url = phone ? `https://wa.me/91${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`
+                    window.open(url, '_blank')
+                  }}
+                  className="rounded-xl h-11 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white"
+                >
+                  <MessageCircle className="w-4 h-4 mr-1.5" /> Share WhatsApp
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

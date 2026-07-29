@@ -37,6 +37,10 @@ export default async function ProductsPage({ searchParams }) {
       else if (sort === 'popular') query = query.order('rating_count', { ascending: false })
       else query = query.order('created_at', { ascending: false })
       
+      // Public showcase: only fetch 10 products for guest visitors
+      // Logged-in customers load their full catalog client-side via API
+      query = query.limit(10)
+      
       return query
     })()
   ])

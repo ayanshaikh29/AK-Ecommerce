@@ -19,10 +19,14 @@ import { useAppContext } from '@/components/providers/AppProvider'
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
 const TIMELINE_STEPS = [
-  { key: 'confirmed', label: 'Order Confirmed', description: 'Your B2B order has been verified and confirmed.' },
-  { key: 'shipped', label: 'Shipped', description: 'Your dispatch is handled by our courier partner.' },
-  { key: 'out for delivery', label: 'Out for Delivery', description: 'The courier is arriving at your warehouse/office location.' },
-  { key: 'delivered', label: 'Delivered', description: 'Delivery completed successfully.' }
+  { key: 'pending', label: 'Order Placed', description: 'Your B2B purchase order has been received.' },
+  { key: 'confirmed', label: 'Admin Confirmed', description: 'Order verified and approved by operations.' },
+  { key: 'vendor_assigned', label: 'Vendor Assigned', description: 'Logistics fulfillment partner assigned.' },
+  { key: 'vendor_accepted', label: 'Vendor Accepted', description: 'Logistics partner accepted dispatch request.' },
+  { key: 'packed', label: 'Packed', description: 'Order items packed and labeled for dispatch.' },
+  { key: 'shipped', label: 'Shipped', description: 'Dispatched via logistics carrier.' },
+  { key: 'out_for_delivery', label: 'Out for Delivery', description: 'Out with delivery executive for arrival.' },
+  { key: 'delivered', label: 'Delivered', description: 'Order delivered successfully.' }
 ]
 
 export default function OrderDetailsPage() {
@@ -288,6 +292,20 @@ export default function OrderDetailsPage() {
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm" />
                 {order.payment_method || 'Cash on Delivery (COD)'}
               </p>
+              {order.vendor_name && (
+                <div className="pt-3 mt-3 border-t border-border/30">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Logistics Fulfillment Partner</p>
+                  <p className="text-sm font-bold mt-0.5 text-foreground flex items-center gap-1.5">
+                    <Truck className="w-4 h-4 text-accent" /> {order.vendor_name}
+                  </p>
+                </div>
+              )}
+              {order.tracking_number && (
+                <div className="pt-2">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Tracking Number</p>
+                  <p className="text-xs font-mono font-bold text-accent">{order.tracking_number}</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -43,17 +43,46 @@ function AppContentInner({ children }) {
   useEffect(() => {
     const storedUser = localStorage.getItem('user')
     const storedToken = localStorage.getItem('token')
+
     if (storedUser && storedToken) {
       try {
         const parsed = JSON.parse(storedUser)
         setUser(parsed)
         if (parsed?.role) {
-          document.cookie = `user_role=${parsed.role}; path=/; max-age=31536000`
+          document.cookie = `user_role=${parsed.role}; path=/; max-age=604800`
+          document.cookie = `auth_token=${storedToken}; path=/; max-age=604800`
         }
-      } catch (e) {}
-    } else if (storedUser && !storedToken) {
+
+        // Verify token with backend /api/auth/me
+        fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${storedToken}` }
+        })
+          .then(res => {
+            if (res.ok) return res.json()
+            throw new Error('Token invalid')
+          })
+          .then(data => {
+            if (data?.user) {
+              setUser(data.user)
+              localStorage.setItem('user', JSON.stringify(data.user))
+              document.cookie = `user_role=${data.user.role}; path=/; max-age=604800`
+              document.cookie = `auth_token=${storedToken}; path=/; max-age=604800`
+            }
+          })
+          .catch(() => {
+            localStorage.removeItem('user')
+            localStorage.removeItem('token')
+            document.cookie = 'user_role=; path=/; max-age=0'
+            document.cookie = 'auth_token=; path=/; max-age=0'
+            setUser(null)
+          })
+      } catch (e) {
+        setUser(null)
+      }
+    } else {
       localStorage.removeItem('user')
       document.cookie = 'user_role=; path=/; max-age=0'
+      document.cookie = 'auth_token=; path=/; max-age=0'
       setUser(null)
     }
 
@@ -67,7 +96,9 @@ function AppContentInner({ children }) {
   useEffect(() => {
     const hasToken = typeof window !== 'undefined' ? !!localStorage.getItem('token') : false
     if (user?.role === 'admin' && hasToken && pathname && !pathname.startsWith('/admin')) {
-      document.cookie = `user_role=admin; path=/; max-age=31536000`
+      document.cookie = `user_role=admin; path=/; max-age=604800`
+      const token = localStorage.getItem('token')
+      if (token) document.cookie = `auth_token=${token}; path=/; max-age=604800`
       router.replace('/admin')
     }
   }, [user, pathname, router])
@@ -162,6 +193,7 @@ function AppContentInner({ children }) {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
     document.cookie = 'user_role=; path=/; max-age=0'
+    document.cookie = 'auth_token=; path=/; max-age=0'
     setUser(null)
     router.push('/')
     toast.success('Signed out successfully')

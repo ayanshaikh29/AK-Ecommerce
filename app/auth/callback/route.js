@@ -15,7 +15,7 @@ function sign(payload) {
 export async function GET(request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
-  const redirectTarget = searchParams.get('redirect') || '/products'
+  const redirectTarget = searchParams.get('redirect') || '/customer/dashboard'
 
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent('No authorization code returned from Google')}`)

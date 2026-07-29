@@ -1,9 +1,11 @@
 'use client'
 import React, { useState, useEffect } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
-import { MapPin, Tag, CheckCircle, ChevronDown, Loader2, X } from 'lucide-react'
+import { MapPin, ChevronDown, CheckCircle2, ArrowRight, Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -35,12 +37,8 @@ export function CheckoutView() {
   const [showAddressPicker, setShowAddressPicker] = useState(false)
   const [loading, setLoading] = useState(false)
   const [isOrdered, setIsOrdered] = useState(false)
+  const [lastOrderData, setLastOrderData] = useState(null)
   const [mounted, setMounted] = useState(false)
-
-  // Coupon state
-  const [couponCode, setCouponCode] = useState('')
-  const [couponLoading, setCouponLoading] = useState(false)
-  const [appliedCoupon, setAppliedCoupon] = useState(null) // { coupon, discount_amount }
 
   useEffect(() => {
     setMounted(true)
@@ -86,55 +84,19 @@ export function CheckoutView() {
     return (
       <div className="max-w-md mx-auto py-20 px-4 text-center slide-up">
         <h2 className="font-display text-3xl font-extrabold mb-2">Sign in to checkout</h2>
-        <p className="text-muted-foreground mb-6">Please sign in or create an account.</p>
-        <div className="flex gap-3">
-          <Button onClick={() => router.push('/login')} className="flex-1 rounded-full">Sign in</Button>
-          <Button onClick={() => router.push('/signup')} variant="outline" className="flex-1 rounded-full">Create account</Button>
-        </div>
+        <p className="text-muted-foreground mb-6">Please log in with your assigned AK Enterprises credentials to place your order.</p>
+        <Button onClick={() => router.push('/login')} className="w-full rounded-full h-12 font-semibold">Sign in to Account</Button>
       </div>
     )
   }
 
   const shipping = cartTotal > 1999 ? 0 : 99
-  const couponDiscount = appliedCoupon?.discount_amount || 0
-  const total = cartTotal - couponDiscount + shipping
+  const total = cartTotal + shipping
   
   const totalUnits = cart.reduce((s, i) => s + (i.quantity || 0), 0)
   const minOrderQty = 6000
   const isBelowMOQ = totalUnits < minOrderQty
   const unitsNeeded = minOrderQty - totalUnits
-
-  const applyCoupon = async () => {
-    if (!couponCode.trim()) return
-    setCouponLoading(true)
-    try {
-      const res = await fetch('/api/coupons/validate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ code: couponCode, order_total: cartTotal })
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        toast.error(data.error || 'Invalid coupon')
-        return
-      }
-      setAppliedCoupon(data)
-      toast.success(`Coupon applied! You save ${formatINR(data.discount_amount)}`)
-    } catch {
-      toast.error('Failed to validate coupon')
-    } finally {
-      setCouponLoading(false)
-    }
-  }
-
-  const removeCoupon = () => {
-    setAppliedCoupon(null)
-    setCouponCode('')
-    toast.success('Coupon removed')
-  }
 
   const selectSavedAddress = (addr) => {
     setAddress({
@@ -170,8 +132,7 @@ export function CheckoutView() {
           subtotal: cartTotal,
           shipping_fee: shipping,
           total,
-          discount: couponDiscount,
-          coupon_code: appliedCoupon?.coupon?.code || null
+          discount: 0
         })
       })
       if (!res.ok) {
@@ -182,9 +143,9 @@ export function CheckoutView() {
       }
       const order = await res.json()
       setIsOrdered(true)
+      setLastOrderData(order)
       localStorage.setItem('lastOrder', JSON.stringify(order))
       clearCart()
-      router.push('/order-success')
     } catch (e) {
       toast.error(e.message)
     } finally {
@@ -194,7 +155,7 @@ export function CheckoutView() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 md:px-6 py-8 md:py-12 text-left">
-      <h1 className="font-display text-3xl md:text-4xl font-extrabold mb-4">Checkout</h1>
+      <h1 className="font-display text-3xl md:text-4xl font-extrabold mb-6">Checkout</h1>
       
       {isBelowMOQ && (
         <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-700 dark:text-amber-300 text-xs font-semibold flex items-center justify-between gap-3">
@@ -210,7 +171,7 @@ export function CheckoutView() {
         </div>
       )}
       <div className="grid lg:grid-cols-3 gap-6 md:gap-8">
-        <div className="lg:col-span-2 space-y-5">
+        <div className="lg:col-span-2 space-y-6">
 
           {/* Shipping Address */}
           <Card className="radius-lg shadow-soft slide-up">
@@ -286,57 +247,10 @@ export function CheckoutView() {
               <label className="flex items-center gap-3 border-2 border-accent rounded-xl p-4 cursor-pointer bg-accent/5">
                 <input type="radio" checked readOnly className="accent-accent w-5 h-5" />
                 <div>
-                  <p className="font-bold">Cash on Delivery</p>
-                  <p className="text-sm text-muted-foreground">Pay when your order arrives</p>
+                  <p className="font-bold text-foreground">Cash on Delivery / Corporate Credit Terms</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Pay upon delivery or per your agreed corporate billing cycle</p>
                 </div>
               </label>
-              <p className="text-xs text-muted-foreground mt-3">Card, UPI & Bank Transfer coming soon.</p>
-            </CardContent>
-          </Card>
-
-          {/* Coupon Code */}
-          <Card className="radius-lg shadow-soft slide-up">
-            <CardContent className="pt-6">
-              <h3 className="font-display font-extrabold text-lg mb-4 flex items-center gap-2">
-                <Tag className="w-5 h-5 text-accent" /> Have a Coupon?
-              </h3>
-              {appliedCoupon ? (
-                <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3.5">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
-                    <div>
-                      <p className="font-bold text-sm text-emerald-700">{appliedCoupon.coupon.code}</p>
-                      <p className="text-xs text-emerald-600 font-medium">
-                        {appliedCoupon.coupon.discount_type === 'percent'
-                          ? `${appliedCoupon.coupon.discount_value}% off`
-                          : `₹${appliedCoupon.coupon.discount_value} flat off`
-                        } — You save {formatINR(appliedCoupon.discount_amount)}
-                      </p>
-                    </div>
-                  </div>
-                  <button onClick={removeCoupon} className="w-7 h-7 rounded-full hover:bg-destructive/10 flex items-center justify-center text-muted-foreground hover:text-destructive transition">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex gap-2">
-                  <Input
-                    value={couponCode}
-                    onChange={e => setCouponCode(e.target.value.toUpperCase())}
-                    onKeyDown={e => e.key === 'Enter' && applyCoupon()}
-                    placeholder="Enter coupon code"
-                    className="h-11 rounded-xl font-mono tracking-widest uppercase flex-1"
-                  />
-                  <Button
-                    onClick={applyCoupon}
-                    disabled={couponLoading || !couponCode.trim()}
-                    className="h-11 rounded-xl px-5 shrink-0"
-                    variant="outline"
-                  >
-                    {couponLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Apply'}
-                  </Button>
-                </div>
-              )}
             </CardContent>
           </Card>
         </div>
@@ -345,15 +259,15 @@ export function CheckoutView() {
         <Card className="h-fit slide-in-right radius-lg shadow-soft sticky top-24">
           <CardContent className="pt-6 space-y-4">
             <h3 className="font-display font-extrabold text-xl">Order Summary</h3>
-            <div className="space-y-3 max-h-60 overflow-y-auto">
+            <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
               {cart.map(i => (
-                <div key={i.product_id} className="flex gap-2 text-sm">
-                  <Image src={i.image || '/placeholder.png'} width={48} height={56} className="w-12 h-14 object-cover rounded-lg" alt="" loading="lazy" />
-                  <div className="flex-1">
+                <div key={i.product_id} className="flex gap-2 text-sm items-center">
+                  <Image src={i.image || '/placeholder.png'} width={48} height={56} className="w-12 h-14 object-cover rounded-lg shrink-0" alt="" loading="lazy" />
+                  <div className="flex-1 min-w-0">
                     <p className="line-clamp-1 text-xs font-medium">{i.product_name_snapshot}</p>
                     <p className="text-muted-foreground text-xs">Qty {i.quantity}</p>
                   </div>
-                  <p className="font-semibold text-xs">{formatINR(i.price_snapshot * i.quantity)}</p>
+                  <p className="font-semibold text-xs shrink-0">{formatINR(i.price_snapshot * i.quantity)}</p>
                 </div>
               ))}
             </div>
@@ -362,16 +276,8 @@ export function CheckoutView() {
               <span className="text-muted-foreground">Subtotal</span>
               <span className="font-medium">{formatINR(cartTotal)}</span>
             </div>
-            {couponDiscount > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-emerald-600 font-medium flex items-center gap-1">
-                  <Tag className="w-3.5 h-3.5" /> Coupon Discount
-                </span>
-                <span className="text-emerald-600 font-bold">−{formatINR(couponDiscount)}</span>
-              </div>
-            )}
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Shipping</span>
+              <span className="text-muted-foreground">Shipping Logistics</span>
               <span className="font-medium">{shipping === 0 ? <span className="text-emerald-600 font-bold">FREE</span> : formatINR(shipping)}</span>
             </div>
             <Separator />
@@ -379,15 +285,10 @@ export function CheckoutView() {
               <span>Total</span>
               <span>{formatINR(total)}</span>
             </div>
-            {couponDiscount > 0 && (
-              <p className="text-xs text-center text-emerald-600 font-semibold bg-emerald-500/8 rounded-lg py-1.5">
-                🎉 You're saving {formatINR(couponDiscount)} on this order!
-              </p>
-            )}
             <Button
               onClick={(e) => { addRipple(e); placeOrder() }}
               disabled={loading || isBelowMOQ}
-              className="w-full rounded-full h-12 btn-shine ripple font-semibold disabled:opacity-50"
+              className="w-full rounded-full h-12 btn-shine ripple font-semibold disabled:opacity-50 mt-2"
               size="lg"
             >
               {loading ? <><span className="btn-spinner mr-2" />Placing order...</> : (isBelowMOQ ? 'MOQ (6,000 units) Required' : 'Place Order')}
@@ -395,6 +296,65 @@ export function CheckoutView() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Order Success Modal */}
+      <AnimatePresence>
+        {isOrdered && lastOrderData && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: 'spring', duration: 0.5 }}
+              className="bg-card border border-border/80 rounded-3xl p-8 md:p-10 max-w-md w-full shadow-2xl text-center relative overflow-hidden"
+            >
+              <div className="w-20 h-20 gold-gradient rounded-full flex items-center justify-center mx-auto mb-6 pulse-glow shadow-glow">
+                <CheckCircle2 className="w-12 h-12 text-primary" />
+              </div>
+
+              <h2 className="font-display text-3xl font-extrabold mb-2">Order Placed!</h2>
+              <p className="text-muted-foreground mb-6">Your order has been submitted successfully.</p>
+
+              <div className="bg-secondary/30 rounded-2xl p-5 mb-6 space-y-3 text-left">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Order ID</span>
+                  <span className="font-bold font-mono text-foreground">#{lastOrderData.order_number || lastOrderData.id?.slice(0, 8)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Total Amount</span>
+                  <span className="font-bold text-foreground">{formatINR(lastOrderData.total || lastOrderData.total_amount || 0)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Status</span>
+                  <span className="font-bold capitalize text-amber-600">{(lastOrderData.status || 'pending').replace(/_/g, ' ')}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Est. Processing</span>
+                  <span className="font-bold text-foreground">24-48 hours</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <Link href={lastOrderData.id ? `/orders/${lastOrderData.id}` : '/orders'} className="w-full">
+                  <Button className="w-full rounded-full h-12 gold-gradient text-primary font-bold shadow-glow">
+                    <Eye className="w-4 h-4 mr-2" /> Track Order
+                  </Button>
+                </Link>
+                <Link href="/customer/dashboard">
+                  <Button variant="outline" className="w-full rounded-full h-12 font-semibold border-border">
+                    <ArrowRight className="w-4 h-4 mr-2" /> Go to Dashboard
+                  </Button>
+                </Link>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

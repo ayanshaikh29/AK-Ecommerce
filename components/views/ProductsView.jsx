@@ -11,9 +11,70 @@ import { Badge } from '@/components/ui/badge'
 import { ProductCard } from '@/components/ui/ProductCard'
 import { useAppContext } from '@/components/providers/AppProvider'
 import { toast } from 'sonner'
-import { useRealtimeProducts, useRealtimePricing } from '@/lib/hooks/useRealtime'
+import { useRealtimeProducts, useRealtimePricing, useRealtimeProfile } from '@/lib/hooks/useRealtime'
 import { CatalogAccessPendingCard } from '@/components/ui/CatalogAccessPendingCard'
 import { useCustomerCatalogAccess } from '@/lib/hooks/useCatalogAccessRealtime'
+
+export function getCustomerGreetingName(user) {
+  if (!user) return ''
+  if (user.full_name && typeof user.full_name === 'string' && user.full_name.trim()) {
+    return user.full_name.trim()
+  }
+  if (user.business_name && typeof user.business_name === 'string' && user.business_name.trim()) {
+    return user.business_name.trim()
+  }
+  if (user.company_name && typeof user.company_name === 'string' && user.company_name.trim()) {
+    return user.company_name.trim()
+  }
+  if (user.display_name && typeof user.display_name === 'string' && user.display_name.trim()) {
+    return user.display_name.trim()
+  }
+  if (user.email && typeof user.email === 'string' && user.email.includes('@')) {
+    const rawUsername = user.email.split('@')[0]
+    if (rawUsername) {
+      return rawUsername.charAt(0).toUpperCase() + rawUsername.slice(1)
+    }
+  }
+  return ''
+}
+
+function ProductsWelcomeHeader({ user }) {
+  const [profileName, setProfileName] = useState(() => getCustomerGreetingName(user))
+
+  useEffect(() => {
+    setProfileName(getCustomerGreetingName(user))
+  }, [user])
+
+  useRealtimeProfile((updatedUser) => {
+    if (updatedUser) {
+      setProfileName(getCustomerGreetingName(updatedUser))
+    }
+  })
+
+  if (!user) {
+    return (
+      <div className="mb-8 pb-4 border-b border-border/40 slide-up">
+        <h1 className="font-display text-3xl md:text-5xl font-extrabold tracking-tight text-foreground flex items-center gap-2.5">
+          👋 Welcome
+        </h1>
+        <p className="text-sm md:text-base text-muted-foreground mt-2 font-medium">
+          Sign in to access your personalized catalog and pricing.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-8 pb-4 border-b border-border/40 slide-up">
+      <h1 className="font-display text-3xl md:text-5xl font-extrabold tracking-tight text-foreground flex items-center gap-2.5">
+        👋 Hello{profileName ? `, ${profileName}` : ''}
+      </h1>
+      <p className="text-sm md:text-base text-muted-foreground mt-2 font-medium">
+        Welcome back! Browse our latest products and exclusive wholesale offers.
+      </p>
+    </div>
+  )
+}
 
 function useScrollReveal(deps = []) {
   useEffect(() => {
@@ -245,9 +306,9 @@ function ProductsViewContent({ initialProducts = [], cats = [], initialCategory 
 
   const categoryName = selectedCat && Array.isArray(cats) ? cats.find(c => c?.slug === selectedCat)?.name : null
 
-  // 1. If Logged Out: Render Informational Category Overview
+  // 1. If Logged Out: Render Marketing Showcase with first 10 products
   if (!user) {
-    return <LoggedOutProductsInfoView cats={Array.isArray(cats) ? cats : []} />
+    return <LoggedOutProductsInfoView cats={Array.isArray(cats) ? cats : []} showcaseProducts={Array.isArray(initialProducts) ? initialProducts.slice(0, 10) : []} />
   }
 
   // 2. If Logged in Customer with No Catalog Access granted yet: Render WhatsApp CTA Screen
@@ -389,24 +450,8 @@ function ProductsViewContent({ initialProducts = [], cats = [], initialCategory 
 
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-6 py-8">
-      {/* Breadcrumb Navigation */}
-      <div className="flex items-center gap-1 text-xs text-muted-foreground mb-6 overflow-x-auto whitespace-nowrap pb-2">
-        <Link href="/" className="hover:text-foreground transition-colors">Home</Link>
-        <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-        <Link 
-          href="/products" 
-          onClick={() => { setSelectedCat(''); applyFilters(''); }} 
-          className={`hover:text-foreground transition-colors ${!selectedCat ? 'font-semibold text-foreground' : ''}`}
-        >
-          Shop
-        </Link>
-        {categoryName && (
-          <>
-            <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-            <span className="font-semibold text-foreground">{categoryName}</span>
-          </>
-        )}
-      </div>
+      {/* Personalized Welcome Header */}
+      <ProductsWelcomeHeader user={user} />
 
       <div className="flex flex-wrap items-center justify-between gap-4 mb-8 slide-up">
         <div>
@@ -479,69 +524,102 @@ function ProductsViewContent({ initialProducts = [], cats = [], initialCategory 
   )
 }
 
-function LoggedOutProductsInfoView({ cats }) {
+function LoggedOutProductsInfoView({ cats, showcaseProducts = [] }) {
   const whatsappUrl = `https://wa.me/918308860894?text=${encodeURIComponent('Hello AK Enterprises, I am visiting your site and would like to request catalog access & wholesale pricing.')}`
 
   return (
-    <div className="max-w-7xl mx-auto px-4 md:px-6 py-12 text-left">
-      <div className="text-center max-w-3xl mx-auto mb-16">
+    <div className="max-w-7xl mx-auto px-4 md:px-6 py-8 text-left">
+      <ProductsWelcomeHeader user={null} />
+
+      {/* Hero Section */}
+      <div className="text-center max-w-3xl mx-auto mb-10 pt-4 slide-up">
         <Badge className="mb-4 bg-accent/20 text-accent border-accent/40 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">
-          Informational Category Overview
+          Product Showcase
         </Badge>
         <h1 className="font-display text-4xl md:text-6xl font-extrabold text-foreground mb-4">
-          Product Offerings & Categories
+          AK Enterprises Product Portfolio
         </h1>
         <p className="text-muted-foreground text-base leading-relaxed">
-          AK Enterprises is a private B2B supplier. Browse our category portfolio below. To view itemized SKUs, inventory availability, and customer-specific wholesale pricing, please log into your corporate portal account.
+          AK Enterprises is a private B2B supplier. Browse a selection of our products below.
+          To view full catalog with SKUs, inventory, and customer-specific wholesale pricing,
+          please log into your corporate portal.
         </p>
       </div>
 
-      <div className="space-y-12 mb-20">
-        {[
-          {
-            title: 'Office Stationery & Printing Supplies',
-            desc: 'Complete corporate desk and print logistics. We supply high-grade copier paper, specialty notebooks, writing instruments, files, desk organizers, toner cartridges, and desktop office devices.',
-            features: ['A4 / A3 Copier Paper (75/80 GSM)', 'Pens, Markers & Writing Instruments', 'Executive Diaries & Registers', 'Storage Files & Folders']
-          },
-          {
-            title: 'Housekeeping & Cleaning Sanitation',
-            desc: 'Commercial facility maintenance and sanitation products. Formulated chemicals, floor disinfectants, industrial mops, handwashes, garbage bags, and tissue paper solutions.',
-            features: ['Disinfectant Floor Cleaners 5L', 'Handwashes & Hand Sanitizers', 'Commercial Tissue Rolls & Napkins', 'Microfiber Mops & Sanitation Tools']
-          },
-          {
-            title: 'UPS Systems & Power Backup Solutions',
-            desc: 'Uninterrupted power supplies for corporate offices and data centers. High-reliability UPS units, industrial batteries, surge protectors, and power accessories.',
-            features: ['Line-Interactive UPS (600VA - 2000VA)', 'Online Industrial UPS Systems', 'SMF / Tubular Batteries', 'Voltage Stabilizers & Power Cables']
-          }
-        ].map((sec, idx) => (
-          <div key={idx} className="bg-card border rounded-3xl p-8 shadow-soft">
-            <h2 className="font-display text-2xl md:text-3xl font-extrabold mb-3 text-foreground">{sec.title}</h2>
-            <p className="text-muted-foreground text-sm leading-relaxed mb-6">{sec.desc}</p>
-            <div className="grid sm:grid-cols-2 gap-3 mb-6">
-              {sec.features.map((feat, fIdx) => (
-                <div key={fIdx} className="flex items-center gap-2 text-xs font-semibold text-foreground bg-secondary/40 p-3 rounded-xl">
-                  <ShieldCheck className="w-4 h-4 text-accent shrink-0" />
-                  <span>{feat}</span>
+      {/* Product Showcase Grid */}
+      {showcaseProducts.length > 0 && (
+        <div className="mb-14">
+          <h2 className="font-display text-2xl font-extrabold text-foreground mb-6">Featured Products</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            {showcaseProducts.map(p => (
+              <div key={p.id} className="bg-card border border-border/60 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
+                <div className="aspect-square bg-secondary/20 overflow-hidden">
+                  <img
+                    src={p.images?.[0] || p.image_url || '/placeholder.png'}
+                    alt={p.name}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
                 </div>
-              ))}
-            </div>
+                <div className="p-3">
+                  <h3 className="text-sm font-bold text-foreground leading-snug line-clamp-2 min-h-[2.5em]">{p.name}</h3>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
+      )}
+
+      {/* Category Overview */}
+      <div className="space-y-8 mb-14">
+        <h2 className="font-display text-2xl font-extrabold text-foreground">Our Product Categories</h2>
+        <div className="grid md:grid-cols-3 gap-4">
+          {[
+            {
+              title: 'Office Stationery & Printing',
+              desc: 'Copier paper, notebooks, writing instruments, files, desk organizers, toner cartridges.',
+              features: ['A4 / A3 Copier Paper (75/80 GSM)', 'Pens, Markers & Writing Instruments', 'Executive Diaries & Registers', 'Storage Files & Folders']
+            },
+            {
+              title: 'Housekeeping & Sanitation',
+              desc: 'Facility maintenance and sanitation products. Floor disinfectants, industrial mops, handwashes.',
+              features: ['Disinfectant Floor Cleaners 5L', 'Handwashes & Hand Sanitizers', 'Commercial Tissue Rolls & Napkins', 'Microfiber Mops & Sanitation Tools']
+            },
+            {
+              title: 'UPS & Power Backup',
+              desc: 'Uninterrupted power supplies for offices and data centers. UPS units, batteries, surge protectors.',
+              features: ['Line-Interactive UPS (600VA - 2000VA)', 'Online Industrial UPS Systems', 'SMF / Tubular Batteries', 'Voltage Stabilizers & Power Cables']
+            }
+          ].map((sec, idx) => (
+            <div key={idx} className="bg-card border rounded-2xl p-5 shadow-sm">
+              <h3 className="font-display font-extrabold text-base mb-2 text-foreground">{sec.title}</h3>
+              <p className="text-muted-foreground text-xs leading-relaxed mb-4">{sec.desc}</p>
+              <ul className="space-y-1.5">
+                {sec.features.map((feat, fIdx) => (
+                  <li key={fIdx} className="flex items-center gap-2 text-xs font-medium text-foreground/80">
+                    <ShieldCheck className="w-3.5 h-3.5 text-accent shrink-0" />
+                    <span>{feat}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       </div>
 
+      {/* View Complete B2B Catalog CTA */}
       <div className="mesh-hero rounded-3xl p-10 text-center text-primary-foreground">
-        <h2 className="font-display text-3xl font-extrabold mb-3">Request Custom B2B Catalog Access</h2>
+        <h2 className="font-display text-3xl font-extrabold mb-3">View Complete B2B Catalog</h2>
         <p className="text-primary-foreground/80 text-sm max-w-xl mx-auto mb-6">
-          Existing client? Log in to view your negotiated rate card. New enterprise buyer? Reach out to our team via WhatsApp to request an account.
+          Log in to access the full product catalog with real-time inventory, customer-specific pricing, and place orders directly.
         </p>
         <div className="flex flex-wrap justify-center gap-4">
           <Link href="/login">
-            <Button size="lg" className="rounded-full px-8 bg-accent text-accent-foreground font-bold hover:bg-accent/90">
-              Sign In to B2B Account
+            <Button size="lg" className="rounded-full px-8 bg-accent text-accent-foreground font-bold hover:bg-accent/90 text-sm">
+              Login to B2B Portal
             </Button>
           </Link>
           <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
-            <Button size="lg" className="rounded-full px-8 border border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white font-bold transition-all shadow-soft backdrop-blur-xs">
+            <Button size="lg" className="rounded-full px-8 border border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white font-bold transition-all shadow-soft backdrop-blur-xs text-sm">
               <MessageCircle className="w-4 h-4 mr-2" /> WhatsApp Procurement Desk
             </Button>
           </a>

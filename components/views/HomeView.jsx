@@ -1,5 +1,6 @@
 'use client'
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { motion } from 'framer-motion'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
@@ -44,12 +45,23 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
   const router = useRouter()
   useScrollReveal([initialFeatured, initialCats, initialTrending, initialBanners, initialClients])
 
+  useEffect(() => {
+    if (!user) return
+    if (user.role === 'customer') {
+      router.replace('/customer/dashboard')
+    } else if (user.role === 'admin') {
+      router.replace('/admin')
+    } else if (user.role === 'vendor') {
+      router.replace('/vendor')
+    }
+  }, [user, router])
+
   if (!user) {
     return <LoggedOutHomeView initialClients={initialClients || []} />
   }
 
   if (user.role === 'customer') {
-    return <LoggedInCustomerHomeView user={user} />
+    return null
   }
 
   const now = new Date()
@@ -580,187 +592,205 @@ function HeroSlider({ whatsappUrl }) {
 }
 
 function LoggedOutHomeView({ initialClients }) {
-  const whatsappUrl = `https://wa.me/918308860894?text=${encodeURIComponent('Hello AK Enterprises, I would like to request catalog access and custom pricing for my corporate account.')}`
-
   return (
     <div>
-      {/* Interactive Hero Slider */}
-      <HeroSlider whatsappUrl={whatsappUrl} />
+      {/* ───── 1. HERO SECTION ───── */}
+      <section className="relative h-[92vh] min-h-[700px] overflow-hidden bg-[#120606]">
+        <div className="absolute inset-0">
+          <Image src="/category-stationery.jpg" alt="" fill className="object-cover opacity-60" priority sizes="100vw" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#120606]/98 via-[#1a0a0a]/90 to-[#2a1212]/70" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#120606]/90 via-transparent to-transparent" />
+        </div>
+        <div className="absolute top-20 right-10 w-96 h-96 rounded-full bg-accent/8 blur-3xl" />
+        <div className="absolute bottom-20 left-10 w-[500px] h-[500px] rounded-full bg-amber-500/5 blur-3xl" />
 
-      {/* Product Categories Section (Visual Only, NOT Clickable) */}
-      <section className="max-w-7xl mx-auto px-4 md:px-6 py-24">
-        <div className="text-center max-w-3xl mx-auto mb-16">
-          <p className="text-xs font-bold tracking-[0.2em] uppercase text-accent mb-3">— Core Categories</p>
-          <h2 className="font-display text-3xl md:text-5xl font-extrabold text-foreground mb-4">
-            Our Business Solutions
-          </h2>
-          <p className="text-muted-foreground text-base">
-            Overview of our main supply categories. Individual product listings and custom prices are unlocked after login.
-          </p>
+        <div className="relative z-10 max-w-7xl mx-auto px-4 md:px-6 h-full flex items-center">
+          <div className="max-w-4xl">
+            <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}>
+              <div className="inline-flex items-center gap-3 glass-dark border border-accent/15 rounded-full px-5 py-2 mb-8">
+                <Award className="w-4 h-4 text-accent" />
+                <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-accent">Est. 2020 — Pune, India</span>
+              </div>
+            </motion.div>
+
+            <motion.h1 initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.2 }} className="font-display text-5xl sm:text-7xl md:text-8xl lg:text-9xl font-extrabold text-white mb-6 leading-[0.92] tracking-[-0.04em]">
+              Your Trusted<br />
+              <span className="gold-shine">B2B Partner</span>
+            </motion.h1>
+
+            <motion.p initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.4 }} className="text-lg md:text-xl lg:text-2xl text-white/70 max-w-2xl mb-10 font-light tracking-wide">
+              Office Stationery <span className="text-accent/50 mx-3">·</span> Housekeeping <span className="text-accent/50 mx-3">·</span> UPS Solutions
+            </motion.p>
+
+            <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.6 }} className="flex flex-wrap gap-4">
+              <Link href="/products">
+                <Button size="lg" className="rounded-full px-10 h-16 bg-accent text-accent-foreground hover:bg-accent/90 btn-shine ripple font-bold text-base shadow-glow text-lg">
+                  Browse Catalog <ArrowRight className="ml-2 w-5 h-5" />
+                </Button>
+              </Link>
+              <Link href="/contact">
+                <Button size="lg" variant="outline" className="rounded-full px-10 h-16 border-white/25 text-white hover:bg-white/10 hover:text-white bg-transparent text-lg">
+                  Request Quote
+                </Button>
+              </Link>
+            </motion.div>
+          </div>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-8">
-          {[
-            {
-              title: 'Office Stationery',
-              desc: 'Premium printing papers, writing instruments, files, folders & desktop accessories',
-              img: '/category-stationery.jpg',
-              badge: 'Visual Overview Only'
-            },
-            {
-              title: 'Housekeeping Supplies',
-              desc: 'Disinfectant cleaners, floor care chemicals, tissue rolls & sanitation gear',
-              img: '/category-housekeeping.jpg',
-              badge: 'Visual Overview Only'
-            },
-            {
-              title: 'UPS & Power Solutions',
-              desc: 'Industrial UPS units, backup batteries, surge protection & power accessories',
-              img: '/category-ups.jpg',
-              badge: 'Visual Overview Only'
-            }
-          ].map((cat, idx) => (
-            <div key={idx} className="group relative radius-xl overflow-hidden shadow-soft border border-border bg-card">
-              <div className="relative aspect-[4/3] overflow-hidden bg-secondary">
-                <Image src={cat.img} alt={cat.title} fill className="object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                <div className="absolute top-4 left-4 bg-primary/90 text-primary-foreground text-[10px] uppercase font-bold tracking-widest px-3 py-1 rounded-full border border-white/20">
-                  {cat.badge}
-                </div>
-              </div>
-              <div className="p-6 text-left">
-                <h3 className="font-display text-2xl font-extrabold mb-2 text-foreground">{cat.title}</h3>
-                <p className="text-xs text-muted-foreground leading-relaxed">{cat.desc}</p>
-                <div className="mt-4 pt-3 border-t border-border/50 text-[11px] text-accent font-semibold flex items-center justify-between">
-                  <span>Non-clickable category overview</span>
-                  <Shield className="w-3.5 h-3.5" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.4 }} className="absolute bottom-8 left-1/2 -translate-x-1/2">
+          <div className="w-6 h-10 rounded-full border-2 border-white/15 flex items-start justify-center p-1.5">
+            <motion.div animate={{ y: [0, 12, 0] }} transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }} className="w-1.5 h-1.5 rounded-full bg-accent" />
+          </div>
+        </motion.div>
       </section>
 
-      {/* Representative Demo Product Images (Visual Only, NOT Clickable, NO Links, NO Prices) */}
-      <section className="bg-secondary/30 border-y border-border/50 py-24">
+      {/* ───── 2. FEATURE STRIP ───── */}
+      <section className="bg-[#120606] border-y border-white/[0.03] py-10">
         <div className="max-w-7xl mx-auto px-4 md:px-6">
-          <div className="text-center max-w-2xl mx-auto mb-14">
-            <p className="text-xs font-bold tracking-[0.2em] uppercase text-accent mb-3">— Visual Demos</p>
-            <h2 className="font-display text-3xl md:text-5xl font-extrabold text-foreground mb-4">
-              Representative Product Visuals
-            </h2>
-            <p className="text-muted-foreground text-sm">
-              Illustrative product visual samples. (Non-clickable demo showcase — no pricing or catalog browsing)
-            </p>
-          </div>
-
-          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              {
-                title: 'Kangaroo Heavy-Duty Plier Stapler HP-45',
-                tag: 'Stationery Sample',
-                img: '/uploads/kangaroo-hp-45-plier-stapler.webp',
-                note: 'Illustrative visual — log in to view assigned prices'
-              },
-              {
-                title: 'Lizol Disinfectant Surface Cleaner 1L',
-                tag: 'Housekeeping Sample',
-                img: '/uploads/lizol-floor-cleaner-1-litre.webp',
-                note: 'Illustrative visual — log in to view assigned prices'
-              },
-              {
-                title: 'Dettol Liquid Hand Wash Pouch 675ml',
-                tag: 'Housekeeping Sample',
-                img: '/uploads/dettol-liquid-hand-wash-pouch-675ml.webp',
-                note: 'Illustrative visual — log in to view assigned prices'
-              },
-              {
-                title: 'Apsara HB Writing Pencils Box',
-                tag: 'Stationery Sample',
-                img: 'https://xgxqremmwxnwplhpvtux.supabase.co/storage/v1/object/public/product-images/demo-visual-1785143613076-51.jpg',
-                note: 'Illustrative visual — log in to view assigned prices'
-              },
-              {
-                title: 'Fluorescent Desk Highlighters Set',
-                tag: 'Stationery Sample',
-                img: 'https://xgxqremmwxnwplhpvtux.supabase.co/storage/v1/object/public/product-images/demo-visual-1785143613984-178.jpg',
-                note: 'Illustrative visual — log in to view assigned prices'
-              },
-              {
-                title: 'Pik Sketch Pen Set 12 Colors',
-                tag: 'Stationery Sample',
-                img: 'https://xgxqremmwxnwplhpvtux.supabase.co/storage/v1/object/public/product-images/demo-visual-1785143626878-950.jpeg',
-                note: 'Illustrative visual — log in to view assigned prices'
-              },
-              {
-                title: 'Heavy Duty Rubber Protection Gloves',
-                tag: 'Housekeeping Sample',
-                img: 'https://xgxqremmwxnwplhpvtux.supabase.co/storage/v1/object/public/product-images/demo-visual-1785143614156-25.jpg',
-                note: 'Illustrative visual — log in to view assigned prices'
-              },
-              {
-                title: 'Commercial Disinfectant Toilet Cleaner 500ml',
-                tag: 'Housekeeping Sample',
-                img: 'https://xgxqremmwxnwplhpvtux.supabase.co/storage/v1/object/public/product-images/demo-visual-1785143614272-231.webp',
-                note: 'Illustrative visual — log in to view assigned prices'
-              }
-            ].map((demo, idx) => (
-              <div key={idx} className="bg-card rounded-2xl overflow-hidden border border-border/60 shadow-sm p-4 text-left">
-                <div className="relative aspect-square rounded-xl overflow-hidden bg-secondary mb-4">
-                  <Image src={demo.img} alt={demo.title} fill className="object-cover pointer-events-none" />
+              [Truck, 'Pan India Delivery', 'Same-day dispatch across Maharashtra'],
+              [Award, 'Premium Quality', 'Only verified & trusted brands'],
+              [Shield, 'GST Invoice', '100% B2B tax compliance on every order'],
+              [Zap, '2 Hour Quotes', 'Rapid response for bulk & corporate orders']
+            ].map(([I, t, d], i) => (
+              <motion.div key={i} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.1, duration: 0.5 }}>
+                <div className="flex items-center gap-4 px-5 py-5 rounded-2xl bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.07] hover:border-accent/20 transition-all duration-300 group">
+                  <div className="w-12 h-12 rounded-xl gold-gradient flex items-center justify-center shrink-0 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
+                    <I className="w-5 h-5 text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold text-sm text-white">{t}</p>
+                    <p className="text-[11px] text-white/50 mt-0.5">{d}</p>
+                  </div>
                 </div>
-                <div>
-                  <Badge variant="outline" className="text-[10px] uppercase font-bold text-accent mb-2">
-                    {demo.tag}
-                  </Badge>
-                  <h4 className="font-display font-extrabold text-sm text-foreground mb-1">{demo.title}</h4>
-                  <p className="text-[11px] text-muted-foreground italic">{demo.note}</p>
-                </div>
-              </div>
+              </motion.div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Trust Features */}
+      {/* ───── 3. CATEGORIES SECTION ───── */}
       <section className="max-w-7xl mx-auto px-4 md:px-6 py-24">
-        <div className="grid md:grid-cols-3 gap-8">
+        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="max-w-2xl mb-14">
+          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-4">— Our Categories</p>
+          <h2 className="font-display text-4xl md:text-6xl font-extrabold text-foreground mb-4 text-balance">
+            Everything your <span className="gold-shine">business</span> needs
+          </h2>
+          <p className="text-muted-foreground text-lg">Complete B2B supply solutions across three core verticals. One trusted partner.</p>
+        </motion.div>
+
+        <div className="grid md:grid-cols-3 gap-6">
           {[
-            { icon: Shield, title: 'Private Account Pricing', desc: 'Client-specific wholesale rate sheets configured and gated per corporate user session.' },
-            { icon: Truck, title: '6,000+ Units MOQ Logistics', desc: 'Direct warehouse dispatch enforcing minimum order quantities for optimum B2B freight rates.' },
-            { icon: Award, title: 'Itemized GST Invoices', desc: 'Official GST Tax Invoices generated with your corporate registration details on every order.' }
-          ].map((item, i) => (
-            <div key={i} className="p-8 bg-card border radius-xl shadow-soft text-left">
-              <div className="w-12 h-12 gold-gradient rounded-xl flex items-center justify-center mb-5">
-                <item.icon className="w-6 h-6 text-primary" />
-              </div>
-              <h3 className="font-display text-xl font-extrabold mb-2">{item.title}</h3>
-              <p className="text-muted-foreground text-xs leading-relaxed">{item.desc}</p>
-            </div>
+            { name: 'Office Stationery', slug: 'office-stationery', img: '/category-stationery.jpg', desc: 'Pens, files, notebooks, printing supplies & desk accessories for corporates.' },
+            { name: 'Housekeeping', slug: 'housekeeping', img: '/category-housekeeping.jpg', desc: 'Cleaning chemicals, garbage bags, tissue rolls & janitorial essentials.' },
+            { name: 'UPS Solutions', slug: 'ups-solutions', img: '/category-ups.jpg', desc: 'Industrial UPS, backup batteries, surge protectors & power infrastructure.' }
+          ].map((cat, i) => (
+            <motion.div key={i} initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.15, duration: 0.6 }}>
+              <Link href={'/products?category=' + cat.slug} className="group relative block aspect-[4/5] radius-xl overflow-hidden shadow-soft hover:shadow-elevated transition-all duration-500">
+                <Image src={cat.img} alt={cat.name} fill className="object-cover product-card-img group-hover:scale-105 transition-transform duration-700" sizes="(max-width: 768px) 100vw, 33vw" />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#120606] via-[#120606]/60 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-br from-accent/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                <div className="absolute inset-0 p-8 flex flex-col justify-end">
+                  <h3 className="font-display text-3xl font-extrabold text-white mb-3">{cat.name}</h3>
+                  <p className="text-sm text-white/70 mb-5">{cat.desc}</p>
+                  <span className="inline-flex items-center gap-2 text-accent font-bold text-sm group-hover:gap-3 transition-all">
+                    Explore Collection <ArrowUpRight className="w-4 h-4 group-hover:rotate-45 transition-transform" />
+                  </span>
+                </div>
+                <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur border border-white/20 text-[10px] font-bold text-white uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                  View Products →
+                </div>
+              </Link>
+            </motion.div>
           ))}
         </div>
       </section>
 
-      {/* CTA Box */}
-      <section className="max-w-5xl mx-auto px-4 pb-24 text-center">
-        <div className="mesh-hero radius-2xl p-10 md:p-16 text-primary-foreground">
-          <h2 className="font-display text-3xl md:text-5xl font-extrabold mb-4">Need Catalog Access for Your Business?</h2>
-          <p className="text-primary-foreground/80 text-base max-w-xl mx-auto mb-8">
-            Contact our procurement team to verify your company account and unlock your customized price list.
-          </p>
-          <div className="flex flex-wrap justify-center gap-4">
-            <Link href="/login">
-              <Button size="lg" className="rounded-full px-8 bg-accent text-accent-foreground font-bold hover:bg-accent/90 shadow-glow">
-                Login to Account
-              </Button>
-            </Link>
-            <Link href="/contact">
-              <Button size="lg" className="rounded-full px-8 border border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white font-bold transition-all shadow-soft backdrop-blur-xs">
-                Contact Procurement Team
-              </Button>
-            </Link>
+      {/* ───── 4. TRUSTED CLIENTS ───── */}
+      <section className="py-24 mesh-dark text-white relative overflow-hidden">
+        <div className="max-w-7xl mx-auto px-4 md:px-6">
+          <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-center mb-14">
+            <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-4">— Trusted Since 2020</p>
+            <h2 className="font-display text-4xl md:text-6xl font-extrabold">Our <span className="gold-shine">Valued</span> Clients</h2>
+            <p className="text-white/60 text-lg mt-4 max-w-xl mx-auto">Serving leading enterprises across finance, insurance & corporate sectors.</p>
+          </motion.div>
+
+          <div className="marquee-wrap overflow-hidden">
+            <div className="flex whitespace-nowrap marquee">
+              {(initialClients && initialClients.length > 0 ? initialClients : ['ICICI Lombard', 'Equitas', 'InCred', 'JM Finance', 'Axis Bank', 'HDFC', 'Bajaj Finserv', 'Tata Capital', 'Aditya Birla']).flatMap(c => [c, c, c]).map((c, i) => (
+                <div key={i} className="mx-4 inline-flex items-center gap-4 glass-dark radius-lg px-8 py-5 group hover:border-accent/30 transition-all duration-300">
+                  <div className="w-11 h-11 gold-gradient rounded-xl flex items-center justify-center shrink-0 group-hover:rotate-6 group-hover:scale-110 transition-all duration-300">
+                    <Building2 className="w-5 h-5 text-primary" />
+                  </div>
+                  <span className="font-display font-extrabold text-xl text-white/90 group-hover:text-accent transition-colors">{typeof c === 'string' ? c : c.name}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
+      </section>
+
+      {/* ───── 5. WHY CHOOSE US ───── */}
+      <section className="max-w-7xl mx-auto px-4 md:px-6 py-24">
+        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="max-w-2xl mb-14">
+          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-4">— Why AK Enterprises</p>
+          <h2 className="font-display text-4xl md:text-6xl font-extrabold text-foreground text-balance">
+            Built for <span className="gold-shine">Bulk Buyers</span>.<br />Trusted by Leaders.
+          </h2>
+        </motion.div>
+
+        <div className="grid md:grid-cols-3 gap-6">
+          {[
+            [Award, 'Premium Quality', 'Only trusted brands & genuine products — verified by our procurement team.'],
+            [TrendingUp, 'Wholesale Pricing', 'Best B2B rates with custom corporate rate cards & volume-based discounts.'],
+            [Truck, 'Timely Delivery', 'Same-day dispatch in Maharashtra, next-day pan-India logistics network.'],
+            [Shield, 'Dedicated Support', 'Personal account manager assigned to every corporate & bulk buyer.'],
+            [Building2, '5+ Years B2B', 'Trusted partner for finance, insurance, IT & manufacturing since 2020.'],
+            [Sparkles, '300+ Products', 'Wide catalog spanning office stationery, housekeeping & UPS solutions.']
+          ].map(([I, t, d], i) => (
+            <motion.div key={i} initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: (i % 3) * 0.1, duration: 0.5 }}>
+              <div className="h-full p-8 bg-card radius-xl shadow-soft hover:shadow-elevated card-lift transition-all duration-300 border border-border/60 group">
+                <div className="w-14 h-14 gold-gradient rounded-2xl flex items-center justify-center mb-5 group-hover:rotate-6 group-hover:scale-110 transition-all duration-300">
+                  <I className="w-6 h-6 text-primary" />
+                </div>
+                <h3 className="font-display text-xl font-extrabold mb-2 text-foreground">{t}</h3>
+                <p className="text-muted-foreground leading-relaxed">{d}</p>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      </section>
+
+      {/* ───── 6. CTA BANNER ───── */}
+      <section className="max-w-7xl mx-auto px-4 md:px-6 pb-24">
+        <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="mesh-hero radius-2xl p-10 md:p-16 relative overflow-hidden grain">
+          <div className="absolute -right-20 -bottom-20 w-80 h-80 rounded-full bg-accent/15 blur-3xl" />
+          <div className="absolute -left-20 -top-20 w-60 h-60 rounded-full bg-white/[0.04] blur-3xl" />
+
+          <div className="relative z-10 text-center max-w-2xl mx-auto">
+            <Badge className="mb-5 bg-accent/20 text-accent border-accent/40 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">Bulk Ordering</Badge>
+            <h2 className="font-display text-4xl md:text-6xl font-extrabold text-primary-foreground mb-4 text-balance">
+              Bulk Orders?<br />
+              <span className="gold-shine">Custom Quotes in 2 Hours.</span>
+            </h2>
+            <p className="text-primary-foreground/80 text-lg mb-8 max-w-lg mx-auto">
+              Corporate purchase orders for 100+ units. Get dedicated pricing & priority dispatch.
+            </p>
+            <div className="flex flex-wrap justify-center gap-4">
+              <Link href="/contact">
+                <Button size="lg" className="rounded-full px-10 h-14 bg-accent text-accent-foreground hover:bg-accent/90 btn-shine ripple font-bold text-base shadow-glow">
+                  Request Bulk Quote <ArrowRight className="ml-2 w-4 h-4" />
+                </Button>
+              </Link>
+              <Link href="/products">
+                <Button size="lg" variant="outline" className="rounded-full px-10 h-14 border-white/30 text-white bg-transparent hover:bg-white/10 hover:text-white font-bold text-base">
+                  View Catalog
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </motion.div>
       </section>
     </div>
   )
