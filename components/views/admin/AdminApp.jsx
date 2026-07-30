@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { INDIAN_STATES } from '@/lib/constants/indian-states'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useAppContext } from '@/components/providers/AppProvider'
 
@@ -998,13 +999,80 @@ function FileUploader({ accept, onUploaded, label, multiple, kind }) {
 }
 
 function AdminProductForm({ router, editId }) {
-  const [f, setF] = useState({ name: '', description: '', price: '', mrp: '', category_id: '', subcategory: '', stock_quantity: '', sku: '', is_featured: false, is_active: true, images: [], videos: [] })
+  const [f, setF] = useState({
+    name: '',
+    description: '',
+    price: '',
+    mrp: '',
+    category_id: '',
+    subcategory: '',
+    stock_quantity: '',
+    sku: '',
+    hsn_code: '',
+    gst_percent: '18',
+    is_featured: false,
+    is_active: true,
+    images: [],
+    videos: [],
+    brand: '',
+    unit: '',
+    weight: '',
+    tags: '',
+    thumbnail: '',
+    gallery_images: []
+  })
   const [cats, setCats] = useState([])
-  useEffect(() => { fetch('/api/categories').then(r=>r.json()).then(setCats) }, [])
-  useEffect(() => { if (editId) fetch('/api/products/' + editId).then(r=>r.json()).then(p => setF({ ...p, images: p.images || [], videos: p.videos || [] })) }, [editId])
+  
+  useEffect(() => { 
+    fetch('/api/categories').then(r => r.json()).then(setCats) 
+  }, [])
+
+  useEffect(() => { 
+    if (editId) {
+      fetch('/api/products/' + editId, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      .then(r => r.json())
+      .then(p => {
+        setF({
+          name: p.name || '',
+          description: p.description || '',
+          price: p.price !== undefined ? String(p.price) : '',
+          mrp: p.mrp !== undefined ? String(p.mrp) : '',
+          category_id: p.category_id || '',
+          subcategory: p.subcategory || '',
+          stock_quantity: p.stock_quantity !== undefined ? String(p.stock_quantity) : '',
+          sku: p.sku || '',
+          hsn_code: p.hsn_code || '',
+          gst_percent: p.gst_percent !== undefined ? String(p.gst_percent) : '18',
+          is_featured: !!p.is_featured,
+          is_active: p.is_active !== false,
+          images: p.images || [],
+          videos: p.videos || [],
+          brand: p.brand || '',
+          unit: p.unit || '',
+          weight: p.weight || '',
+          tags: p.tags || '',
+          thumbnail: p.thumbnail || '',
+          gallery_images: p.gallery_images || []
+        })
+      })
+      .catch(e => {
+        console.error('[Fetch Product Error]:', e)
+        toast.error('Failed to load product details')
+      })
+    }
+  }, [editId])
+
   const save = async e => {
     e.preventDefault()
-    const body = { ...f, price: +f.price, mrp: +f.mrp, stock_quantity: +f.stock_quantity }
+    const body = { 
+      ...f, 
+      price: +f.price, 
+      mrp: f.mrp ? +f.mrp : null, 
+      stock_quantity: +f.stock_quantity, 
+      gst_percent: +f.gst_percent 
+    }
     try { 
       let res
       if (editId) res = await fetch('/api/products/' + editId, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(body) })
@@ -1014,8 +1082,10 @@ function AdminProductForm({ router, editId }) {
       router.push('/admin/products') 
     } catch (e) { toast.error(e.message) }
   }
+
   const removeImg = i => setF({ ...f, images: f.images.filter((_, idx) => idx !== i) })
   const removeVid = i => setF({ ...f, videos: f.videos.filter((_, idx) => idx !== i) })
+
   return (
     <div className="w-full max-w-5xl mx-auto slide-up text-left">
       <h1 className="font-display text-3xl font-extrabold mb-6 text-foreground">{editId ? 'Edit Product' : 'Add Product'}</h1>
@@ -1031,16 +1101,75 @@ function AdminProductForm({ router, editId }) {
             <div><Label>MRP (₹)</Label><Input type="number" value={f.mrp} onChange={e => setF({ ...f, mrp: e.target.value })} className="h-11 rounded-xl"/></div>
             <div><Label>Stock *</Label><Input required type="number" value={f.stock_quantity} onChange={e => setF({ ...f, stock_quantity: e.target.value })} className="h-11 rounded-xl"/></div>
             <div><Label>SKU</Label><Input value={f.sku} onChange={e => setF({ ...f, sku: e.target.value })} className="h-11 rounded-xl"/></div>
+            <div><Label>HSN Code *</Label><Input required value={f.hsn_code} onChange={e => setF({ ...f, hsn_code: e.target.value })} placeholder="e.g. 4820" className="h-11 rounded-xl"/></div>
+            <div><Label>GST Rate (%)</Label><Select value={String(f.gst_percent)} onValueChange={v => setF({ ...f, gst_percent: v })}><SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Select GST %"/></SelectTrigger><SelectContent><SelectItem value="0">0% — Exempt</SelectItem><SelectItem value="5">5% GST</SelectItem><SelectItem value="12">12% GST</SelectItem><SelectItem value="18">18% GST</SelectItem><SelectItem value="28">28% GST</SelectItem></SelectContent></Select></div>
+            
+            {/* Added Extra Metadata Fields */}
+            <div><Label>Brand</Label><Input value={f.brand} onChange={e => setF({ ...f, brand: e.target.value })} placeholder="e.g. AK Premium, Camlin" className="h-11 rounded-xl"/></div>
+            <div><Label>Unit</Label><Input value={f.unit} onChange={e => setF({ ...f, unit: e.target.value })} placeholder="e.g. Box, Kg, Pcs" className="h-11 rounded-xl"/></div>
+            <div><Label>Weight</Label><Input value={f.weight} onChange={e => setF({ ...f, weight: e.target.value })} placeholder="e.g. 500g, 1.2kg" className="h-11 rounded-xl"/></div>
+            <div><Label>Tags</Label><Input value={f.tags} onChange={e => setF({ ...f, tags: e.target.value })} placeholder="e.g. stationery, office-supplies (comma separated)" className="h-11 rounded-xl"/></div>
+            <div className="sm:col-span-2"><Label>Thumbnail Image URL</Label><Input value={f.thumbnail} onChange={e => setF({ ...f, thumbnail: e.target.value })} placeholder="Optional: direct image URL for listing preview" className="h-11 rounded-xl"/></div>
           </div>
-          <div className="flex gap-4"><label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={f.is_featured} onChange={e => setF({ ...f, is_featured: e.target.checked })}/>Featured</label><label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={f.is_active} onChange={e => setF({ ...f, is_active: e.target.checked })}/>Active</label></div>
+          <div className="flex gap-4 pt-2"><label className="flex items-center gap-2 cursor-pointer font-semibold"><input type="checkbox" checked={f.is_featured} onChange={e => setF({ ...f, is_featured: e.target.checked })}/>Featured Product</label><label className="flex items-center gap-2 cursor-pointer font-semibold"><input type="checkbox" checked={f.is_active} onChange={e => setF({ ...f, is_active: e.target.checked })}/>Active / Visible Status</label></div>
         </CardContent></Card>
 
         <Card className="radius-lg shadow-soft"><CardContent className="pt-6 space-y-4">
           <h3 className="font-display font-extrabold flex items-center gap-2 text-lg"><ImageIcon className="w-5 h-5"/>Product Images</h3>
-          <FileUploader accept="image/*" multiple label="Click to upload images" onUploaded={urls => setF(prev => ({ ...prev, images: [...prev.images, ...urls] }))}/>
-          {f.images.length > 0 && <div className="grid grid-cols-4 md:grid-cols-6 gap-3">{f.images.map((url, i) => (
-            <div key={i} className="relative group aspect-square rounded-xl overflow-hidden border scale-in"><Image src={url} alt="" fill className="object-cover" loading="lazy" sizes="(max-width: 768px) 25vw, 15vw"/><button type="button" onClick={() => removeImg(i)} className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition"><Trash2 className="w-5 h-5 text-white"/></button></div>
-          ))}</div>}
+          <FileUploader accept="image/*" multiple label="Click to upload new images" onUploaded={urls => setF(prev => ({ ...prev, images: [...prev.images, ...urls] }))}/>
+          
+          {f.images.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mt-4">
+              {f.images.map((url, i) => (
+                <div key={i} className="relative rounded-xl border p-2 bg-secondary/30 space-y-2 flex flex-col justify-between scale-in">
+                  <div className="relative aspect-square rounded-lg overflow-hidden border bg-background">
+                    <Image src={url} alt="" fill className="object-cover" />
+                  </div>
+                  <div className="flex gap-1.5 mt-auto">
+                    <label className="flex-1">
+                      <span className="w-full text-center block text-[11px] font-bold py-1.5 px-2 bg-background border hover:bg-secondary rounded-lg cursor-pointer">
+                        Replace
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          const fd = new FormData()
+                          fd.append('file', file)
+                          try {
+                            const res = await fetch('/api/upload', {
+                              method: 'POST',
+                              body: fd,
+                              headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                            })
+                            if (!res.ok) throw new Error('Upload failed')
+                            const data = await res.json()
+                            const newImages = [...f.images]
+                            newImages[i] = data.url
+                            setF({ ...f, images: newImages })
+                            toast.success('Image replaced successfully')
+                          } catch (err) {
+                            toast.error(err.message)
+                          }
+                        }}
+                      />
+                    </label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => removeImg(i)}
+                      className="h-8 px-2 text-destructive border-destructive/20 hover:bg-destructive/10 rounded-lg text-xs"
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent></Card>
 
         <Card className="radius-lg shadow-soft"><CardContent className="pt-6 space-y-4">
@@ -1120,14 +1249,15 @@ function AdminOrders({ refreshTrigger, router }) {
         <Select value={status} onValueChange={setStatus}><SelectTrigger className="w-40 rounded-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All</SelectItem>{statuses.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select>
       </div>
       <Card className="radius-lg shadow-soft"><CardContent className="p-0 overflow-x-auto"><table className="w-full text-sm min-w-[800px]">
-        <thead className="bg-secondary"><tr><th className="text-left p-3">Order #</th><th className="text-left p-3">Date</th><th className="text-left p-3">Customer</th><th className="text-left p-3">Total</th><th className="text-left p-3">Status</th><th className="p-3"></th></tr></thead>
-        <tbody>{!orders ? <tr><td colSpan="6" className="p-8 text-center">Loading...</td></tr> : orders.length === 0 ? <tr><td colSpan="6" className="p-8 text-center text-muted-foreground">No orders</td></tr> : orders.map(o => (
+        <thead className="bg-secondary"><tr><th className="text-left p-3">Order #</th><th className="text-left p-3">Date</th><th className="text-left p-3">Customer</th><th className="text-left p-3">Total</th><th className="text-left p-3">Status</th><th className="text-left p-3">Vendor</th><th className="p-3"></th></tr></thead>
+        <tbody>{!orders ? <tr><td colSpan="7" className="p-8 text-center">Loading...</td></tr> : orders.length === 0 ? <tr><td colSpan="7" className="p-8 text-center text-muted-foreground">No orders</td></tr> : orders.map(o => (
           <tr key={o.id} className="border-t hover:bg-secondary/50">
             <td className="p-3 font-mono font-bold">{o.order_number}</td>
             <td className="p-3">{new Date(o.placed_at).toLocaleDateString('en-IN')}</td>
             <td className="p-3">{o.address?.full_name}</td>
             <td className="p-3 font-bold">{formatINR(o.total)}</td>
             <td className="p-3"><Badge className="capitalize rounded-full">{(o.status || '').replace(/_/g, ' ')}</Badge></td>
+            <td className="p-3 font-medium text-xs text-muted-foreground">{o.vendor_name || 'Unassigned'}</td>
             <td className="p-3"><Button size="sm" variant="outline" onClick={() => router.push(`/admin/orders/${o.id}`)} className="rounded-full">View</Button></td>
           </tr>
         ))}</tbody>
@@ -1356,6 +1486,22 @@ function AdminSettings({ setSettings }) {
           <div><Label>Refund & Return Policy</Label><Textarea value={f.policy_refund || ''} onChange={e => setF({ ...f, policy_refund: e.target.value })} rows={4} className="rounded-xl"/></div>
         </CardContent></Card>
 
+        <Card className="radius-lg shadow-soft"><CardContent className="pt-6 space-y-4">
+          <h3 className="font-display font-extrabold text-lg">GST & Tax Settings</h3>
+          <p className="text-xs text-muted-foreground">These settings control how CGST/SGST vs IGST is calculated for customer invoices. Set to your business's registered state.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><Label>Supplier / Business State (GSTIN State)</Label>
+              <Select value={f.supplier_state || 'Maharashtra'} onValueChange={v => setF({ ...f, supplier_state: v })}>
+                <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Select State"/></SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {INDIAN_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground mt-1">Customers in <strong>{f.supplier_state || 'Maharashtra'}</strong> will be charged CGST + SGST; all others will be charged IGST.</p>
+            </div>
+          </div>
+        </CardContent></Card>
+
         <div className="sticky bottom-4 glass-strong border radius-lg p-3 shadow-elevated"><Button type="submit" size="lg" disabled={loading} className="w-full rounded-full btn-shine">{loading ? <><span className="btn-spinner mr-2"/>Saving...</> : 'Save All Settings'}</Button></div>
       </form>
     </div>
@@ -1508,6 +1654,19 @@ function AdminReports() {
   const [dates, setDates] = useState({ start: '', end: '' })
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [monthlyTrends, setMonthlyTrends] = useState([])
+  const [trendsLoading, setTrendsLoading] = useState(true)
+
+  const fetchMonthlyTrends = async () => {
+    setTrendsLoading(true)
+    try {
+      const res = await fetch('/api/admin/monthly-trends', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      if (res.ok) setMonthlyTrends(await res.json())
+    } catch (e) { console.error('Monthly trends error:', e) }
+    finally { setTrendsLoading(false) }
+  }
 
   const fetchReports = async () => {
     setLoading(true)
@@ -1532,6 +1691,7 @@ function AdminReports() {
 
   useEffect(() => {
     fetchReports()
+    fetchMonthlyTrends()
   }, [])
 
   const exportCSV = () => {
@@ -1676,6 +1836,70 @@ function AdminReports() {
                 </div>
               ))}
             </div>
+          </Card>
+
+          {/* 12-Month Monthly Trends Chart */}
+          <Card className="radius-xl shadow-soft border p-6 col-span-full">
+            <h3 className="font-bold text-sm mb-1">12-Month Order Trends</h3>
+            <p className="text-[11px] text-muted-foreground mb-5">Monthly order volume and revenue — last 12 months</p>
+            {trendsLoading ? (
+              <div className="h-48 skeleton rounded-xl" />
+            ) : monthlyTrends.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-12 text-center">No order data available yet</p>
+            ) : (
+              <div className="space-y-6">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Monthly Revenue (₹)</p>
+                  <div className="flex items-end gap-1.5 h-36 pt-8 relative">
+                    {monthlyTrends.map((m, idx) => {
+                      const maxRev = Math.max(...monthlyTrends.map(x => x.revenue), 1)
+                      const heightPct = Math.max(4, Math.round((m.revenue / maxRev) * 100))
+                      return (
+                        <div key={idx} className="flex-1 flex flex-col items-center group relative">
+                          <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[8px] font-bold bg-popover text-popover-foreground px-1.5 py-0.5 rounded shadow-sm opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-10">
+                            ₹{Number(m.revenue).toLocaleString('en-IN')}
+                          </span>
+                          <div style={{ height: `${heightPct}%` }} className="w-full bg-accent/30 group-hover:bg-accent rounded-t-lg transition-all duration-300" />
+                          <span className="text-[8px] text-muted-foreground mt-1 font-medium">{m.month?.slice(5)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Monthly Order Count</p>
+                  <div className="flex items-end gap-1.5 h-24 pt-6 relative">
+                    {monthlyTrends.map((m, idx) => {
+                      const maxOrds = Math.max(...monthlyTrends.map(x => x.orders), 1)
+                      const heightPct = Math.max(4, Math.round((m.orders / maxOrds) * 100))
+                      return (
+                        <div key={idx} className="flex-1 flex flex-col items-center group relative">
+                          <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[8px] font-bold bg-popover text-popover-foreground px-1.5 py-0.5 rounded shadow-sm opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-10">
+                            {m.orders} orders
+                          </span>
+                          <div style={{ height: `${heightPct}%` }} className="w-full bg-primary/25 group-hover:bg-primary/60 rounded-t-lg transition-all duration-300" />
+                          <span className="text-[8px] text-muted-foreground mt-1">{m.month?.slice(5)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse">
+                    <thead><tr className="bg-secondary"><th className="text-left p-2 font-bold">Month</th><th className="text-right p-2 font-bold">Orders</th><th className="text-right p-2 font-bold">Revenue</th></tr></thead>
+                    <tbody>
+                      {monthlyTrends.map((m, idx) => (
+                        <tr key={idx} className="border-t hover:bg-secondary/30">
+                          <td className="p-2 font-mono">{m.month}</td>
+                          <td className="p-2 text-right font-semibold">{m.orders}</td>
+                          <td className="p-2 text-right font-semibold font-mono">₹{Number(m.revenue).toLocaleString('en-IN')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </Card>
         </>
       )}
@@ -1907,11 +2131,6 @@ function AdminOrderDetail({ orderId }) {
   const router = useRouter()
   const [order, setOrder] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [vendors, setVendors] = useState([])
-  const [selectedVendor, setSelectedVendor] = useState('')
-  const [internalNote, setInternalNote] = useState('')
-  const [assigningLoading, setAssigningLoading] = useState(false)
-
   const load = async () => {
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
@@ -1920,8 +2139,6 @@ function AdminOrderDetail({ orderId }) {
       if (res.ok) {
         const d = await res.json()
         setOrder(d)
-        if (d.assigned_vendor_id) setSelectedVendor(d.assigned_vendor_id)
-        if (d.internal_notes) setInternalNote(d.internal_notes)
       } else {
         toast.error('Failed to load order details')
       }
@@ -1934,10 +2151,6 @@ function AdminOrderDetail({ orderId }) {
 
   useEffect(() => {
     load()
-    fetch('/api/admin/vendors', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
-      .then(r => r.json())
-      .then(d => setVendors(Array.isArray(d) ? d : []))
-      .catch(() => {})
   }, [orderId])
 
   const updateStatus = async (newStatus, extraPayload = {}) => {
@@ -1959,56 +2172,6 @@ function AdminOrderDetail({ orderId }) {
       }
     } catch (e) {
       toast.error(e.message)
-    }
-  }
-
-  const handleAssignVendor = async () => {
-    if (!selectedVendor) { toast.error('Please select a vendor'); return }
-    setAssigningLoading(true)
-    try {
-      const res = await fetch(`/api/orders/${orderId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ assigned_vendor_id: selectedVendor, status: 'vendor_assigned' })
-      })
-      const data = await res.json().catch(() => ({}))
-      if (res.ok) {
-        toast.success('Vendor Assigned! Vendor notified in Realtime.')
-        load()
-      } else {
-        // Show the real error from the server, not a generic message
-        const errMsg = data?.error || data?.message || `Server error (${res.status})`
-        toast.error(`Vendor assignment failed: ${errMsg}`)
-        console.error('[Vendor Assignment Fail]:', data)
-      }
-    } catch (e) {
-      toast.error(`Network error: ${e.message}`)
-      console.error('[Vendor Assignment Exception]:', e)
-    } finally {
-      setAssigningLoading(false)
-    }
-  }
-
-  const handleSaveNotes = async () => {
-    try {
-      const res = await fetch(`/api/orders/${orderId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ internal_notes: internalNote })
-      })
-      if (res.ok) {
-        toast.success('Internal notes saved')
-      } else {
-        toast.error('Failed to save notes')
-      }
-    } catch {
-      toast.error('Failed to save notes')
     }
   }
 
@@ -2050,11 +2213,22 @@ function AdminOrderDetail({ orderId }) {
   const shippingVal = order.shipping_fee || 0
   const discountVal = order.discount || 0
   
-  const gstRate = 0.18
-  const taxableSubtotal = (subtotalVal - discountVal) / (1 + gstRate)
-  const gstAmt = (subtotalVal - discountVal) - taxableSubtotal
-  const cgst = gstAmt / 2
-  const sgst = gstAmt / 2
+  const supplierState = 'Maharashtra'
+  const customerState = order.address?.state || ''
+  const sameState = !customerState || customerState.trim().toLowerCase() === supplierState.toLowerCase()
+
+  const gstBreakdown = order.gst_breakdown || null
+  const totalTaxable = gstBreakdown?.totalTaxable ?? (
+    (order.items || []).reduce((sum, item) => {
+      const rate = item.gst_percent !== undefined ? Number(item.gst_percent) : 18
+      const itemTotal = (item.price_snapshot || 0) * (item.quantity || 1)
+      return sum + (rate > 0 ? itemTotal / (1 + rate / 100) : itemTotal)
+    }, 0)
+  )
+
+  const totalCGST = gstBreakdown?.totalCGST ?? (sameState ? (subtotalVal - discountVal - totalTaxable) / 2 : 0)
+  const totalSGST = gstBreakdown?.totalSGST ?? (sameState ? (subtotalVal - discountVal - totalTaxable) / 2 : 0)
+  const totalIGST = gstBreakdown?.totalIGST ?? (!sameState ? (subtotalVal - discountVal - totalTaxable) : 0)
 
   return (
     <div className="space-y-6 slide-up pb-12">
@@ -2215,58 +2389,41 @@ function AdminOrderDetail({ orderId }) {
             </CardContent>
           </Card>
 
-          {/* 2. Assign Vendor Logistics Partner Card */}
+          {/* 2. Assigned Logistics Partner Card (Read-only display replacing manual assign and notes) */}
           <Card className="radius-xl shadow-soft border">
             <CardContent className="p-6 space-y-4">
               <h3 className="font-display font-extrabold text-lg flex items-center gap-2">
-                <Truck className="w-5 h-5 text-accent" /> Assign Logistics Vendor
+                <Truck className="w-5 h-5 text-accent" /> Logistics Partner
               </h3>
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-xs font-bold text-foreground mb-1.5 block">Select Partner Unit</Label>
-                  <select
-                    value={selectedVendor}
-                    onChange={e => setSelectedVendor(e.target.value)}
-                    className="w-full h-11 rounded-xl bg-background border font-semibold text-xs px-3"
-                  >
-                    <option value="">Select Vendor Partner...</option>
-                    {vendors.map(v => (
-                      <option key={v.id} value={v.id}>
-                        {v.name} ({v.email})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <Button
-                  onClick={handleAssignVendor}
-                  disabled={assigningLoading || !selectedVendor}
-                  className="w-full rounded-xl h-10 font-bold text-xs gold-gradient text-primary shadow-soft flex items-center justify-center gap-2"
-                >
-                  <Truck className="w-4 h-4" /> {assigningLoading ? 'Assigning...' : 'Confirm & Assign Vendor'}
-                </Button>
+              <div className="p-4 rounded-xl bg-secondary/50 border space-y-2">
+                {order.vendor_name ? (
+                  <div>
+                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Assigned Partner Unit</span>
+                    <span className={`font-semibold text-sm block ${order.vendor_name.includes('No vendor available') ? 'text-destructive font-bold' : 'text-foreground'}`}>
+                      {order.vendor_name}
+                    </span>
+                    {order.vendor_email && (
+                      <span className="text-xs text-muted-foreground font-mono block mt-1">
+                        {order.vendor_email}
+                      </span>
+                    )}
+                    {order.assigned_at && (
+                      <div className="pt-2 mt-2 border-t text-[10px] text-muted-foreground">
+                        Assigned on {new Date(order.assigned_at).toLocaleString('en-IN')} by {order.assigned_by || 'System'}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Fulfillment Status</span>
+                    <span className="font-medium text-xs text-muted-foreground mt-1 block">
+                      {order.status === 'pending' 
+                        ? 'Vendor will be assigned automatically upon accepting/approving the order.' 
+                        : 'Unassigned / Pending Vendor Assignment'}
+                    </span>
+                  </div>
+                )}
               </div>
-            </CardContent>
-          </Card>
-
-          {/* 3. Internal Admin Notes Card */}
-          <Card className="radius-xl shadow-soft border">
-            <CardContent className="p-6 space-y-3">
-              <h3 className="font-display font-extrabold text-lg">Internal Admin Notes</h3>
-              <Textarea
-                value={internalNote}
-                onChange={e => setInternalNote(e.target.value)}
-                placeholder="Add confidential fulfillment or verification notes..."
-                className="rounded-xl text-xs"
-                rows={3}
-              />
-              <Button
-                onClick={handleSaveNotes}
-                variant="outline"
-                size="sm"
-                className="w-full rounded-xl text-xs font-bold"
-              >
-                Save Internal Notes
-              </Button>
             </CardContent>
           </Card>
 
@@ -2396,16 +2553,25 @@ function AdminOrderDetail({ orderId }) {
             <tbody>
               <tr>
                 <td className="py-1 text-gray-600">Taxable Value:</td>
-                <td className="py-1 font-mono">₹{taxableSubtotal.toFixed(2)}</td>
+                <td className="py-1 font-mono">₹{totalTaxable.toFixed(2)}</td>
               </tr>
-              <tr>
-                <td className="py-1 text-gray-600">CGST (9%):</td>
-                <td className="py-1 font-mono">₹{cgst.toFixed(2)}</td>
-              </tr>
-              <tr>
-                <td className="py-1 text-gray-600">SGST (9%):</td>
-                <td className="py-1 font-mono">₹{sgst.toFixed(2)}</td>
-              </tr>
+              {sameState ? (
+                <>
+                  <tr>
+                    <td className="py-1 text-gray-600">CGST (incl.):</td>
+                    <td className="py-1 font-mono">₹{totalCGST.toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1 text-gray-600">SGST (incl.):</td>
+                    <td className="py-1 font-mono">₹{totalSGST.toFixed(2)}</td>
+                  </tr>
+                </>
+              ) : (
+                <tr>
+                  <td className="py-1 text-gray-600">IGST (incl.):</td>
+                  <td className="py-1 font-mono">₹{totalIGST.toFixed(2)}</td>
+                </tr>
+              )}
               <tr className="border-t border-dashed">
                 <td className="py-1 font-bold">Total Items Value:</td>
                 <td className="py-1 font-mono font-bold">₹{subtotalVal.toFixed(2)}</td>

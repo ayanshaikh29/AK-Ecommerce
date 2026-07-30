@@ -4,11 +4,12 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ShoppingBag, ArrowRight, Minus, Plus, Trash2 } from 'lucide-react'
+import { ShoppingBag, ArrowRight, Minus, Plus, Trash2, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { useAppContext } from '@/components/providers/AppProvider'
+import { validateCategoryMinOrderValues } from '@/lib/gst-utils'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
@@ -123,6 +124,15 @@ function CartQuantityInput({ item, onUpdateQty, onRemove }) {
 export function CartView() {
   const { cart, cartTotal, updateQty, removeItem } = useAppContext()
   const router = useRouter()
+  const [categories, setCategories] = useState([])
+
+  // Fetch categories to get min_order_value per category
+  useEffect(() => {
+    fetch('/api/categories')
+      .then(r => r.ok ? r.json() : [])
+      .then(cats => setCategories(Array.isArray(cats) ? cats : []))
+      .catch(() => {})
+  }, [])
 
   if (cart.length === 0) {
     return (
@@ -140,29 +150,36 @@ export function CartView() {
   }
 
   const shipping = cartTotal > 1999 ? 0 : 99
-  const totalUnits = cart.reduce((s, i) => s + (i.quantity || 0), 0)
-  const minOrderQty = 6000
-  const isBelowMOQ = totalUnits < minOrderQty
-  const unitsNeeded = minOrderQty - totalUnits
+
+  // Validate per-category minimum order values
+  const movViolations = validateCategoryMinOrderValues(cart, categories)
+  const hasMOVViolation = movViolations.length > 0
 
   return (
     <div className="max-w-6xl mx-auto px-4 md:px-6 py-12">
       <h1 className="font-display text-4xl md:text-5xl font-extrabold mb-4">Shopping Cart</h1>
-      
-      {/* MOQ Warning Banner */}
-      {isBelowMOQ && (
-        <div className="mb-8 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-700 dark:text-amber-300 text-xs font-semibold flex items-center justify-between gap-3 shadow-sm">
-          <div>
-            <p className="font-bold text-sm">⚠️ Minimum Order Quantity Not Met</p>
-            <p className="mt-0.5">
-              Minimum total order quantity is <strong>6,000 units</strong>. You currently have <strong>{totalUnits.toLocaleString()} units</strong> in your cart — please add <strong>{unitsNeeded.toLocaleString()} more units</strong> to enable checkout.
-            </p>
-          </div>
-          <Link href="/products">
-            <Button size="sm" variant="outline" className="border-amber-500/40 text-amber-800 dark:text-amber-200 shrink-0 font-bold">
-              Add More Items
-            </Button>
-          </Link>
+
+      {/* Per-Category Minimum Order Value Warnings */}
+      {hasMOVViolation && (
+        <div className="mb-8 space-y-3">
+          {movViolations.map((v, i) => (
+            <div key={i} className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-700 dark:text-amber-300 text-xs font-semibold flex items-center justify-between gap-3 shadow-sm">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-sm">⚠️ Category Minimum Order Value Required</p>
+                  <p className="mt-0.5">
+                    <strong>{v.categoryName} items:</strong> {formatINR(v.currentValue)} of {formatINR(v.minValue)} required — add <strong>{formatINR(v.shortage)}</strong> more
+                  </p>
+                </div>
+              </div>
+              <Link href={`/products?category=${v.categoryName.toLowerCase().replace(/\s+/g, '-')}`}>
+                <Button size="sm" variant="outline" className="border-amber-500/40 text-amber-800 dark:text-amber-200 shrink-0 font-bold whitespace-nowrap">
+                  Add More
+                </Button>
+              </Link>
+            </div>
+          ))}
         </div>
       )}
 
@@ -194,10 +211,6 @@ export function CartView() {
         <Card className="h-fit slide-in-right radius-lg shadow-soft sticky top-24">
           <CardContent className="pt-6 space-y-4">
             <h3 className="font-display font-extrabold text-2xl">Order Summary</h3>
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>Total Units</span>
-              <span className={`font-bold ${isBelowMOQ ? 'text-amber-600' : 'text-emerald-600'}`}>{totalUnits.toLocaleString()} / 6,000</span>
-            </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Subtotal</span>
               <span className="font-semibold">{formatINR(cartTotal)}</span>
@@ -211,12 +224,17 @@ export function CartView() {
               <span>Total</span>
               <span>{formatINR(cartTotal + shipping)}</span>
             </div>
-            <Button 
-              onClick={(e) => { addRipple(e); router.push('/checkout') }} 
-              disabled={isBelowMOQ}
+            {hasMOVViolation && (
+              <p className="text-xs text-amber-600 font-semibold text-center bg-amber-500/10 rounded-xl p-2">
+                Meet category minimums above to checkout
+              </p>
+            )}
+            <Button
+              onClick={(e) => { addRipple(e); router.push('/checkout') }}
+              disabled={hasMOVViolation}
               className="w-full rounded-full h-12 btn-shine ripple font-semibold disabled:opacity-50"
             >
-              {isBelowMOQ ? `MOQ (6,000 units) Required` : <>Proceed to Checkout <ArrowRight className="ml-1 w-4 h-4" /></>}
+              {hasMOVViolation ? 'Category Minimum Required' : <><span>Proceed to Checkout</span> <ArrowRight className="ml-1 w-4 h-4" /></>}
             </Button>
           </CardContent>
         </Card>

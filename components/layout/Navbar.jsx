@@ -247,7 +247,7 @@ export function Navbar({ settings }) {
                 <ShoppingBag className={`w-5 h-5 transition-transform duration-300 ${cartBounce ? 'animate-bounce' : ''}`}/>
                 {cartCount > 0 && (
                   <span className={`absolute -top-0.5 -right-0.5 gold-gradient text-primary text-[10px] font-extrabold rounded-full w-5 h-5 flex items-center justify-center shadow-soft transition-transform duration-300 ${cartBounce ? 'scale-125 shadow-glow' : ''}`}>
-                    {cartCount}
+                    {cartCount > 99 ? '99+' : cartCount}
                   </span>
                 )}
               </button>

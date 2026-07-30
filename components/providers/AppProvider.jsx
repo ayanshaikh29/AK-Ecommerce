@@ -155,7 +155,7 @@ function AppContentInner({ children }) {
     broadcastCartUpdate([])
   }, [broadcastCartUpdate])
 
-  const cartCount = useMemo(() => cart.reduce((s, i) => s + i.quantity, 0), [cart])
+  const cartCount = useMemo(() => cart.length, [cart])
   const cartTotal = useMemo(() => cart.reduce((s, i) => s + i.price_snapshot * i.quantity, 0), [cart])
 
   const logout = useCallback(async () => {

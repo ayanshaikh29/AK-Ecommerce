@@ -56,7 +56,7 @@ export function MobileBottomNav() {
                 <tab.icon className={`w-5 h-5 transition-transform duration-300 ${isActive ? 'scale-110' : ''} ${isBouncing ? 'scale-125 animate-bounce text-emerald-600' : ''}`} />
                 {tab.badge > 0 && (
                   <span className={`absolute -top-1.5 -right-2 gold-gradient text-primary text-[9px] font-extrabold rounded-full w-4 h-4 flex items-center justify-center shadow-sm transition-transform duration-300 ${isBouncing ? 'scale-125 shadow-glow' : ''}`}>
-                    {tab.badge > 9 ? '9+' : tab.badge}
+                    {tab.badge > 99 ? '99+' : tab.badge}
                   </span>
                 )}
               </div>

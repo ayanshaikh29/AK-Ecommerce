@@ -1,17 +1,20 @@
 'use client'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
-import { MapPin, ChevronDown, CheckCircle2, ArrowRight, Eye } from 'lucide-react'
+import { MapPin, ChevronDown, CheckCircle2, ArrowRight, Eye, AlertTriangle, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAppContext } from '@/components/providers/AppProvider'
+import { INDIAN_STATES } from '@/lib/constants/indian-states'
+import { calculateCartGST, validateCategoryMinOrderValues } from '@/lib/gst-utils'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
@@ -39,9 +42,24 @@ export function CheckoutView() {
   const [isOrdered, setIsOrdered] = useState(false)
   const [lastOrderData, setLastOrderData] = useState(null)
   const [mounted, setMounted] = useState(false)
+  const [categories, setCategories] = useState([])
+  const [supplierState, setSupplierState] = useState('Maharashtra')
 
   useEffect(() => {
     setMounted(true)
+
+    // Load categories for MOV validation
+    fetch('/api/categories')
+      .then(r => r.ok ? r.json() : [])
+      .then(cats => setCategories(Array.isArray(cats) ? cats : []))
+      .catch(() => {})
+
+    // Load settings for supplier_state
+    fetch('/api/settings')
+      .then(r => r.ok ? r.json() : {})
+      .then(s => { if (s?.supplier_state) setSupplierState(s.supplier_state) })
+      .catch(() => {})
+
     if (user) {
       setAddress(a => ({ ...a, full_name: user.full_name || '', phone: user.phone || '' }))
 
@@ -91,12 +109,27 @@ export function CheckoutView() {
   }
 
   const shipping = cartTotal > 1999 ? 0 : 99
+
+  // Per-category MOV validation
+  const movViolations = validateCategoryMinOrderValues(cart, categories)
+  const hasMOVViolation = movViolations.length > 0
+
+  // GST breakdown (recalculated whenever address.state changes)
+  const gstBreakdown = calculateCartGST(
+    cart.map(i => ({
+      ...i,
+      price_snapshot: i.price_snapshot,
+      quantity: i.quantity,
+      gst_percent: (i.gst_percent !== undefined && i.gst_percent !== null) ? i.gst_percent : 18,
+      hsn_code: i.hsn_code || '',
+      product_name_snapshot: i.product_name_snapshot,
+    })),
+    address.state,
+    supplierState
+  )
+
+  const { sameState, totalTaxable, totalCGST, totalSGST, totalIGST, totalTax } = gstBreakdown
   const total = cartTotal + shipping
-  
-  const totalUnits = cart.reduce((s, i) => s + (i.quantity || 0), 0)
-  const minOrderQty = 6000
-  const isBelowMOQ = totalUnits < minOrderQty
-  const unitsNeeded = minOrderQty - totalUnits
 
   const selectSavedAddress = (addr) => {
     setAddress({
@@ -114,8 +147,9 @@ export function CheckoutView() {
   }
 
   const placeOrder = async () => {
-    if (isBelowMOQ) {
-      toast.error(`Minimum order quantity is 6,000 units. You currently have ${totalUnits} units — please add ${unitsNeeded} more units to place an order.`)
+    if (hasMOVViolation) {
+      const msgs = movViolations.map(v => `${v.categoryName}: add ${formatINR(v.shortage)} more`).join('; ')
+      toast.error(`Category minimum not met — ${msgs}`)
       return
     }
     for (const k of ['full_name', 'phone', 'line1', 'city', 'state', 'pincode']) {
@@ -132,7 +166,8 @@ export function CheckoutView() {
           subtotal: cartTotal,
           shipping_fee: shipping,
           total,
-          discount: 0
+          discount: 0,
+          gst_breakdown: gstBreakdown
         })
       })
       if (!res.ok) {
@@ -156,20 +191,29 @@ export function CheckoutView() {
   return (
     <div className="max-w-6xl mx-auto px-4 md:px-6 py-8 md:py-12 text-left">
       <h1 className="font-display text-3xl md:text-4xl font-extrabold mb-6">Checkout</h1>
-      
-      {isBelowMOQ && (
-        <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-700 dark:text-amber-300 text-xs font-semibold flex items-center justify-between gap-3">
-          <div>
-            <p className="font-bold text-sm">⚠️ Minimum Order Quantity Warning</p>
-            <p className="mt-0.5">
-              Minimum order quantity is <strong>6,000 units</strong>. You have <strong>{totalUnits.toLocaleString()} units</strong> in your cart. Add <strong>{unitsNeeded.toLocaleString()} more units</strong> to place order.
-            </p>
-          </div>
-          <Button size="sm" onClick={() => router.push('/cart')} variant="outline" className="border-amber-500/40 text-amber-800 dark:text-amber-200 shrink-0 font-bold">
-            Add Units
-          </Button>
+
+      {/* Per-Category MOV Warnings */}
+      {hasMOVViolation && (
+        <div className="mb-6 space-y-2">
+          {movViolations.map((v, i) => (
+            <div key={i} className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-700 dark:text-amber-300 text-xs font-semibold flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-sm">⚠️ Category Minimum Order Value Required</p>
+                  <p className="mt-0.5">
+                    <strong>{v.categoryName} items:</strong> {formatINR(v.currentValue)} of {formatINR(v.minValue)} required — add <strong>{formatINR(v.shortage)}</strong> more
+                  </p>
+                </div>
+              </div>
+              <Button size="sm" onClick={() => router.push('/cart')} variant="outline" className="border-amber-500/40 text-amber-800 dark:text-amber-200 shrink-0 font-bold">
+                Go to Cart
+              </Button>
+            </div>
+          ))}
         </div>
       )}
+
       <div className="grid lg:grid-cols-3 gap-6 md:gap-8">
         <div className="lg:col-span-2 space-y-6">
 
@@ -223,9 +267,8 @@ export function CheckoutView() {
                   ['line1', 'Address line 1', 'sm:col-span-2'],
                   ['line2', 'Address line 2 (optional)', 'sm:col-span-2'],
                   ['city', 'City'],
-                  ['state', 'State'],
                   ['pincode', 'Pincode'],
-                  ['gst', 'GST Number (optional)']
+                  ['gst', 'GST Number (optional)'],
                 ].map(([k, l, cls]) => (
                   <div key={k} className={cls}>
                     <Label className="mb-1.5 text-xs font-semibold">{l}</Label>
@@ -236,7 +279,33 @@ export function CheckoutView() {
                     />
                   </div>
                 ))}
+
+                {/* State Dropdown — Indian States */}
+                <div>
+                  <Label className="mb-1.5 text-xs font-semibold">State *</Label>
+                  <Select value={address.state} onValueChange={v => setAddress({ ...address, state: v })}>
+                    <SelectTrigger className="h-11 rounded-xl">
+                      <SelectValue placeholder="Select State" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      {INDIAN_STATES.map(s => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
+
+              {/* GST Type Badge */}
+              {address.state && (
+                <div className={`mt-4 text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-2 ${sameState ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-blue-500/10 text-blue-700 dark:text-blue-300'}`}>
+                  <span className={`w-2 h-2 rounded-full ${sameState ? 'bg-emerald-500' : 'bg-blue-500'}`} />
+                  {sameState
+                    ? `Intra-state supply (${address.state}) — CGST + SGST applies`
+                    : `Inter-state supply (${address.state} ← ${supplierState}) — IGST applies`
+                  }
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -272,14 +341,46 @@ export function CheckoutView() {
               ))}
             </div>
             <Separator />
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Subtotal</span>
-              <span className="font-medium">{formatINR(cartTotal)}</span>
+
+            {/* Price Breakdown */}
+            <div className="space-y-1.5 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Taxable Value</span>
+                <span className="font-medium">{formatINR(totalTaxable)}</span>
+              </div>
+
+              {/* GST Breakdown */}
+              {address.state ? (
+                sameState ? (
+                  <>
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>CGST (incl.)</span>
+                      <span>{formatINR(totalCGST)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>SGST (incl.)</span>
+                      <span>{formatINR(totalSGST)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>IGST (incl.)</span>
+                    <span>{formatINR(totalIGST)}</span>
+                  </div>
+                )
+              ) : (
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>GST (select state to split)</span>
+                  <span className="italic">—</span>
+                </div>
+              )}
+
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Shipping Logistics</span>
+                <span className="font-medium">{shipping === 0 ? <span className="text-emerald-600 font-bold">FREE</span> : formatINR(shipping)}</span>
+              </div>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Shipping Logistics</span>
-              <span className="font-medium">{shipping === 0 ? <span className="text-emerald-600 font-bold">FREE</span> : formatINR(shipping)}</span>
-            </div>
+
             <Separator />
             <div className="flex justify-between font-display font-extrabold text-xl">
               <span>Total</span>
@@ -287,11 +388,11 @@ export function CheckoutView() {
             </div>
             <Button
               onClick={(e) => { addRipple(e); placeOrder() }}
-              disabled={loading || isBelowMOQ}
+              disabled={loading || hasMOVViolation}
               className="w-full rounded-full h-12 btn-shine ripple font-semibold disabled:opacity-50 mt-2"
               size="lg"
             >
-              {loading ? <><span className="btn-spinner mr-2" />Placing order...</> : (isBelowMOQ ? 'MOQ (6,000 units) Required' : 'Place Order')}
+              {loading ? <><span className="btn-spinner mr-2" />Placing order...</> : hasMOVViolation ? 'Category Minimum Required' : 'Place Order'}
             </Button>
           </CardContent>
         </Card>

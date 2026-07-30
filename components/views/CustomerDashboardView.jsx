@@ -5,7 +5,7 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { toast } from 'sonner'
-import { Grid3x3, Clock, PackageCheck, CheckCircle2, MessageCircle, ChevronRight, Heart, User, HeadphonesIcon, ShoppingBag, ArrowRight, Truck, Award, Sparkles, FileText, BatteryCharging, AlertCircle } from 'lucide-react'
+import { Grid3x3, Clock, PackageCheck, CheckCircle2, MessageCircle, ChevronRight, Heart, User, HeadphonesIcon, ShoppingBag, ArrowRight, Truck, Award, Sparkles, FileText, BatteryCharging, AlertCircle, ShoppingBasket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -238,14 +238,15 @@ export function CustomerDashboardView({ user }) {
         <div className="flex items-center justify-between mb-5">
           <h2 className="font-display text-2xl font-extrabold">Shop by Category</h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { name: 'Office Stationery', slug: 'office-stationery', icon: FileText, img: '/category-stationery.jpg', desc: 'Pens, paper, files & more' },
             { name: 'Housekeeping', slug: 'housekeeping', icon: Sparkles, img: '/category-housekeeping.jpg', desc: 'Cleaning & janitorial supplies' },
-            { name: 'UPS Solutions', slug: 'ups-solutions', icon: BatteryCharging, img: '/category-ups.jpg', desc: 'Power backup & industrial UPS' }
+            { name: 'UPS Solutions', slug: 'ups-solutions', icon: BatteryCharging, img: '/category-ups.jpg', desc: 'Power backup & industrial UPS' },
+            { name: 'Grocery', slug: 'grocery', icon: ShoppingBasket, img: '/category-grocery.jpg', desc: 'Pantry & kitchen essentials' }
           ].map((cat, i) => (
             <Link key={i} href={`/products?category=${cat.slug}`} className="group relative h-44 rounded-2xl overflow-hidden shadow-soft">
-              <Image src={cat.img} alt={cat.name} fill className="object-cover group-hover:scale-105 transition-transform duration-500" sizes="(max-width: 768px) 100vw, 33vw" />
+              <Image src={cat.img} alt={cat.name} fill className="object-cover group-hover:scale-105 transition-transform duration-500" sizes="(max-width: 768px) 100vw, 25vw" />
               <div className="absolute inset-0 bg-gradient-to-r from-primary/90 to-primary/40" />
               <div className="absolute inset-0 p-5 flex items-center gap-4">
                 <div className="w-11 h-11 gold-gradient rounded-xl flex items-center justify-center shrink-0 group-hover:rotate-6 transition-transform">

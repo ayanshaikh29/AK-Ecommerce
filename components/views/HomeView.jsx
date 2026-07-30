@@ -5,7 +5,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ArrowRight, ArrowUpRight, Truck, Award, Shield, Zap, TrendingUp, Building2, Sparkles, Grid3x3, Heart, ShoppingBag, Star, PlayCircle, FileText, BatteryCharging, Clock, PackageCheck, AlertCircle, CheckCircle2, RotateCcw, MessageCircle, ChevronRight, ChevronLeft, Lock, ShieldCheck } from 'lucide-react'
+import { ArrowRight, ArrowUpRight, Truck, Award, Shield, Zap, TrendingUp, Building2, Sparkles, Grid3x3, Heart, ShoppingBag, Star, PlayCircle, FileText, BatteryCharging, Clock, PackageCheck, AlertCircle, CheckCircle2, RotateCcw, MessageCircle, ChevronRight, ChevronLeft, Lock, ShieldCheck, ShoppingBasket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -15,7 +15,7 @@ import { RecentlyViewed } from '@/components/product/RecentlyViewed'
 import { CatalogAccessPendingCard } from '@/components/ui/CatalogAccessPendingCard'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
-const catIcon = { 'office-stationery': FileText, 'housekeeping': Sparkles, 'ups-solutions': BatteryCharging }
+const catIcon = { 'office-stationery': FileText, 'housekeeping': Sparkles, 'ups-solutions': BatteryCharging, 'grocery': ShoppingBasket }
 
 function addRipple(e) {
   const btn = e.currentTarget; if (!btn) return
@@ -92,6 +92,13 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
       slug: 'ups-solutions',
       description: 'UPS systems, backup batteries & industrial supplies',
       image_url: '/category-ups.jpg'
+    },
+    {
+      id: 'cat-grocery',
+      name: 'Grocery',
+      slug: 'grocery',
+      description: 'Daily groceries, pantry supplies & office kitchen essentials',
+      image_url: '/category-grocery.jpg'
     }
   ]
 
@@ -107,6 +114,7 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
               { name: 'Office Stationery', slug: 'office-stationery', icon: FileText },
               { name: 'Housekeeping', slug: 'housekeeping', icon: Sparkles },
               { name: 'UPS Solutions', slug: 'ups-solutions', icon: BatteryCharging },
+              { name: 'Grocery', slug: 'grocery', icon: ShoppingBasket },
               { name: 'All Products', slug: '', icon: Grid3x3 }
             ].map((cat, i) => {
               const Icon = cat.icon
@@ -155,9 +163,9 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
         <div className="max-w-2xl mb-12 reveal">
           <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-3">— Categories</p>
           <h2 className="font-display text-4xl md:text-6xl font-extrabold mb-4 text-balance">Everything your <span className="gold-shine">business</span> needs</h2>
-          <p className="text-muted-foreground text-lg">Three curated collections. Hundreds of products. One trusted supplier.</p>
+          <p className="text-muted-foreground text-lg">Four curated collections. Hundreds of products. One trusted supplier.</p>
         </div>
-        <div className="grid md:grid-cols-3 gap-6">
+        <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-6">
           {categoriesList.map((c, i) => {
             const Icon = catIcon[c.slug] || Grid3x3
             return (

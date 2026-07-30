@@ -35,6 +35,66 @@ function db() {
   return _supabase
 }
 
+function extractMetadata(prod) {
+  if (!prod) return prod;
+  let brand = '';
+  let unit = '';
+  let weight = '';
+  let tags = '';
+  let thumbnail = '';
+  let gallery_images = [];
+  let hsn_code = '';
+  let gst_percent = 18;
+
+  let cleanDescription = prod.description || '';
+  const metaMatch = cleanDescription.match(/<!--METADATA:([\s\S]*?)-->/);
+  if (metaMatch) {
+    try {
+      const meta = JSON.parse(metaMatch[1]);
+      brand = meta.brand || '';
+      unit = meta.unit || '';
+      weight = meta.weight || '';
+      tags = meta.tags || '';
+      thumbnail = meta.thumbnail || '';
+      gallery_images = meta.gallery_images || [];
+      hsn_code = meta.hsn_code || '';
+      gst_percent = meta.gst_percent !== undefined ? Number(meta.gst_percent) : 18;
+      
+      cleanDescription = cleanDescription.replace(/<!--METADATA:([\s\S]*?)-->/, '').trim();
+    } catch (e) {
+      console.error('[Metadata Parse Error]:', e);
+    }
+  }
+
+  return {
+    ...prod,
+    description: cleanDescription,
+    brand: prod.brand || brand,
+    unit: prod.unit || unit,
+    weight: prod.weight || weight,
+    tags: prod.tags || tags,
+    thumbnail: prod.thumbnail || thumbnail,
+    gallery_images: prod.gallery_images || gallery_images,
+    hsn_code: prod.hsn_code || hsn_code,
+    gst_percent: prod.gst_percent !== undefined ? Number(prod.gst_percent) : gst_percent
+  }
+}
+
+function injectMetadata(body) {
+  const cleanDescription = (body.description || '').replace(/<!--METADATA:([\s\S]*?)-->/, '').trim();
+  const extraMetadata = {
+    brand: body.brand || '',
+    unit: body.unit || '',
+    weight: body.weight || '',
+    tags: body.tags || '',
+    thumbnail: body.thumbnail || '',
+    gallery_images: body.gallery_images || body.images || [],
+    hsn_code: body.hsn_code || '',
+    gst_percent: body.gst_percent !== undefined ? Number(body.gst_percent) : 18
+  };
+  return cleanDescription + '\n\n<!--METADATA:' + JSON.stringify(extraMetadata) + '-->';
+}
+
 function hashPw(pw) { return crypto.createHmac('sha256', SECRET).update(pw).digest('hex') }
 function sign(payload) {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
@@ -189,15 +249,36 @@ async function ensureSeed() {
     })
   }
 
-  // Only seed categories if none exist — never delete existing ones
-  const { data: existingCats } = await supabase.from('categories').select('id').limit(1)
+  // Ensure categories exist and have proper min_order_value set
+  const { data: existingCats } = await supabase.from('categories').select('id, slug')
   if (!existingCats || existingCats.length === 0) {
     const cats = [
-      { name: 'Office Stationery', slug: 'office-stationery', description: 'Papers, files, pens, notebooks & printer supplies', image_url: '/category-stationery.jpg', icon: 'FileText' },
-      { name: 'Housekeeping', slug: 'housekeeping', description: 'Cleaning chemicals, tissues, mops & sanitation supplies', image_url: '/category-housekeeping.jpg', icon: 'Sparkles' },
-      { name: 'UPS Solutions', slug: 'ups-solutions', description: 'UPS systems, batteries & power backup accessories', image_url: '/category-ups.jpg', icon: 'BatteryCharging' },
+      { name: 'Office Stationery', slug: 'office-stationery', description: 'Papers, files, pens, notebooks & printer supplies', image_url: '/category-stationery.jpg', icon: 'FileText', min_order_value: 2000 },
+      { name: 'Housekeeping', slug: 'housekeeping', description: 'Cleaning chemicals, tissues, mops & sanitation supplies', image_url: '/category-housekeeping.jpg', icon: 'Sparkles', min_order_value: 5000 },
+      { name: 'UPS Solutions', slug: 'ups-solutions', description: 'UPS systems, batteries & power backup accessories', image_url: '/category-ups.jpg', icon: 'BatteryCharging', min_order_value: null },
+      { name: 'Grocery', slug: 'grocery', description: 'Daily groceries, pantry supplies & office kitchen essentials', image_url: '/category-grocery.jpg', icon: 'ShoppingBasket', min_order_value: null },
     ].map(c => ({ id: uuidv4(), ...c, created_at: now }))
     await supabase.from('categories').insert(cats)
+  } else {
+    // Ensure min_order_value values are synced on existing categories
+    await supabase.from('categories').update({ min_order_value: 5000 }).eq('slug', 'housekeeping')
+    await supabase.from('categories').update({ min_order_value: 2000 }).eq('slug', 'office-stationery')
+    await supabase.from('categories').update({ min_order_value: null }).eq('slug', 'ups-solutions')
+    
+    // Ensure Grocery category exists
+    const hasGrocery = existingCats.some(c => c.slug === 'grocery')
+    if (!hasGrocery) {
+      await supabase.from('categories').insert({
+        id: uuidv4(),
+        name: 'Grocery',
+        slug: 'grocery',
+        description: 'Daily groceries, pantry supplies & office kitchen essentials',
+        image_url: '/category-grocery.jpg',
+        icon: 'ShoppingBasket',
+        min_order_value: null,
+        created_at: now
+      })
+    }
   }
 
   // Only seed products if none exist — never delete existing ones
@@ -250,7 +331,8 @@ async function ensureSeed() {
     promo_code: 'AK100', whatsapp_number: '918308860894', contact_phone: '+91 83088 60894',
     contact_email: 'akenterprises1411@gmail.com', contact_address: 'Pune - 411004',
     contact_person: 'Mr. Sagar Lahole', year_established: '2020',
-    marquee_messages: ['🚚 Free Pan-India Delivery on Bulk Orders'], updated_at: now,
+    marquee_messages: ['🚚 Free Pan-India Delivery on Bulk Orders'],
+    supplier_state: 'Maharashtra', updated_at: now,
   })
   await supabase.from('meta').upsert({ id: 'seed', version: SEED_VERSION, done_at: now })
   _seeded = true
@@ -386,6 +468,18 @@ async function route(req, method) {
       const { email, password } = body
       const { data: u } = await supabase.from('users').select('*').eq('email', email).eq('password', hashPw(password)).maybeSingle()
       if (!u) return err('Invalid credentials', 401)
+
+      // Check if vendor account is disabled
+      if (u.role === 'vendor') {
+        const { data: vendorRecord } = await supabase.from('vendors').select('id').eq('user_id', u.id).maybeSingle()
+        if (vendorRecord) {
+          const { data: disabledStore } = await supabase.from('settings').select('marquee_messages').eq('id', 'disabled_vendors').maybeSingle()
+          const disabledList = disabledStore?.marquee_messages || []
+          if (disabledList.includes(vendorRecord.id)) {
+            return err('Your account has been disabled — contact AK Enterprises', 403)
+          }
+        }
+      }
 
       // Self-heal: ensure profiles row exists (only for roles allowed by profiles_role_check)
       const PROFILE_ALLOWED_ROLES = ['customer', 'admin']
@@ -583,19 +677,20 @@ async function route(req, method) {
       else query = query.order('created_at', { ascending: false })
       
       const { data: list } = await query
-      const listMapped = (list || []).map(p => {
-        const customPrice = customerPricingMap ? customerPricingMap.get(p.id) : p.price
-        const rawImgs = (p.product_images || []).map(img => img.image_url).filter(Boolean)
+       const listMapped = (list || []).map(p => {
+        const withMeta = extractMetadata(p)
+        const customPrice = customerPricingMap ? customerPricingMap.get(p.id) : withMeta.price
+        const rawImgs = (withMeta.product_images || []).map(img => img.image_url).filter(Boolean)
         let finalImgs = []
         if (rawImgs.length > 0) finalImgs = rawImgs
-        else if (p.images && p.images.length > 0) finalImgs = p.images.filter(Boolean)
-        else if (p.image_url) finalImgs = [p.image_url]
+        else if (withMeta.images && withMeta.images.length > 0) finalImgs = withMeta.images.filter(Boolean)
+        else if (withMeta.image_url) finalImgs = [withMeta.image_url]
         else finalImgs = ['/placeholder.png']
 
         return {
-          ...p,
-          price: customPrice !== undefined ? customPrice : p.price,
-          original_default_price: user.role === 'admin' ? p.price : undefined,
+          ...withMeta,
+          price: customPrice !== undefined ? customPrice : withMeta.price,
+          original_default_price: user.role === 'admin' ? withMeta.price : undefined,
           images: finalImgs,
           image_url: finalImgs[0]
         }
@@ -625,10 +720,13 @@ async function route(req, method) {
       const { data: related } = await supabase.from('products').select('*, product_images(image_url)').eq('category_id', prod.category_id).neq('id', prod.id).limit(4)
       const { data: reviews } = await supabase.from('reviews').select('*').eq('product_id', prod.id).order('created_at', { ascending: false })
       
-      let relatedMapped = (related || []).map(p => ({
-        ...p,
-        images: p.product_images?.map(img => img.image_url) || []
-      }))
+      let relatedMapped = (related || []).map(p => {
+        const rWithMeta = extractMetadata(p)
+        return {
+          ...rWithMeta,
+          images: rWithMeta.product_images?.map(img => img.image_url) || []
+        }
+      })
 
       if (user.role === 'customer') {
         const visibleMap = await getCustomerVisiblePricingMap(user.id)
@@ -637,9 +735,10 @@ async function route(req, method) {
           .map(r => ({ ...r, price: visibleMap.get(r.id) }))
       }
 
+      const prodWithMeta = extractMetadata(prod)
       const prodMapped = {
-        ...prod,
-        images: prod.product_images?.map(img => img.image_url) || []
+        ...prodWithMeta,
+        images: prodWithMeta.product_images?.map(img => img.image_url) || []
       }
       return json({ ...prodMapped, category: cat, related: relatedMapped, reviews: reviews || [] })
     }
@@ -651,7 +750,7 @@ async function route(req, method) {
         id: pId, 
         name: body.name, 
         slug: (body.name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-'), 
-        description: body.description, 
+        description: injectMetadata(body), 
         price: body.price, 
         mrp: body.mrp, 
         discount_percent: body.mrp?Math.round((1-body.price/body.mrp)*100):0, 
@@ -669,24 +768,36 @@ async function route(req, method) {
         const imgDocs = body.images.map((url, idx) => ({ id: uuidv4(), product_id: pId, image_url: url, sort_order: idx, created_at: now }))
         await supabase.from('product_images').insert(imgDocs)
       }
-      return json({ ...doc, images: body.images || [] })
+      return json({ ...extractMetadata(doc), images: body.images || [] })
     }
     if (method === 'PUT' && p[1]) {
       if (!user || user.role !== 'admin') return err('Forbidden', 403)
       const now = new Date().toISOString()
+      
+      // Load existing product first to implement partial save behavior
+      const { data: existing } = await supabase.from('products').select('*').eq('id', p[1]).maybeSingle()
+      if (!existing) return err('Product not found', 404)
+      const existingWithMeta = extractMetadata(existing)
+
+      // Merge only the provided body fields with existing values
+      const merged = { ...existingWithMeta, ...body }
+      
       const upd = { 
-        name: body.name, 
-        slug: body.slug, 
-        description: body.description, 
-        price: body.price, 
-        mrp: body.mrp, 
-        category_id: body.category_id, 
-        stock_quantity: body.stock_quantity, 
-        sku: body.sku, 
-        is_active: body.is_active, 
+        name: merged.name, 
+        slug: merged.slug || (merged.name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-'), 
+        description: injectMetadata(merged), 
+        price: merged.price, 
+        mrp: merged.mrp, 
+        category_id: merged.category_id, 
+        stock_quantity: merged.stock_quantity, 
+        sku: merged.sku, 
+        is_active: merged.is_active, 
         updated_at: now 
       }
-      if (body.mrp && body.price) upd.discount_percent = Math.round((1-body.price/body.mrp)*100)
+      // Remove undefined keys so we don't overwrite with undefined
+      Object.keys(upd).forEach(k => upd[k] === undefined && delete upd[k])
+      if (merged.mrp && merged.price) upd.discount_percent = Math.round((1-merged.price/merged.mrp)*100)
+      
       await supabase.from('products').update(upd).eq('id', p[1])
       if (body.images) {
         await supabase.from('product_images').delete().eq('product_id', p[1])
@@ -964,11 +1075,59 @@ async function route(req, method) {
       const { items, address, payment_method } = body
       if (!items?.length || !address) return err('Invalid order request', 400)
       
-      // 1. Minimum Order Quantity (MOQ) Check
-      const minOrderQty = await getMinOrderQuantity()
-      const totalUnits = items.reduce((sum, item) => sum + Math.max(1, Number(item.quantity) || 1), 0)
-      if (totalUnits < minOrderQty) {
-        return err(`Minimum order quantity is ${minOrderQty} units. You currently have ${totalUnits} units — please add ${minOrderQty - totalUnits} more.`, 400)
+      // 1. Validate Category Minimum Order Values (server-side enforcement)
+      const DEFAULT_MINS = { 'housekeeping': 5000, 'office-stationery': 2000, 'ups-solutions': 0, 'grocery': 0 }
+      const { data: allCats } = await supabase.from('categories').select('*')
+      const catList = (allCats && allCats.length > 0) ? allCats : [
+        { id: 'hk', name: 'Housekeeping', slug: 'housekeeping', min_order_value: 5000 },
+        { id: 'os', name: 'Office Stationery', slug: 'office-stationery', min_order_value: 2000 },
+        { id: 'ups', name: 'UPS Solutions', slug: 'ups-solutions', min_order_value: 0 },
+        { id: 'grocery', name: 'Grocery', slug: 'grocery', min_order_value: 0 }
+      ]
+
+      const catMap = Object.fromEntries(catList.map(c => [c.id, c]))
+      const catMapBySlug = Object.fromEntries(catList.filter(c => c.slug).map(c => [c.slug.toLowerCase(), c]))
+
+      const catTotals = {}
+      for (const item of items) {
+        let cat = null
+        const prodRes = await supabase.from('products').select('id, category_id, name').eq('id', item.product_id || item.id).maybeSingle()
+        const catId = prodRes?.data?.category_id || item.category_id
+
+        if (catId && catMap[catId]) {
+          cat = catMap[catId]
+        } else if (item.category_slug && catMapBySlug[item.category_slug.toLowerCase()]) {
+          cat = catMapBySlug[item.category_slug.toLowerCase()]
+        }
+
+        const pName = (prodRes?.data?.name || item.product_name_snapshot || item.name || '').toLowerCase()
+        if (!cat) {
+          if (pName.includes('pencil') || pName.includes('paper') || pName.includes('stationery') || pName.includes('pen') || pName.includes('apsara')) {
+            cat = catMapBySlug['office-stationery']
+          } else if (pName.includes('spoon') || pName.includes('freshener') || pName.includes('housekeeping')) {
+            cat = catMapBySlug['housekeeping']
+          }
+        }
+
+        if (!cat) continue
+
+        const slugKey = (cat.slug || '').toLowerCase()
+        const minVal = (cat.min_order_value !== undefined && cat.min_order_value !== null)
+          ? Number(cat.min_order_value)
+          : (DEFAULT_MINS[slugKey] ?? (pName.includes('pencil') || slugKey.includes('stationery') ? 2000 : slugKey.includes('housekeeping') ? 5000 : 0))
+
+        if (!minVal || minVal <= 0) continue
+
+        const catKey = cat.id || cat.slug || cat.name
+        const itemTotal = (item.price_snapshot || item.price || 0) * Math.max(1, Number(item.quantity) || 1)
+        catTotals[catKey] = (catTotals[catKey] || { name: cat.name, total: 0, min: minVal })
+        catTotals[catKey].total += itemTotal
+      }
+
+      const violations = Object.values(catTotals).filter(c => c.total < c.min)
+      if (violations.length > 0) {
+        const msgs = violations.map(v => `${v.name}: ₹${v.total.toFixed(0)} items in cart — add ₹${(v.min - v.total).toFixed(0)} more to meet ₹${v.min} minimum`).join('; ')
+        return err(`Category minimum order values not met — ${msgs}`, 400)
       }
 
       // 2. Validate Customer Catalog Assignment & Custom Prices Server-Side
@@ -1142,6 +1301,8 @@ async function route(req, method) {
       if (targetStatus === 'out for delivery') targetStatus = 'out_for_delivery'
       if (targetStatus === 'accepted') targetStatus = 'vendor_accepted'
 
+      let finalStatus = targetStatus
+
       // Handle Admin Accept Order (move from pending -> confirmed)
       if (targetStatus === 'confirmed' && orderToUpdate.status !== 'confirmed') {
         // Deduct stock & log stock movements (auto-adjusting stock if needed for B2B wholesale orders)
@@ -1167,19 +1328,90 @@ async function route(req, method) {
             console.error('Stock movement warning:', mErr.message)
           }
         }
-        updatePayload.status = 'confirmed'
+
+        // --- VENDOR AUTO-ASSIGNMENT LOGIC ---
+        // 1. Fetch all vendors
+        const { data: allVendors } = await supabase.from('vendors').select('*')
+        const vendorsList = allVendors || []
+
+        // 2. Fetch disabled vendors list
+        const { data: disabledStore } = await supabase.from('settings').select('marquee_messages').eq('id', 'disabled_vendors').maybeSingle()
+        const disabledList = disabledStore?.marquee_messages || []
+
+        // 3. Filter active (enabled) vendors
+        const enabledVendors = vendorsList.filter(v => !disabledList.includes(v.id))
+
+        if (enabledVendors.length === 0) {
+          // If NO enabled vendors exist at all, leave the order unassigned and clearly flag it
+          finalStatus = 'confirmed'
+          updatePayload.assigned_vendor_id = null
+          updatePayload.vendor_name = 'No vendor available — please enable a vendor partner'
+          updatePayload.vendor_email = ''
+          updatePayload.assigned_at = null
+          updatePayload.assigned_by = 'Auto-Assign System'
+        } else {
+          // If there are enabled vendors, select one
+          let chosenVendor = null
+          if (enabledVendors.length === 1) {
+            chosenVendor = enabledVendors[0]
+          } else {
+            // Find whoever has the fewest active/unfulfilled assigned orders
+            const activeStatuses = ['confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery']
+            const { data: activeOrders } = await supabase.from('orders').select('assigned_vendor_id').in('status', activeStatuses)
+            
+            const counts = {}
+            enabledVendors.forEach(v => { counts[v.id] = 0 })
+            if (activeOrders) {
+              activeOrders.forEach(o => {
+                if (o.assigned_vendor_id && counts[o.assigned_vendor_id] !== undefined) {
+                  counts[o.assigned_vendor_id]++
+                }
+              })
+            }
+
+            let minCount = Infinity
+            enabledVendors.forEach(v => {
+              if (counts[v.id] < minCount) {
+                minCount = counts[v.id]
+                chosenVendor = v
+              }
+            })
+          }
+
+          if (chosenVendor) {
+            finalStatus = 'vendor_assigned' // Transition straight to vendor_assigned
+            updatePayload.assigned_vendor_id = chosenVendor.id
+            updatePayload.vendor_name = chosenVendor.name || ''
+            updatePayload.vendor_email = chosenVendor.email || ''
+            updatePayload.assigned_at = now
+            updatePayload.assigned_by = 'Auto-Assign System'
+          } else {
+            finalStatus = 'confirmed'
+          }
+        }
       } else if (targetStatus === 'rejected') {
-        updatePayload.status = 'rejected'
+        finalStatus = 'rejected'
         updatePayload.rejection_reason = body.rejection_reason || 'Order rejected by Admin'
       } else if (targetStatus) {
-        updatePayload.status = targetStatus
+        finalStatus = targetStatus
       }
 
-      if (targetStatus && targetStatus !== orderToUpdate.status) {
+      if (finalStatus) {
+        updatePayload.status = finalStatus
+      }
+
+      if (finalStatus && finalStatus !== orderToUpdate.status) {
         const history = Array.isArray(orderToUpdate.status_history) ? [...orderToUpdate.status_history] : []
+        if (targetStatus === 'confirmed' && finalStatus === 'vendor_assigned') {
+          history.push({
+            status: 'confirmed',
+            note: 'Order Accepted by Admin',
+            timestamp: now
+          })
+        }
         history.push({
-          status: targetStatus,
-          note: `Order status updated to ${targetStatus.toUpperCase()}`,
+          status: finalStatus,
+          note: finalStatus === 'vendor_assigned' ? `Vendor Auto-Assigned: ${updatePayload.vendor_name}` : `Order status updated to ${finalStatus.toUpperCase()}`,
           timestamp: now
         })
         updatePayload.status_history = history
@@ -1249,8 +1481,9 @@ async function route(req, method) {
       }
 
       // Post-assignment: create notifications for vendor, customer, admin
-      if (body.assigned_vendor_id !== undefined) {
-        const vendorId = body.assigned_vendor_id
+      const finalVendorId = updatePayload.assigned_vendor_id || body.assigned_vendor_id
+      if (finalVendorId) {
+        const vendorId = finalVendorId
         const ordNum = orderToUpdate.order_number || p[1]
         try {
           const { data: vendorRecord } = await supabase.from('vendors').select('user_id, name, email').eq('id', vendorId).maybeSingle()
@@ -2454,8 +2687,45 @@ Current Conversation History:\n` +
     if (!user || user.role !== 'admin') return err('Forbidden', 403)
     
     if (method === 'GET') {
+      const supabase = db()
       const vendors = await getVendorsList()
-      return json(vendors)
+      const { data: disabledStore } = await supabase.from('settings').select('marquee_messages').eq('id', 'disabled_vendors').maybeSingle()
+      const disabledList = disabledStore?.marquee_messages || []
+      
+      const mapped = (vendors || []).map(v => ({
+        ...v,
+        is_enabled: !disabledList.includes(v.id)
+      }))
+      return json(mapped)
+    }
+
+    if (method === 'PUT') {
+      const { id, is_enabled } = body
+      if (!id) return err('Vendor ID required', 400)
+
+      const supabase = db()
+      const { data: disabledStore } = await supabase.from('settings').select('marquee_messages').eq('id', 'disabled_vendors').maybeSingle()
+      let disabledList = disabledStore?.marquee_messages || []
+
+      if (is_enabled) {
+        disabledList = disabledList.filter(vId => vId !== id)
+      } else {
+        if (!disabledList.includes(id)) {
+          disabledList.push(id)
+        }
+      }
+
+      const { error: upsertErr } = await supabase.from('settings').upsert({
+        id: 'disabled_vendors',
+        marquee_messages: disabledList
+      })
+
+      if (upsertErr) {
+        console.error('[Vendor Enable/Disable Error]:', upsertErr)
+        return err('Failed to update vendor status: ' + upsertErr.message, 500)
+      }
+
+      return json({ success: true, is_enabled })
     }
 
     if (method === 'POST') {
@@ -2716,6 +2986,39 @@ Current Conversation History:\n` +
     })
   }
 
+  // ==================== ADMIN MONTHLY TRENDS ====================
+  if (p[0] === 'admin' && p[1] === 'monthly-trends' && method === 'GET') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    const supabase = db()
+    const now = new Date()
+    const trends = []
+
+    // Build last 12 calendar months
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).toISOString()
+      const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59).toISOString()
+      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+
+      const { data: monthOrders } = await supabase
+        .from('orders')
+        .select('total, status')
+        .gte('placed_at', monthStart)
+        .lte('placed_at', monthEnd)
+
+      let revenue = 0
+      let count = 0
+      for (const o of (monthOrders || [])) {
+        if (o.status !== 'cancelled' && o.status !== 'rejected') {
+          revenue += o.total || 0
+          count++
+        }
+      }
+      trends.push({ month: monthKey, orders: count, revenue: Math.round(revenue * 100) / 100 })
+    }
+    return json(trends)
+  }
+
   // ==================== ADMIN CUSTOMERS ====================
   if (p[0] === 'admin' && p[1] === 'customers' && method === 'GET') {
     if (!user || user.role !== 'admin') return err('Forbidden', 403)
@@ -2870,6 +3173,198 @@ Current Conversation History:\n` +
         date: r.created_at
       }))
     })
+  }
+
+  // ==================== ADMIN DELETE ACCOUNT ====================
+  if (p[0] === 'admin' && p[1] === 'delete-account' && method === 'POST') {
+    if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
+
+    const { user_id } = body
+    if (!user_id) return err('User ID required', 400)
+
+    const supabase = db()
+
+    // Check if user has existing orders
+    const { data: orders } = await supabase.from('orders').select('id').eq('user_id', user_id).limit(1)
+    if (orders && orders.length > 0) {
+      return err('Cannot delete: this account has order history. Consider deactivating instead.', 400)
+    }
+
+    // Look up user info before deletion
+    const { data: targetUser } = await supabase.from('users').select('id, email, role').eq('id', user_id).maybeSingle()
+    if (!targetUser) return err('User not found', 404)
+
+    // Delete from Supabase Auth
+    const { error: authErr } = await supabase.auth.admin.deleteUser(user_id)
+    if (authErr) {
+      console.error('[Admin Delete Account Auth Fail]:', authErr)
+    }
+
+    // Delete customer_product_pricing rows
+    await supabase.from('customer_product_pricing').delete().eq('user_id', user_id)
+
+    // Delete customer_logins rows
+    await supabase.from('customer_logins').delete().eq('user_id', user_id)
+
+    // Delete from users table
+    await supabase.from('users').delete().eq('id', user_id)
+
+    // If vendor, also delete from vendors table
+    if (targetUser.role === 'vendor') {
+      await supabase.from('vendors').delete().eq('user_id', user_id)
+    }
+
+    return json({ success: true, message: 'Account deleted successfully' })
+  }
+
+  // ==================== ADMIN DEACTIVATE ACCOUNT ====================
+  if (p[0] === 'admin' && p[1] === 'deactivate-account' && method === 'POST') {
+    if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
+
+    const { user_id } = body
+    if (!user_id) return err('User ID required', 400)
+
+    const supabase = db()
+
+    const { error } = await supabase.from('users').update({ status: 'deactivated' }).eq('id', user_id)
+    if (error) return err('Failed to deactivate account: ' + error.message, 500)
+
+    return json({ success: true, message: 'Account deactivated successfully' })
+  }
+
+  // ==================== ADMIN USER PROFILE ====================
+  if (p[0] === 'admin' && p[1] === 'user-profile' && method === 'GET') {
+    if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
+
+    const targetUserId = url.searchParams.get('user_id')
+    console.log('[User Profile] Fetching profile for user_id:', targetUserId, '| full URL:', req.url)
+    if (!targetUserId) return err('User ID required', 400)
+
+    try {
+      const supabase = db()
+
+      // Fetch user info (removed 'status' as it is not present in the users schema)
+      const { data: userData, error: userErr } = await supabase.from('users').select('id, email, full_name, phone, role, created_at').eq('id', targetUserId).maybeSingle()
+      if (userErr) {
+        console.error('[User Profile] DB error fetching users table for ID:', targetUserId, 'Error:', {
+          message: userErr.message,
+          code: userErr.code,
+          details: userErr.details,
+          hint: userErr.hint
+        })
+        return err('Database error: ' + userErr.message, 500)
+      }
+      if (!userData) {
+        console.warn('[User Profile] User not found in users table for ID:', targetUserId)
+        return err('User not found: no user with ID ' + targetUserId, 404)
+      }
+
+      // Fetch last login
+      const { data: lastLogin, error: loginErr } = await supabase.from('customer_logins').select('login_at').eq('user_id', targetUserId).order('login_at', { ascending: false }).limit(1).maybeSingle()
+      if (loginErr) {
+        console.error('[User Profile] DB error fetching customer_logins table for ID:', targetUserId, 'Error:', {
+          message: loginErr.message,
+          code: loginErr.code,
+          details: loginErr.details,
+          hint: loginErr.hint
+        })
+      }
+
+      // Fetch orders
+      const { data: orders, error: ordersErr } = await supabase.from('orders').select('id, order_number, total, status, placed_at, updated_at, order_items(id, product_name_snapshot, quantity)').eq('user_id', targetUserId).order('placed_at', { ascending: false })
+      if (ordersErr) {
+        console.error('[User Profile] DB error fetching orders table for ID:', targetUserId, 'Error:', {
+          message: ordersErr.message,
+          code: ordersErr.code,
+          details: ordersErr.details,
+          hint: ordersErr.hint
+        })
+      }
+
+      const ordersList = orders || []
+      const totalOrders = ordersList.length
+      const totalSpent = ordersList.filter(o => o.status !== 'cancelled').reduce((sum, o) => sum + (o.total || 0), 0)
+      const avgOrderValue = totalOrders > 0 ? totalSpent / totalOrders : 0
+
+      const statusBreakdown = {}
+      for (const o of ordersList) {
+        statusBreakdown[o.status] = (statusBreakdown[o.status] || 0) + 1
+      }
+
+      let catalogSummary = null
+      if (userData.role === 'customer') {
+        // Fix: customer_product_pricing table uses 'customer_id' not 'user_id'
+        const { data: catalog, error: catalogErr } = await supabase.from('customer_product_pricing').select('id').eq('customer_id', targetUserId)
+        if (catalogErr) {
+          console.error('[User Profile] DB error fetching customer_product_pricing for customer:', targetUserId, 'Error:', {
+            message: catalogErr.message,
+            code: catalogErr.code,
+            details: catalogErr.details,
+            hint: catalogErr.hint
+          })
+        }
+        catalogSummary = { visibleProducts: catalog?.length || 0 }
+      }
+
+      let vendorStats = null
+      if (userData.role === 'vendor') {
+        const { data: vendor, error: vendorErr } = await supabase.from('vendors').select('id').eq('user_id', targetUserId).maybeSingle()
+        if (vendorErr) {
+          console.error('[User Profile] DB error fetching vendor record for user:', targetUserId, 'Error:', {
+            message: vendorErr.message,
+            code: vendorErr.code,
+            details: vendorErr.details,
+            hint: vendorErr.hint
+          })
+        }
+        if (vendor) {
+          // Fix: orders table uses 'assigned_vendor_id' not 'vendor_id'
+          const { data: assignedOrders, error: assignedErr } = await supabase.from('orders').select('id, status, placed_at, updated_at').eq('assigned_vendor_id', vendor.id)
+          if (assignedErr) {
+            console.error('[User Profile] DB error fetching orders for vendor ID:', vendor.id, 'Error:', {
+              message: assignedErr.message,
+              code: assignedErr.code,
+              details: assignedErr.details,
+              hint: assignedErr.hint
+            })
+          }
+          const assigned = assignedOrders || []
+          vendorStats = {
+            totalFulfilled: assigned.filter(o => o.status === 'delivered').length,
+            currentlyAssigned: assigned.filter(o => ['confirmed', 'processing', 'shipped'].includes(o.status)).length,
+            totalAssigned: assigned.length
+          }
+        }
+      }
+
+      return json({
+        user: {
+          ...userData,
+          status: 'active', // default status to active since users table doesn't have status column
+          last_login_at: lastLogin?.login_at || null
+        },
+        orderStats: {
+          totalOrders,
+          totalSpent,
+          avgOrderValue,
+          statusBreakdown
+        },
+        orders: ordersList.map(o => ({
+          id: o.id,
+          order_number: o.order_number,
+          total: o.total,
+          status: o.status,
+          placed_at: o.placed_at,
+          updated_at: o.updated_at,
+          itemCount: o.order_items?.length || 0
+        })),
+        catalogSummary,
+        vendorStats
+      })
+    } catch (e) {
+      console.error('[User Profile] Unexpected error handling request:', e)
+      return err('Failed to load profile: ' + e.message, 500)
+    }
   }
 
   return err('Not found', 404)
