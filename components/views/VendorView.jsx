@@ -1,8 +1,13 @@
 'use client'
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Truck, Package, MapPin, Phone, RefreshCw, LogOut, Layers, Search, ShieldCheck, CheckCircle2, AlertCircle } from 'lucide-react'
+import { 
+  Truck, Package, Phone, RefreshCw, LogOut, Search, 
+  CheckCircle2, AlertCircle, FileText, Download, Calendar, User, 
+  MapPin, Eye, ChevronRight, MessageSquare, Award, Clock, ClipboardCheck,
+  ShieldCheck, HelpCircle, Layers, ArrowLeft
+} from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -11,20 +16,38 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAppContext } from '@/components/providers/AppProvider'
 import { useRealtimeOrders } from '@/lib/hooks/useRealtime'
 
+const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
+
+const CHECKPOINT_COLORS = {
+  vendor_assigned: 'bg-amber-500/10 text-amber-600 border border-amber-500/20', // Pending Acceptance
+  vendor_accepted: 'bg-blue-500/10 text-blue-600 border border-blue-500/20',     // Accepted
+  packed: 'bg-purple-500/10 text-purple-600 border border-purple-500/20',        // Packed
+  out_for_delivery: 'bg-yellow-500/10 text-yellow-600 border border-yellow-500/20', // Out for Delivery
+  delivered: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',  // Delivered
+  cancelled: 'bg-rose-500/10 text-rose-600 border border-rose-500/20',
+  vendor_rejected: 'bg-rose-500/10 text-rose-600 border border-rose-500/20',
+  rejected: 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
+}
+
 export function VendorView() {
   const { user, setUser } = useAppContext()
   const router = useRouter()
 
-  const [activeTab, setActiveTab] = useState('orders') // 'orders' | 'inventory'
+  const [activeTab, setActiveTab] = useState('orders') // 'orders' | 'inventory' | 'performance'
   const [orders, setOrders] = useState([])
   const [inventory, setInventory] = useState([])
   const [loadingOrders, setLoadingOrders] = useState(true)
   const [loadingInventory, setLoadingInventory] = useState(false)
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [inventorySearch, setInventorySearch] = useState('')
   const [authReady, setAuthReady] = useState(false)
 
-  // 1. Fetch Vendor Assigned Orders
+  // Filters State
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+
+  // Selected Order for detail view page render (inline replacement mode)
+  const [selectedOrderId, setSelectedOrderId] = useState(null)
+
+  // 1. Fetch Vendor Orders
   const fetchVendorOrders = useCallback(async () => {
     setLoadingOrders(true)
     try {
@@ -39,12 +62,9 @@ export function VendorView() {
         setOrders(Array.isArray(data) ? data : [])
       } else if (res.status === 401) {
         router.push('/vendor/login')
-      } else if (res.status === 500) {
-        console.error('[Vendor Orders HTTP 500 Fail]')
-        toast.error('Server error loading assigned orders')
       }
     } catch (e) {
-      console.error('[Vendor Orders Exception]:', e)
+      console.error('[Vendor Orders Fetch Exception]:', e)
     } finally {
       setLoadingOrders(false)
     }
@@ -63,8 +83,6 @@ export function VendorView() {
       if (res.ok) {
         const data = await res.json()
         setInventory(Array.isArray(data) ? data : [])
-      } else if (res.status === 500) {
-        console.error('[Vendor Inventory HTTP 500 Fail]')
       }
     } catch (e) {
       console.error('[Vendor Inventory Exception]:', e)
@@ -75,7 +93,7 @@ export function VendorView() {
 
   useRealtimeOrders(fetchVendorOrders)
 
-  // Auth guard: Wait for localStorage to be available (client-side hydration)
+  // Auth Guard
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
     const storedUser = typeof window !== 'undefined' ? localStorage.getItem('user') : null
@@ -83,7 +101,6 @@ export function VendorView() {
     try { parsedRole = storedUser ? JSON.parse(storedUser)?.role : null } catch {}
 
     if (!token || (parsedRole && parsedRole !== 'vendor' && parsedRole !== 'admin')) {
-      // No token at all — redirect to vendor login
       router.replace('/vendor/login')
       return
     }
@@ -92,16 +109,11 @@ export function VendorView() {
 
   useEffect(() => {
     if (!authReady) return
-    // Extra check once user state is loaded from AppProvider
-    if (user && user.role !== 'vendor' && user.role !== 'admin') {
-      toast.error('Vendor access required')
-      router.replace('/vendor/login')
-      return
-    }
     fetchVendorOrders()
     fetchInventory()
-  }, [authReady, user, router, fetchVendorOrders, fetchInventory])
+  }, [authReady, user, fetchVendorOrders, fetchInventory])
 
+  // Accept Order
   const handleAcceptOrder = async (orderId) => {
     try {
       const res = await fetch(`/api/vendor/orders/${orderId}`, {
@@ -113,18 +125,19 @@ export function VendorView() {
         body: JSON.stringify({ action: 'accept' })
       })
       if (res.ok) {
-        toast.success('Order Accepted! Admin & Customer notified in Realtime.')
+        toast.success('Order Accepted! Added to Active Deliveries.')
         fetchVendorOrders()
       } else {
         toast.error('Failed to accept order')
       }
     } catch {
-      toast.error('Failed to accept order')
+      toast.error('Network error accepting order')
     }
   }
 
+  // Reject Order
   const handleRejectOrder = async (orderId) => {
-    if (!confirm('Are you sure you want to decline this dispatch request?')) return
+    if (!confirm('Decline this dispatch shipment?')) return
     try {
       const res = await fetch(`/api/vendor/orders/${orderId}`, {
         method: 'PUT',
@@ -135,16 +148,18 @@ export function VendorView() {
         body: JSON.stringify({ status: 'vendor_rejected' })
       })
       if (res.ok) {
-        toast.info('Dispatch request declined. Admin notified.')
+        toast.info('Shipment declined.')
         fetchVendorOrders()
+        setSelectedOrderId(null)
       } else {
-        toast.error('Failed to update request status')
+        toast.error('Failed to decline shipment')
       }
     } catch {
-      toast.error('Failed to update status')
+      toast.error('Network error declining shipment')
     }
   }
 
+  // Live status transitions
   const handleStatusUpdate = async (orderId, newStatus) => {
     try {
       const res = await fetch(`/api/vendor/orders/${orderId}`, {
@@ -156,13 +171,13 @@ export function VendorView() {
         body: JSON.stringify({ status: newStatus })
       })
       if (res.ok) {
-        toast.success(`Order status updated to ${newStatus.toUpperCase()}`)
+        toast.success(`Shipment checkpoint updated: ${newStatus.replace(/_/g, ' ').toUpperCase()}`)
         fetchVendorOrders()
       } else {
-        toast.error('Failed to update order status')
+        toast.error('Failed to update shipment status')
       }
     } catch {
-      toast.error('Failed to update status')
+      toast.error('Network error updating status')
     }
   }
 
@@ -173,293 +188,583 @@ export function VendorView() {
     document.cookie = 'user_role=; path=/; max-age=0'
     document.cookie = 'auth_token=; path=/; max-age=0'
     router.push('/vendor/login')
-    toast.success('Signed out of Vendor Portal')
   }
 
-  const filteredOrders = orders.filter(o => {
-    if (statusFilter === 'all') return true
-    return o.status === statusFilter
-  })
+  // Filtered dataset mapping
+  const filteredOrders = useMemo(() => {
+    return orders.filter(o => {
+      // Search (ID / Customer Phone / Name / City)
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase().trim()
+        const matchId = String(o.order_number || '').toLowerCase().includes(q)
+        const matchName = String(o.address?.full_name || '').toLowerCase().includes(q)
+        const matchCity = String(o.address?.city || '').toLowerCase().includes(q)
+        if (!matchId && !matchName && !matchCity) return false
+      }
 
-  const filteredInventory = inventory.filter(p => {
-    if (!inventorySearch) return true
-    const q = inventorySearch.toLowerCase()
-    const catStr = (p.category || p.subcategory || '').toLowerCase()
-    return p.name?.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q) || catStr.includes(q)
-  })
+      // Status selector
+      if (statusFilter !== 'all') {
+        if (o.status !== statusFilter) return false
+      }
 
+      return true
+    })
+  }, [orders, searchQuery, statusFilter])
+
+  // Stats Counters mapping
+  const stats = useMemo(() => {
+    let pending = 0
+    let active = 0
+    let delivered = 0
+
+    orders.forEach(o => {
+      if (o.status === 'vendor_assigned') pending++
+      else if (['vendor_accepted', 'packed', 'shipped', 'out_for_delivery'].includes(o.status)) active++
+      else if (o.status === 'delivered') delivered++
+    })
+
+    return { pending, active, delivered }
+  }, [orders])
+
+  // Get currently selected order details object
+  const selectedOrder = useMemo(() => {
+    if (!selectedOrderId) return null
+    return orders.find(o => o.id === selectedOrderId)
+  }, [orders, selectedOrderId])
+
+  // Inline Replacement: Render premium details view
+  if (selectedOrder) {
+    const totalVal = selectedOrder.total_amount || 0
+    const subtotalVal = selectedOrder.total_amount - (selectedOrder.shipping_fee || 0)
+    const shippingVal = selectedOrder.shipping_fee || 0
+
+    // Derive active timeline step percentage
+    const stepMap = { 'vendor_assigned': 15, 'vendor_accepted': 40, 'packed': 60, 'out_for_delivery': 80, 'delivered': 100 }
+    const activePercent = stepMap[selectedOrder.status] || 10
+
+    return (
+      <div className="min-h-screen bg-[#F8F9FC] pb-12 font-sans text-left">
+        <header className="bg-white border-b border-[#ECECEC] py-4 px-6 sticky top-0 z-40">
+          <div className="max-w-6xl mx-auto flex items-center justify-between">
+            <button 
+              onClick={() => setSelectedOrderId(null)} 
+              className="text-xs text-slate-600 hover:text-slate-900 font-bold flex items-center gap-1.5 transition-all hover:-translate-x-1"
+            >
+              <ArrowLeft className="w-4 h-4" /> Back to Orders Feed
+            </button>
+            <span className="text-xs font-bold text-slate-400">Order Ref: <strong className="text-slate-800 font-mono">#{selectedOrder.id}</strong></span>
+          </div>
+        </header>
+
+        <div className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+          {/* Header Action Row */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-2xl border border-[#ECECEC] shadow-sm">
+            <div>
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Logistics Dispatch ID</span>
+              <h1 className="font-display text-2xl font-black text-slate-900 mt-1">Order #{selectedOrder.order_number}</h1>
+              <p className="text-xs text-slate-400 mt-1">Assigned on {new Date(selectedOrder.placed_at).toLocaleString('en-IN')}</p>
+            </div>
+            <div className="flex gap-3">
+              <Button 
+                onClick={() => import('@/lib/invoice').then(({ downloadInvoice }) => downloadInvoice(selectedOrder))} 
+                className="rounded-full bg-slate-900 text-white font-bold text-xs h-10 px-6 hover:bg-slate-800 shadow-sm"
+              >
+                <Download className="w-4 h-4 mr-2" /> Download Invoice
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6">
+            
+            {/* Left Column details container */}
+            <div className="space-y-6">
+              
+              {/* Product items costing snapshot */}
+              <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden">
+                <CardContent className="p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-display font-extrabold text-sm text-slate-800">Fulfillment Product Costing Table</h3>
+                    <Badge className="bg-[#F4B942]/10 text-[#A96B0D] font-bold border border-[#F4B942]/20">{selectedOrder.items?.length || 0} Products</Badge>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {selectedOrder.items?.map((it, i) => (
+                      <div key={i} className="py-4 flex gap-4 items-center">
+                        <div className="w-12 h-14 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-center shrink-0">
+                          <Package className="w-6 h-6 text-slate-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-slate-800 truncate text-sm">{it.product_name_snapshot}</p>
+                          <p className="text-xs text-slate-400 mt-1">Qty {it.quantity} · Unit Price {formatINR(it.price_snapshot)}</p>
+                        </div>
+                        <span className="font-black text-slate-800 text-sm">{formatINR(it.price_snapshot * it.quantity)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Shipping Recipient contacts info */}
+              <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden">
+                <CardContent className="p-6 space-y-4">
+                  <h3 className="font-display font-bold text-sm text-slate-800">Customer Shipping Address & Connect</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div className="space-y-3 bg-[#F8F9FC] p-4 rounded-xl border border-slate-100">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider">Recipient Contact</span>
+                        <span className="font-black text-slate-800 text-sm mt-1 block">{selectedOrder.address?.full_name}</span>
+                        <span className="font-semibold text-slate-500 font-mono block mt-1">📞 {selectedOrder.address?.phone}</span>
+                      </div>
+                      {selectedOrder.address?.gst && (
+                        <div>
+                          <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider">GSTIN Number</span>
+                          <span className="font-bold text-slate-800 font-mono block mt-1 text-[#F4B942]">{selectedOrder.address.gst}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-1 bg-[#F8F9FC] p-4 rounded-xl border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-bold uppercase tracking-wider">Address Details</span>
+                      <p className="text-slate-600 font-medium leading-relaxed mt-2">
+                        {selectedOrder.address?.line1}<br />
+                        {selectedOrder.address?.line2 && <>{selectedOrder.address.line2}<br /></>}
+                        {selectedOrder.address?.city}, {selectedOrder.address?.state} {selectedOrder.address?.pincode}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Customer Quick contact links */}
+                  <div className="grid grid-cols-3 gap-3 pt-2">
+                    <a 
+                      href={`tel:${selectedOrder.address?.phone}`}
+                      className="flex items-center justify-center gap-2 py-3 rounded-full bg-slate-50 hover:bg-slate-100 border text-slate-600 font-bold text-xs transition"
+                    >
+                      ☎ Call Customer
+                    </a>
+                    <a 
+                      href={`https://wa.me/${selectedOrder.address?.phone || ''}`} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 py-3 rounded-full bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 font-bold text-xs transition"
+                    >
+                      💬 WhatsApp
+                    </a>
+                    <a 
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${selectedOrder.address?.line1 || ''} ${selectedOrder.address?.city || ''} ${selectedOrder.address?.pincode || ''}`)}`}
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 py-3 rounded-full bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-bold text-xs transition"
+                    >
+                      📍 Google Maps
+                    </a>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Status Timeline checkpoints with animated progress bar */}
+              <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden">
+                <CardContent className="p-6 space-y-6">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-display font-extrabold text-sm text-slate-800">Fulfillment Checklist Progress</h3>
+                    <span className="text-xs text-slate-400 font-bold">{activePercent}% Completed</span>
+                  </div>
+
+                  {/* Progress Line */}
+                  <div className="relative w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-4">
+                    <div className="absolute top-0 left-0 bg-[#F4B942] h-2 transition-all duration-500" style={{ width: `${activePercent}%` }} />
+                  </div>
+
+                  <div className="grid grid-cols-5 text-center text-[10px] font-bold text-slate-400 gap-1">
+                    <div className={selectedOrder.status_history?.some(h => h.status === 'vendor_assigned') ? 'text-[#F4B942] font-black' : ''}>
+                      ✔ Assigned
+                    </div>
+                    <div className={selectedOrder.status_history?.some(h => h.status === 'vendor_accepted') ? 'text-[#F4B942] font-black' : ''}>
+                      ✔ Accepted
+                    </div>
+                    <div className={selectedOrder.status_history?.some(h => h.status === 'packed') ? 'text-[#F4B942] font-black' : ''}>
+                      📦 Packed
+                    </div>
+                    <div className={selectedOrder.status_history?.some(h => h.status === 'out_for_delivery') ? 'text-[#F4B942] font-black' : ''}>
+                      🚚 Dispatch
+                    </div>
+                    <div className={selectedOrder.status === 'delivered' ? 'text-emerald-600 font-black' : ''}>
+                      🏠 Delivered
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+            </div>
+
+            {/* Right Column sidebar */}
+            <div className="space-y-6">
+              
+              {/* Checkpoint controller actions */}
+              <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden border-l-4 border-l-[#F4B942]">
+                <CardContent className="p-6 space-y-4">
+                  <h3 className="font-display font-black text-xs uppercase text-slate-400 tracking-wider">Fulfillment Stage</h3>
+                  
+                  {selectedOrder.status === 'vendor_assigned' ? (
+                    <div className="grid gap-2">
+                      <Button 
+                        onClick={() => handleAcceptOrder(selectedOrder.id)}
+                        className="w-full rounded-full font-bold h-11 bg-slate-900 text-white text-xs hover:bg-slate-800 shadow-sm"
+                      >
+                        Accept Shipment
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        onClick={() => handleRejectOrder(selectedOrder.id)}
+                        className="w-full rounded-full border-rose-200 text-rose-600 hover:bg-rose-50 font-bold h-11 text-xs"
+                      >
+                        Decline Shipment
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Fulfillment checkpoint:</span>
+                      <div className="grid gap-2">
+                        {[
+                          { key: 'vendor_accepted', label: '✓ Vendor Accepted' },
+                          { key: 'packed', label: '📦 Mark Packed' },
+                          { key: 'shipped', label: '🚢 Mark Shipped' },
+                          { key: 'out_for_delivery', label: '🚚 Out for Delivery' },
+                          { key: 'delivered', label: '✅ Mark Delivered' }
+                        ].map(st => (
+                          <Button
+                            key={st.key}
+                            onClick={() => handleStatusUpdate(selectedOrder.id, st.key)}
+                            variant={selectedOrder.status === st.key ? 'default' : 'outline'}
+                            size="sm"
+                            className={`w-full rounded-full text-xs font-bold h-10 ${
+                              selectedOrder.status === st.key 
+                                ? 'bg-slate-900 text-white hover:bg-slate-800' 
+                                : 'border-slate-200 hover:bg-slate-50'
+                            }`}
+                          >
+                            {st.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Financial cost breakdown sidebar */}
+              <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden">
+                <CardContent className="p-6">
+                  <h3 className="font-display font-extrabold text-sm text-slate-800 mb-3">Cost Breakdown</h3>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400 font-medium">Subtotal</span>
+                      <span className="font-semibold text-slate-800">{formatINR(subtotalVal)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400 font-medium">Shipping Fee</span>
+                      <span className="font-semibold text-slate-800">{shippingVal === 0 ? 'FREE' : formatINR(shippingVal)}</span>
+                    </div>
+                    <div className="pt-3 border-t border-slate-100 flex justify-between font-display font-black text-sm text-slate-900">
+                      <span>Grand Total</span>
+                      <span>{formatINR(totalVal)}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+            </div>
+
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Dashboard Page Listing View
   return (
-    <div className="min-h-screen bg-background text-foreground text-left">
-      {/* Light Banner Header — Matching Admin & Customer Site Header */}
-      <header className="bg-card border-b border-border px-4 md:px-8 py-4 shadow-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+    <div className="min-h-screen bg-[#F8F9FC] text-slate-900 pb-12 font-sans text-left">
+      
+      {/* Top Navbar */}
+      <header className="bg-white border-b border-[#ECECEC] py-4 px-6 sticky top-0 z-40 shadow-xs">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl gold-gradient flex items-center justify-center font-bold text-primary shadow-soft">
-              <Truck className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-slate-950 flex items-center justify-center font-bold text-[#F4B942] shadow-xs">
+              <Truck className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="font-display font-extrabold text-lg text-foreground tracking-tight">Vendor Fulfillment Portal</h1>
-              <p className="text-xs text-accent font-semibold">Logistics & Delivery Partner Dashboard</p>
+              <h1 className="font-display font-black text-sm text-slate-800 tracking-tight leading-none">AK Enterprises Vendor Portal</h1>
+              <span className="text-[10px] text-muted-foreground font-bold mt-1 block">Logistics & Delivery Partner Dashboard</span>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="text-xs font-semibold text-muted-foreground hidden sm:inline-block bg-secondary px-3.5 py-1.5 rounded-full border border-border">
-              Partner: <strong className="text-foreground">{user?.full_name || user?.email}</strong>
-            </span>
-            <Button size="sm" variant="outline" onClick={logout} className="rounded-xl h-9 text-xs">
-              <LogOut className="w-4 h-4 mr-1.5 text-destructive" /> Sign Out
+            <div className="hidden sm:flex flex-col text-right">
+              <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider leading-none">Logistics Unit</span>
+              <span className="text-xs font-black text-slate-800 mt-1">{user?.full_name || user?.email}</span>
+            </div>
+            <Button variant="ghost" size="sm" onClick={logout} className="rounded-full h-9 px-4 text-xs font-bold text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100">
+              Sign Out
             </Button>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 md:px-8 py-8 space-y-6">
-        {/* Navigation Tabs — Light Card Styling */}
-        <div className="flex items-center gap-2 border-b border-border pb-3">
+      {/* Main Container Page */}
+      <main className="max-w-6xl mx-auto px-6 pt-8 space-y-6">
+        
+        {/* Welcome Greeting Banner */}
+        <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-950 text-white rounded-3xl p-6 md:p-8 relative overflow-hidden shadow-md">
+          <div className="absolute right-0 bottom-0 top-0 opacity-10 pointer-events-none flex items-center pr-12">
+            <Truck className="w-48 h-48" />
+          </div>
+          <div className="space-y-1 relative z-10">
+            <h2 className="font-display font-black text-xl md:text-2xl tracking-tight">👋 Welcome back, {user?.full_name || 'Delivery Partner'}</h2>
+            <p className="text-xs text-slate-400 font-medium">
+              You have <strong className="text-white">{stats.pending} orders</strong> awaiting acceptance and <strong className="text-white">{stats.active} shipments</strong> active in transit.
+            </p>
+          </div>
+        </div>
+
+        {/* 3 Premium KPI Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs overflow-hidden">
+            <CardContent className="p-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
+                <Clock className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Pending Orders</span>
+                <span className="text-2xl font-black text-slate-800 mt-1 block">{stats.pending}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs overflow-hidden">
+            <CardContent className="p-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
+                <Truck className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Active Deliveries</span>
+                <span className="text-2xl font-black text-slate-800 mt-1 block">{stats.active}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs overflow-hidden">
+            <CardContent className="p-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Delivered Shipments</span>
+                <span className="text-2xl font-black text-slate-800 mt-1 block">{stats.delivered}</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Tab switcher navigation exactly as requested */}
+        <div className="flex bg-white p-1 rounded-full border border-[#ECECEC] max-w-sm shadow-xs">
           <button
-            onClick={() => setActiveTab('orders')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-bold text-xs transition-all ${
-              activeTab === 'orders'
-                ? 'gold-gradient text-primary shadow-soft'
-                : 'bg-card text-muted-foreground hover:text-foreground border border-border hover:bg-secondary/50'
-            }`}
+            onClick={() => { setActiveTab('orders'); setStatusFilter('all') }}
+            className={`flex-1 py-2 px-4 rounded-full font-bold text-xs transition ${activeTab === 'orders' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           >
-            <Package className="w-4 h-4" /> Assigned Orders ({orders.length})
+            Assigned Orders ({orders.length})
           </button>
           <button
-            onClick={() => setActiveTab('inventory')}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-bold text-xs transition-all ${
-              activeTab === 'inventory'
-                ? 'gold-gradient text-primary shadow-soft'
-                : 'bg-card text-muted-foreground hover:text-foreground border border-border hover:bg-secondary/50'
-            }`}
+            onClick={() => { setActiveTab('inventory'); setStatusFilter('all') }}
+            className={`flex-1 py-2 px-4 rounded-full font-bold text-xs transition ${activeTab === 'inventory' ? 'bg-white text-slate-800 shadow-sm border border-transparent' : 'text-slate-500 hover:text-slate-800'}`}
           >
-            <Layers className="w-4 h-4" /> Stock Inventory ({inventory.length})
+            Stock Inventory ({inventory.length})
           </button>
         </div>
 
-        {/* TAB 1: ASSIGNED DELIVERY ORDERS */}
+        {/* Feed lists tabs */}
         {activeTab === 'orders' && (
-          <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h2 className="font-display text-xl font-extrabold text-foreground">Assigned Delivery Orders</h2>
-                <p className="text-xs text-muted-foreground">View customer shipping addresses, quantities, and update dispatch status live.</p>
+          <div className="space-y-4 slide-up">
+            
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 border border-[#ECECEC] rounded-2xl shadow-xs">
+              <div className="relative flex-1 w-full max-w-md">
+                <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+                <Input
+                  placeholder="Search by Order ID, Customer name or City..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="pl-10 h-10 rounded-full bg-[#F8F9FC] border-transparent focus:bg-white text-xs transition"
+                />
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 w-full md:w-auto">
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-44 rounded-xl h-10 bg-card border-border text-xs text-foreground focus:ring-amber-500">
-                    <SelectValue placeholder="Status Filter" />
+                  <SelectTrigger className="w-40 rounded-full h-10 text-xs bg-white border-[#ECECEC]">
+                    <SelectValue placeholder="All Orders" />
                   </SelectTrigger>
-                  <SelectContent className="bg-card border-border text-foreground">
+                  <SelectContent>
                     <SelectItem value="all">All Orders</SelectItem>
-                    <SelectItem value="vendor_assigned">Vendor Assigned</SelectItem>
-                    <SelectItem value="vendor_accepted">Vendor Accepted</SelectItem>
-                    <SelectItem value="confirmed">Confirmed</SelectItem>
+                    <SelectItem value="vendor_assigned">Assigned</SelectItem>
+                    <SelectItem value="vendor_accepted">Accepted</SelectItem>
                     <SelectItem value="packed">Packed</SelectItem>
-                    <SelectItem value="shipped">Shipped</SelectItem>
                     <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
                     <SelectItem value="delivered">Delivered</SelectItem>
                   </SelectContent>
                 </Select>
-
-                <Button variant="outline" size="sm" onClick={fetchVendorOrders} className="rounded-xl h-10 text-xs">
-                  <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh
+                <Button variant="outline" size="sm" onClick={fetchVendorOrders} className="rounded-full h-10 text-xs px-4">
+                  <RefreshCw className="w-3.5 h-3.5 mr-2" /> Refresh
                 </Button>
               </div>
             </div>
 
+            {/* Render Orders list */}
             {loadingOrders ? (
-              <div className="py-24 text-center text-sm text-muted-foreground">Loading assigned delivery orders...</div>
+              <div className="text-center py-16 text-xs text-slate-400 font-semibold animate-pulse">Syncing shipments database...</div>
             ) : filteredOrders.length === 0 ? (
-              <Card className="radius-xl shadow-soft text-center py-16">
-                <CardContent>
-                  <Package className="w-12 h-12 text-muted-foreground/40 mx-auto mb-3" />
-                  <h3 className="font-display font-bold text-lg text-foreground mb-1">No assigned orders found</h3>
-                  <p className="text-xs text-muted-foreground">You currently have no delivery orders assigned to your logistics unit.</p>
-                </CardContent>
-              </Card>
+              <div className="bg-white border border-[#ECECEC] rounded-2xl py-16 text-center text-xs text-slate-400 font-bold shadow-xs">
+                No assigned shipments found matching selection.
+              </div>
             ) : (
-              <div className="space-y-4">
-                {filteredOrders.map(o => (
-                  <Card key={o.id} className="radius-xl shadow-soft border border-border overflow-hidden">
-                    <CardContent className="p-6 space-y-4">
-                      {/* Vendor Acceptance Banner */}
-                      {!o.vendor_accepted && (
-                        <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3 mb-2">
-                          <div className="flex items-center gap-2 text-xs text-amber-900 dark:text-amber-300">
-                            <AlertCircle className="w-4 h-4 text-accent shrink-0" />
-                            <span><strong>Dispatch Request Pending:</strong> Admin has assigned this order to your logistics unit. Please confirm acceptance.</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              onClick={() => handleAcceptOrder(o.id)}
-                              className="gold-gradient text-primary font-extrabold text-xs h-9 px-4 rounded-xl shadow-soft flex items-center gap-1.5"
-                            >
-                              <CheckCircle2 className="w-4 h-4" /> Accept Delivery Request
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleRejectOrder(o.id)}
-                              className="border-destructive/30 text-destructive hover:bg-destructive/10 font-bold text-xs h-9 px-3 rounded-xl"
-                            >
-                              Decline
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Order Header */}
-                      <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-border">
-                        <div>
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono font-black text-lg text-foreground">Order #{o.order_number}</span>
-                            <Badge className={`capitalize font-bold px-3 py-1 rounded-full ${
-                              o.status === 'delivered' ? 'bg-emerald-600 text-white' :
-                              o.status === 'shipped' || o.status === 'out_for_delivery' ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30' : 'gold-gradient text-primary'
-                            }`}>
-                              {o.status.replace(/_/g, ' ')}
-                            </Badge>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Assigned on {new Date(o.placed_at).toLocaleDateString('en-IN')}
-                          </p>
-                        </div>
-
-                        {/* Status Update Buttons — Gold CTA Active States */}
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-semibold text-muted-foreground mr-1">Update Status:</span>
-                          {['packed', 'shipped', 'out_for_delivery', 'delivered'].map(st => (
-                            <Button
-                              key={st}
-                              size="sm"
-                              variant={o.status === st ? 'default' : 'outline'}
-                              onClick={() => handleStatusUpdate(o.id, st)}
-                              className={`capitalize rounded-xl text-xs h-8 font-extrabold ${
-                                o.status === st
-                                  ? 'gold-gradient text-primary shadow-soft'
-                                  : 'border-border bg-card text-foreground hover:bg-secondary'
-                              }`}
-                            >
-                              {st.replace(/_/g, ' ')}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Customer Address & Dispatch Items Grid */}
-                      <div className="grid md:grid-cols-2 gap-4">
-                        <div className="bg-secondary/40 p-4 rounded-xl border border-border text-xs space-y-2">
-                          <h4 className="font-bold text-sm text-foreground flex items-center gap-2 mb-2">
-                            <MapPin className="w-4 h-4 text-accent" /> Shipping Address & Contact
-                          </h4>
-                          <p className="font-bold text-foreground text-sm">{o.address?.full_name}</p>
-                          <p className="text-muted-foreground flex items-center gap-1.5">
-                            <Phone className="w-3.5 h-3.5 text-accent" /> Phone: <strong className="text-foreground">{o.address?.phone}</strong>
-                          </p>
-                          <p className="text-muted-foreground leading-relaxed">
-                            {o.address?.line1}{o.address?.line2 ? `, ${o.address?.line2}` : ''}, {o.address?.city}, {o.address?.state} — <strong className="text-foreground">{o.address?.pincode}</strong>
-                          </p>
-                        </div>
-
-                        <div className="bg-secondary/40 p-4 rounded-xl border border-border text-xs">
-                          <h4 className="font-bold text-sm text-foreground flex items-center gap-2 mb-2">
-                            <Package className="w-4 h-4 text-accent" /> Dispatch Items ({o.items?.length || 0})
-                          </h4>
-                          <div className="divide-y divide-border max-h-36 overflow-y-auto pr-1 space-y-2">
-                            {o.items?.map((it, idx) => (
-                              <div key={idx} className="pt-2 flex justify-between items-center text-xs">
-                                <span className="font-semibold text-foreground line-clamp-1">{it.product_name_snapshot}</span>
-                                <Badge variant="outline" className="font-mono font-extrabold text-amber-800 dark:text-amber-300 bg-amber-500/10 border-amber-500/20 shrink-0 ml-2">
-                                  Qty {it.quantity}
-                                </Badge>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 2: STOCK INVENTORY (READ ONLY) */}
-        {activeTab === 'inventory' && (
-          <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h2 className="font-display text-xl font-extrabold text-foreground">Stock Inventory</h2>
-                <p className="text-xs text-muted-foreground">Read-only view of current warehouse inventory and stock levels.</p>
-              </div>
-
-              <div className="flex items-center gap-3 w-full sm:w-auto">
-                <div className="relative flex-1 sm:w-64">
-                  <Search className="w-4 h-4 absolute left-3 top-3 text-muted-foreground" />
-                  <Input
-                    placeholder="Search product or SKU..."
-                    value={inventorySearch}
-                    onChange={(e) => setInventorySearch(e.target.value)}
-                    className="pl-9 h-10 rounded-xl bg-card border-border text-xs text-foreground focus:ring-amber-500"
-                  />
-                </div>
-                <Button variant="outline" size="sm" onClick={fetchInventory} className="rounded-xl h-10 text-xs">
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </div>
-
-            {loadingInventory ? (
-              <div className="py-24 text-center text-sm text-muted-foreground">Loading stock inventory...</div>
-            ) : filteredInventory.length === 0 ? (
-              <Card className="radius-xl shadow-soft text-center py-16">
-                <CardContent>
-                  <Layers className="w-12 h-12 text-muted-foreground/40 mx-auto mb-3" />
-                  <h3 className="font-display font-bold text-lg text-foreground mb-1">No products found</h3>
-                  <p className="text-xs text-muted-foreground">No inventory matches your search criteria.</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredInventory.map((p) => {
-                  const isLow = p.stock_quantity <= (p.min_stock_alert || 5)
-                  const isOut = p.stock_quantity === 0
-
+              <div className="grid grid-cols-1 gap-4">
+                {filteredOrders.map(o => {
+                  const totalItems = o.items?.reduce((s, it) => s + (it.quantity || 0), 0) || 0
                   return (
-                    <Card key={p.id} className="radius-xl shadow-soft border border-border p-4 space-y-3">
-                      <div className="flex justify-between items-start gap-2">
-                        <div>
-                          <h4 className="font-bold text-sm text-foreground line-clamp-1">{p.name}</h4>
-                          <span className="text-[11px] text-muted-foreground font-mono">SKU: {p.sku || 'N/A'}</span>
-                        </div>
-                        <Badge className={`capitalize font-bold text-[10px] ${
-                          isOut ? 'bg-destructive text-destructive-foreground' : isLow ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30' : 'bg-emerald-600/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
-                        }`}>
-                          {isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock'}
-                        </Badge>
-                      </div>
+                    <Card key={o.id} className="bg-white border border-[#ECECEC] hover:border-slate-300 transition-all rounded-3xl shadow-sm overflow-hidden">
+                      <CardContent className="p-6 space-y-4">
+                        
+                        {/* Upper status checkpoint triggers */}
+                        <div className="flex flex-wrap justify-between items-center gap-3 border-b border-slate-100 pb-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-black text-sm text-slate-800">Order #{o.order_number}</span>
+                              <Badge className={`capitalize font-bold text-[9px] rounded-full px-2.5 py-0.5 ${CHECKPOINT_COLORS[o.status] || 'bg-slate-100 text-slate-600'}`}>
+                                {o.status.replace(/_/g, ' ')}
+                              </Badge>
+                            </div>
+                            <span className="text-[10px] text-slate-400 block font-medium">Assigned on {new Date(o.placed_at).toLocaleDateString('en-IN')}</span>
+                          </div>
 
-                      <div className="flex justify-between items-center pt-2 border-t border-border text-xs">
-                        <span className="text-muted-foreground capitalize">Category: <strong className="text-foreground">{p.category || p.subcategory || 'General'}</strong></span>
-                        <div className="text-right">
-                          <span className="text-muted-foreground text-[10px] block">Stock Level</span>
-                          <strong className="text-accent font-mono font-extrabold text-sm">{p.stock_quantity} units</strong>
+                          <div className="flex flex-wrap gap-2 items-center">
+                            <span className="text-[10px] text-slate-400 font-bold mr-1">Update Status:</span>
+                            {o.status === 'vendor_assigned' ? (
+                              <div className="flex gap-2">
+                                <Button size="sm" onClick={() => handleAcceptOrder(o.id)} className="h-8 text-xs font-bold rounded-full bg-slate-900 hover:bg-slate-800 text-white px-4">
+                                  Accept
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => handleRejectOrder(o.id)} className="h-8 text-xs font-bold rounded-full border-rose-200 text-rose-600 hover:bg-rose-50 px-4">
+                                  Decline
+                                </Button>
+                              </div>
+                            ) : (
+                              ['vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered'].map(st => (
+                                <Button
+                                  key={st}
+                                  size="sm"
+                                  onClick={() => handleStatusUpdate(o.id, st)}
+                                  variant={o.status === st ? 'default' : 'outline'}
+                                  className={`h-8 text-[10px] font-bold rounded-full capitalize px-3 ${
+                                    o.status === st 
+                                      ? 'bg-slate-900 text-white hover:bg-slate-800' 
+                                      : 'border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {st.replace(/_/g, ' ')}
+                                </Button>
+                              ))
+                            )}
+                          </div>
                         </div>
-                      </div>
+
+                        {/* Mid columns info split */}
+                        <div className="grid grid-cols-1 md:grid-cols-[1.5fr_1fr] gap-4">
+                          <div className="bg-[#F8F9FC] p-5 rounded-2xl border border-slate-100 space-y-2 text-xs">
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Shipping Address & Contact</span>
+                            <p className="font-black text-slate-800 text-sm mt-2">{o.address?.full_name}</p>
+                            <p className="text-slate-500 font-bold">📞 Phone: {o.address?.phone}</p>
+                            <p className="text-slate-500 leading-relaxed font-medium">
+                              {o.address?.line1}, {o.address?.line2 && o.address.line2 + ', '}{o.address?.city}, {o.address?.state} — <strong className="text-slate-700">{o.address?.pincode}</strong>
+                            </p>
+                          </div>
+
+                          <div className="bg-[#F8F9FC] p-5 rounded-2xl border border-slate-100 space-y-3 text-xs flex flex-col justify-between">
+                            <div>
+                              <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                                <span>Dispatch Items ({o.items?.length || 0})</span>
+                                <span>Qty {totalItems}</span>
+                              </div>
+                              <div className="divide-y divide-slate-100 max-h-36 overflow-y-auto mt-2 pr-1 font-medium text-slate-700">
+                                {o.items?.map((it, idx) => (
+                                  <div key={idx} className="py-1.5 flex justify-between items-center text-xs">
+                                    <span className="truncate max-w-[200px]">{it.product_name_snapshot}</span>
+                                    <Badge className="font-bold text-[10px] bg-slate-100 text-slate-700 shrink-0">Qty {it.quantity}</Badge>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="flex justify-between items-center border-t border-slate-200/60 pt-3">
+                              <span className="font-black text-base text-[#F4B942]">{formatINR(o.total_amount)}</span>
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => setSelectedOrderId(o.id)} 
+                                className="h-8 text-xs font-bold text-slate-900 hover:bg-slate-100 rounded-full"
+                              >
+                                View Complete Details &rarr;
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+
+                      </CardContent>
                     </Card>
                   )
                 })}
               </div>
             )}
+
           </div>
         )}
+
+        {/* Stock Inventory Tab content with premium progress bars */}
+        {activeTab === 'inventory' && (
+          <div className="space-y-4 slide-up">
+            
+            <div className="bg-white p-6 border border-[#ECECEC] rounded-3xl shadow-xs">
+              <h2 className="font-display font-black text-sm text-slate-800">Warehouse Stock Inventory</h2>
+              <p className="text-[10px] text-slate-400 mt-0.5">Read-only warehouse level inventory allocations and custom stock warnings.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {inventory.map(p => {
+                const isLow = p.stock_quantity <= 10
+                const percent = Math.min(100, Math.round((p.stock_quantity / 1200) * 100))
+
+                return (
+                  <Card key={p.id} className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs p-5 space-y-4">
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <h4 className="font-bold text-xs text-slate-800 line-clamp-1">{p.name}</h4>
+                        <span className="text-[9px] text-slate-400 font-mono">SKU: {p.sku || 'N/A'}</span>
+                      </div>
+                      <Badge className={`font-bold text-[9px] rounded-full px-2 py-0.5 ${isLow ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20' : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'}`}>
+                        {isLow ? 'Restock Soon' : 'In Stock'}
+                      </Badge>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-[10px] font-bold text-slate-500">
+                        <span>Allocated Level</span>
+                        <span>{p.stock_quantity} pcs</span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                        <div className={`h-1.5 rounded-full ${isLow ? 'bg-rose-500' : 'bg-[#F4B942]'}`} style={{ width: `${percent}%` }} />
+                      </div>
+                    </div>
+                  </Card>
+                )
+              })}
+            </div>
+
+          </div>
+        )}
+
       </main>
     </div>
   )

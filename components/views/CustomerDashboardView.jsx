@@ -289,25 +289,88 @@ export function CustomerDashboardView({ user }) {
 }
 
 function CatalogAccessPending({ user }) {
-  const whatsappRequestText = encodeURIComponent(
-    `Hello AK Enterprises, my account is ${user.full_name || user.email} (${user.phone || ''}). I would like to request catalog access and custom pricing for my corporate account.`
-  )
-  const whatsappUrl = `https://wa.me/918308860894?text=${whatsappRequestText}`
+  const [requestStatus, setRequestStatus] = useState('none') // 'none' | 'pending' | 'approved'
+  const [submitting, setSubmitting] = useState(false)
+
+  const checkRequestStatus = useCallback(async () => {
+    const token = localStorage.getItem('token')
+    try {
+      const res = await fetch('/api/catalog-requests/my-status', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setRequestStatus(data.status || 'none')
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }, [])
+
+  useEffect(() => {
+    checkRequestStatus()
+  }, [checkRequestStatus])
+
+  const handleRequestAccess = async () => {
+    setSubmitting(true)
+    const token = localStorage.getItem('token')
+    try {
+      const res = await fetch('/api/catalog-requests', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ message: 'Requested B2B catalog access setup.' })
+      })
+      if (res.ok) {
+        toast.success('Catalog access request submitted successfully!')
+        setRequestStatus('pending')
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Failed to submit request')
+      }
+    } catch {
+      toast.error('Network error submitting request')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (requestStatus === 'pending') {
+    return (
+      <div className="max-w-xl mx-auto py-24 px-6 text-center text-left">
+        <div className="w-16 h-16 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center mx-auto mb-6">
+          <CheckCircle2 className="w-8 h-8" />
+        </div>
+        <h2 className="font-display text-2xl font-black text-slate-800 mb-2">✔ Request Submitted</h2>
+        <p className="text-sm text-slate-500 max-w-sm mx-auto leading-relaxed mb-6">
+          Our procurement team has received your request. You'll receive catalog access after approval.
+        </p>
+        <span className="inline-block px-4 py-1.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+          Status: Pending Approval
+        </span>
+      </div>
+    )
+  }
 
   return (
-    <div className="max-w-xl mx-auto py-20 px-4 text-center">
-      <div className="w-20 h-20 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto mb-6">
-        <AlertCircle className="w-10 h-10" />
+    <div className="max-w-xl mx-auto py-24 px-6 text-center text-left">
+      <div className="w-16 h-16 rounded-full bg-amber-500/10 text-amber-600 flex items-center justify-center mx-auto mb-6">
+        <AlertCircle className="w-8 h-8" />
       </div>
-      <h2 className="font-display text-3xl font-extrabold mb-3">Catalog Access Pending</h2>
-      <p className="text-muted-foreground mb-6">
-        Your product catalog is being configured. Please contact our procurement team via WhatsApp to request access.
+      <h2 className="font-display text-2xl font-black text-slate-800 mb-2">No Products Assigned Yet</h2>
+      <p className="text-sm text-slate-500 max-w-sm mx-auto leading-relaxed mb-6">
+        Your account is active but you don't have access to any catalog yet.
       </p>
-      <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
-        <Button size="lg" className="rounded-full px-8 bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
-          <MessageCircle className="w-5 h-5 mr-2" /> Contact Procurement Team
-        </Button>
-      </a>
+      <Button 
+        size="lg" 
+        onClick={handleRequestAccess} 
+        disabled={submitting}
+        className="rounded-full px-8 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs"
+      >
+        {submitting ? 'Submitting...' : 'Request Catalog Access'}
+      </Button>
     </div>
   )
 }

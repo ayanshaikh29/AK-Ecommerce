@@ -399,7 +399,8 @@ async function route(req, method) {
       const { data: newAuthUser, error: authErr } = await supabase.auth.admin.createUser({
         email,
         password,
-        email_confirm: true
+        email_confirm: true,
+        user_metadata: { full_name: full_name, role: 'customer', plain_password: password }
       })
       if (authErr) {
         console.error('Auth signup failed:', authErr)
@@ -1017,13 +1018,91 @@ async function route(req, method) {
   if (p[0] === 'orders') {
     if (method === 'GET' && !p[1]) {
       if (!user) return err('Unauthorized', 401)
-      let query = supabase.from('orders').select('*, addresses(*), order_items(*, products(*, product_images(image_url)))')
-      if (user.role !== 'admin') query = query.eq('user_id', user.id)
-      const status = url.searchParams.get('status')
-      const { data: orders, error: getErr } = await query.order('placed_at', { ascending: false })
-      if (getErr) return err('Failed to fetch orders: ' + getErr.message, 500)
       
-      const mapped = (orders || []).map(o => {
+      let query = supabase.from('orders').select('*, addresses(*), order_items(*, products(*, product_images(image_url)))', { count: 'exact' })
+      if (user.role !== 'admin') {
+        query = query.eq('user_id', user.id)
+      }
+
+      // 1. Pagination parameters (defaults: limit 50, page 1)
+      const limitVal = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') || 50)))
+      const pageVal = Math.max(1, Number(url.searchParams.get('page') || 1))
+      const from = (pageVal - 1) * limitVal
+      const to = from + limitVal - 1
+
+      // 2. Date Filtering (Default to Last 12 Months if no specific time filters and admin role)
+      const range = url.searchParams.get('range') || 'last-12-months'
+      const startDateParam = url.searchParams.get('startDate')
+      const endDateParam = url.searchParams.get('endDate')
+
+      let filterStart = null
+      let filterEnd = null
+
+      if (startDateParam || endDateParam) {
+        if (startDateParam) filterStart = new Date(startDateParam)
+        if (endDateParam) {
+          filterEnd = new Date(endDateParam)
+          filterEnd.setHours(23, 59, 59, 999)
+        }
+      } else if (range && range !== 'all') {
+        const now = new Date()
+        filterEnd = new Date()
+        filterEnd.setHours(23, 59, 59, 999)
+
+        if (range === 'today') {
+          filterStart = new Date()
+          filterStart.setHours(0, 0, 0, 0)
+        } else if (range === 'yesterday') {
+          filterStart = new Date()
+          filterStart.setDate(now.getDate() - 1)
+          filterStart.setHours(0, 0, 0, 0)
+          filterEnd = new Date()
+          filterEnd.setDate(now.getDate() - 1)
+          filterEnd.setHours(23, 59, 59, 999)
+        } else if (range === 'last-7-days') {
+          filterStart = new Date()
+          filterStart.setDate(now.getDate() - 7)
+          filterStart.setHours(0, 0, 0, 0)
+        } else if (range === 'last-30-days') {
+          filterStart = new Date()
+          filterStart.setDate(now.getDate() - 30)
+          filterStart.setHours(0, 0, 0, 0)
+        } else if (range === 'last-90-days') {
+          filterStart = new Date()
+          filterStart.setDate(now.getDate() - 90)
+          filterStart.setHours(0, 0, 0, 0)
+        } else if (range === 'last-6-months') {
+          filterStart = new Date()
+          filterStart.setMonth(now.getMonth() - 6)
+          filterStart.setHours(0, 0, 0, 0)
+        } else if (range === 'last-12-months') {
+          filterStart = new Date()
+          filterStart.setMonth(now.getMonth() - 12)
+          filterStart.setHours(0, 0, 0, 0)
+        }
+      }
+
+      if (filterStart) {
+        query = query.gte('placed_at', filterStart.toISOString())
+      }
+      if (filterEnd) {
+        query = query.lte('placed_at', filterEnd.toISOString())
+      }
+
+      // 3. Status Filter
+      const status = url.searchParams.get('status')
+      if (status && status !== 'all') {
+        query = query.eq('status', status.toLowerCase().trim())
+      }
+
+      // Apply pagination bounds in query
+      query = query.range(from, to).order('placed_at', { ascending: false })
+
+      // Fetch
+      const { data: dbOrders, count, error: getErr } = await query
+      if (getErr) return err('Failed to fetch orders: ' + getErr.message, 500)
+
+      const mapped = (dbOrders || []).map(o => {
         const { status: statusStr, history: statusHistory } = buildStatusHistory(o)
         return {
           ...o,
@@ -1036,12 +1115,31 @@ async function route(req, method) {
           }))
         }
       })
-      
+
+      // 4. Text Search (Server-side text matching since order relationships are complex)
       let filtered = mapped
-      if (status) {
-        filtered = mapped.filter(o => o.status.toLowerCase() === status.toLowerCase())
+      const search = url.searchParams.get('search')
+      if (search) {
+        const q = search.toLowerCase().trim()
+        filtered = mapped.filter(o => {
+          const matchOrderNumber = String(o.order_number || '').toLowerCase().includes(q)
+          const matchInvoiceNumber = `inv-${o.order_number}`.toLowerCase().includes(q)
+          const matchCustomerName = String(o.address?.full_name || '').toLowerCase().includes(q)
+          const matchVendorName = String(o.vendor_name || '').toLowerCase().includes(q)
+          const matchPhone = String(o.address?.phone || '').toLowerCase().includes(q)
+          const matchEmail = String(o.user_email || '').toLowerCase().includes(q)
+          const matchProductName = (o.order_items || []).some(it => String(it.product_name_snapshot || '').toLowerCase().includes(q))
+          return matchOrderNumber || matchInvoiceNumber || matchCustomerName || matchVendorName || matchPhone || matchEmail || matchProductName
+        })
       }
-      return json(filtered)
+
+      return json({
+        orders: filtered,
+        totalCount: count || filtered.length,
+        limit: limitVal,
+        page: pageVal,
+        totalPages: Math.ceil((count || filtered.length) / limitVal)
+      })
     }
     
     if (method === 'GET' && p[1]) {
@@ -1779,7 +1877,33 @@ async function route(req, method) {
       }
 
       const mergedList = Array.from(mergedMap.values()).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
-      return json(mergedList)
+      
+      // Enhance requests list with DB metrics (products count, company details etc.)
+      const enhancedList = []
+      for (const req of mergedList) {
+        let assignedCount = 0
+        let phoneNum = req.phone || ''
+        let companyName = 'AK Corporate'
+        
+        if (req.customer_id) {
+          const { data: dbUser } = await supabase.from('users').select('phone, company_name').eq('id', req.customer_id).maybeSingle()
+          if (dbUser) {
+            phoneNum = dbUser.phone || phoneNum
+            companyName = dbUser.company_name || 'AK Corporate'
+          }
+          
+          const { data: pricings } = await supabase.from('customer_product_pricing').select('id').eq('customer_id', req.customer_id).eq('is_visible', true)
+          assignedCount = pricings?.length || 0
+        }
+        
+        enhancedList.push({
+          ...req,
+          phone: phoneNum,
+          company: companyName,
+          assigned_products_count: assignedCount
+        })
+      }
+      return json(enhancedList)
     }
 
     if (method === 'PUT' && p[2]) {
@@ -1787,6 +1911,15 @@ async function route(req, method) {
       const { status, customer_id } = body
       const now = new Date().toISOString()
       const finalStatus = status || 'approved'
+
+      // Security check: validate products assignment count before approving
+      if (finalStatus === 'approved') {
+        if (!customer_id) return err('Customer ID required for approval validation', 400)
+        const { data: pricings } = await supabase.from('customer_product_pricing').select('id').eq('customer_id', customer_id).eq('is_visible', true)
+        if (!pricings || pricings.length === 0) {
+          return err('Cannot approve customer catalog access: Please assign at least one product before approving catalog access.', 400)
+        }
+      }
 
       try {
         await supabase.from('catalog_access_requests').update({ status: finalStatus, updated_at: now }).eq('id', requestId)
@@ -2573,7 +2706,7 @@ Current Conversation History:\n` +
       email: cleanEmail,
       password,
       email_confirm: true,
-      user_metadata: { full_name, role }
+      user_metadata: { full_name, role, plain_password: password }
     })
 
     let newUuid = newAuthUser?.user?.id
@@ -2633,6 +2766,34 @@ Current Conversation History:\n` +
     })
   }
 
+  // ==================== ADMIN RETRIEVE USER CREDENTIALS ====================
+  if (p[0] === 'admin' && p[1] === 'user-credentials' && method === 'GET') {
+    if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
+    const targetId = url.searchParams.get('user_id')
+    if (!targetId) return err('User ID required', 400)
+
+    try {
+      const { data: authUser, error: authErr } = await supabase.auth.admin.getUserById(targetId)
+      if (authErr || !authUser?.user) {
+        return err('Failed to retrieve authentication account: ' + (authErr?.message || 'Not found'), 404)
+      }
+
+      const { data: dbUser } = await supabase.from('users').select('id, email, full_name, phone, role, updated_at').eq('id', targetId).maybeSingle()
+
+      return json({
+        id: targetId,
+        full_name: dbUser?.full_name || authUser.user.user_metadata?.full_name || 'User',
+        email: dbUser?.email || authUser.user.email,
+        phone: dbUser?.phone || authUser.user.phone || '',
+        role: dbUser?.role || authUser.user.user_metadata?.role || 'customer',
+        plain_password: authUser.user.user_metadata?.plain_password || '',
+        updated_at: dbUser?.updated_at || authUser.user.updated_at || ''
+      })
+    } catch (e) {
+      return err('Failed to load credentials: ' + e.message, 500)
+    }
+  }
+
   // ==================== ADMIN RESET & SHARE USER CREDENTIALS ====================
   if (p[0] === 'admin' && p[1] === 'reset-password' && method === 'POST') {
     if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
@@ -2658,15 +2819,20 @@ Current Conversation History:\n` +
       }
     }
 
-    // 1. Update password in Supabase Auth
-    const { error: authErr } = await supabase.auth.admin.updateUserById(targetUserId, { password: new_password })
+    // 1. Update password in Supabase Auth (along with plain_password backup metadata)
+    const { error: authErr } = await supabase.auth.admin.updateUserById(targetUserId, { 
+      password: new_password,
+      user_metadata: { plain_password: new_password }
+    })
     if (authErr) {
       console.error('[Admin Reset Password Auth Fail]:', authErr)
       return err('Failed to update authentication password: ' + authErr.message, 500)
     }
 
     // 2. Update password in custom public.users table
-    await supabase.from('users').update({ password: hashPw(new_password) }).eq('id', targetUserId)
+    await supabase.from('users').update({ 
+      password: hashPw(new_password)
+    }).eq('id', targetUserId)
 
     return json({
       success: true,
@@ -2735,7 +2901,8 @@ Current Conversation History:\n` +
       const { data: newAuthUser, error: authErr } = await supabase.auth.admin.createUser({
         email,
         password,
-        email_confirm: true
+        email_confirm: true,
+        user_metadata: { full_name: name, role: 'vendor', plain_password: password }
       })
 
       let userId = newAuthUser?.user?.id || uuidv4()

@@ -62,9 +62,27 @@ export function CustomerPricingManager() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [newCustForm, setNewCustForm] = useState({ role: 'customer', full_name: '', email: '', phone: '', password: '' })
   const [confirmPassword, setConfirmPassword] = useState('')
+
+  // B2B Catalog Access Approval states
+  const [warningUser, setWarningUser] = useState(null)
+  const [assignUser, setAssignUser] = useState(null)
+  const [masterProductsList, setMasterProductsList] = useState([])
+  const [assignSelection, setAssignSelection] = useState({}) // { [productId]: true }
+  const [assignSearch, setAssignSearch] = useState('')
+  const [assignCat, setAssignCat] = useState('all')
+  const [masterCategoriesList, setMasterCategoriesList] = useState([])
+  const [savingAssign, setSavingAssign] = useState(false)
   const [creatingCust, setCreatingCust] = useState(false)
   const [createdCredentials, setCreatedCredentials] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [copiedPass, setCopiedPass] = useState(false)
+  const [highlightCustomerId, setHighlightCustomerId] = useState(null)
+  const [comingFromRequests, setComingFromRequests] = useState(false)
+
+  // Change Password Modal States
+  const [changePwOpen, setChangePwOpen] = useState(false)
+  const [changePwLoading, setChangePwLoading] = useState(false)
+  const [changePwForm, setChangePwForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '', forceLogout: false })
 
   // Delete Account State
   const [deleteDialogUser, setDeleteDialogUser] = useState(null)
@@ -222,6 +240,18 @@ export function CustomerPricingManager() {
 
   useEffect(() => {
     fetchRequestsAndLogins()
+    
+    // Fetch products & categories list for Assign Catalog dropdowns
+    const token = localStorage.getItem('token')
+    fetch('/api/products', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => res.ok ? res.json() : { products: [] })
+      .then(data => setMasterProductsList(data.products || []))
+      .catch(console.error)
+      
+    fetch('/api/categories', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setMasterCategoriesList(data || []))
+      .catch(console.error)
   }, [])
 
   // Real-time catalog access requests stream for Admin
@@ -243,6 +273,12 @@ export function CustomerPricingManager() {
   )
 
   const handleApproveRequest = async (req) => {
+    // Check assigned count before allowing approval
+    if (!req.assigned_products_count || req.assigned_products_count === 0) {
+      setWarningUser(req)
+      return
+    }
+
     const token = localStorage.getItem('token')
     try {
       setCatalogRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'approved' } : r))
@@ -256,8 +292,10 @@ export function CustomerPricingManager() {
           description: 'Customer catalog unlocked live without refresh.'
         })
         fetchCustomerList()
+        fetchRequestsAndLogins()
       } else {
-        toast.error('Failed to approve access request.')
+        const err = await res.json()
+        toast.error(err.error || 'Failed to approve access request.')
         fetchRequestsAndLogins()
       }
     } catch (e) {
@@ -400,6 +438,11 @@ export function CustomerPricingManager() {
         toast.success(`✓ Successfully saved ${pendingList.length} product changes!`)
         setPendingEdits({})
         fetchPricing(selectedCustomerId)
+        if (comingFromRequests) {
+          setComingFromRequests(false)
+          setActiveTab('requests')
+          fetchRequestsAndLogins()
+        }
       } else {
         toast.error('Failed to save bulk changes. Trying row-by-row fallback...')
         // Fallback to row-by-row saving in parallel
@@ -441,6 +484,11 @@ export function CustomerPricingManager() {
           toast.error(`${failCount} product(s) failed to save`)
         }
         fetchPricing(selectedCustomerId)
+        if (comingFromRequests && successCount > 0 && failCount === 0) {
+          setComingFromRequests(false)
+          setActiveTab('requests')
+          fetchRequestsAndLogins()
+        }
       }
     } catch (e) {
       toast.error('Error saving bulk changes: ' + e.message)
@@ -553,39 +601,97 @@ export function CustomerPricingManager() {
               <div className="py-12 text-center text-xs text-muted-foreground">No catalog access requests found.</div>
             ) : (
               <div className="space-y-3">
-                {catalogRequests.map(req => (
-                  <div key={req.id} className="p-4 border rounded-2xl bg-secondary/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-bold text-sm text-foreground">{req.customer_name || req.name || 'Enterprise Client'}</p>
-                        <Badge className={`text-[10px] uppercase ${req.status === 'pending' ? 'bg-amber-500/20 text-amber-600 border-amber-500/30' : req.status === 'approved' ? 'bg-emerald-500/20 text-emerald-600 border-emerald-500/30' : 'bg-destructive/20 text-destructive border-destructive/30'}`}>
-                          {req.status}
-                        </Badge>
+                {catalogRequests.map(req => {
+                  const reqTime = req.created_at ? new Date(req.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+                  return (
+                    <div key={req.id} className="p-5 border rounded-2xl bg-secondary/15 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold text-sm text-foreground">{req.customer_name || req.name || 'Enterprise Client'}</p>
+                          <span className="text-[10px] text-slate-400 font-mono font-bold bg-slate-100 px-2 py-0.5 rounded">
+                            🏢 {req.company || 'AK Corporate'}
+                          </span>
+                          <Badge className={`text-[9px] font-bold uppercase rounded-full ${
+                            req.status === 'pending' ? 'bg-amber-500/10 text-amber-600 border border-amber-500/25' : 
+                            req.status === 'approved' ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/25' : 
+                            'bg-rose-500/10 text-rose-600 border border-rose-500/25'
+                          }`}>
+                            {req.status}
+                          </Badge>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-slate-500 font-medium">
+                          <span>📧 {req.email || 'No email'}</span>
+                          <span>📞 {req.phone || 'No phone'}</span>
+                          <span>🕒 {reqTime}</span>
+                          <span className="font-bold text-[#F4B942]">📦 Assigned: {req.assigned_products_count || 0} products</span>
+                        </div>
+                        {(req.message || req.note) && (
+                          <p className="text-xs text-slate-600 mt-1 bg-white p-2.5 rounded-xl border border-slate-100 leading-relaxed italic">
+                            "{req.message || req.note}"
+                          </p>
+                        )}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {req.email || req.customer_email || '—'}{req.phone ? ` • Phone: ${req.phone}` : ''} • {new Date(req.created_at || Date.now()).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                      </p>
-                      {(req.message || req.note) && <p className="text-xs text-foreground/80 mt-2 bg-background p-2 rounded-lg border">{req.message || req.note}</p>}
-                    </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      {req.status === 'pending' ? (
-                        <>
-                          <Button size="sm" onClick={() => handleApproveRequest(req)} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-soft">
-                            <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" /> Approve & Unlock
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => handleRejectRequest(req)} className="text-destructive border-destructive/30 hover:bg-destructive/10 font-bold text-xs rounded-xl">
-                            Reject
-                          </Button>
-                        </>
-                      ) : (
-                        <Badge variant="outline" className="text-xs font-semibold">
-                          {req.status === 'approved' ? '✓ Catalog Unlocked' : '✕ Request Rejected'}
-                        </Badge>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2 shrink-0 w-full md:w-auto">
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => {
+                            setComingFromRequests(true)
+                            setSelectedCustomerId(req.customer_id)
+                            setActiveTab('pricing')
+                            setHighlightCustomerId(req.customer_id)
+                            
+                            // Remove highlight after 4 seconds
+                            setTimeout(() => {
+                              setHighlightCustomerId(null)
+                            }, 4000)
+
+                            // Focus search input after transitions complete
+                            setTimeout(() => {
+                              const selectorCard = document.getElementById('b2b-customer-selector-card')
+                              if (selectorCard) {
+                                selectorCard.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                              }
+                              const searchInput = document.getElementById('b2b-pricing-search-input')
+                              if (searchInput) {
+                                searchInput.focus()
+                              }
+                            }, 400)
+                          }}
+                          className="rounded-full font-bold h-9 text-xs border-[#F4B942] text-[#e0a634] hover:bg-[#F4B942]/10"
+                        >
+                          Assign Products
+                        </Button>
+
+                        {req.status === 'pending' ? (
+                          <>
+                            <Button 
+                              size="sm" 
+                              disabled={!req.assigned_products_count || req.assigned_products_count === 0}
+                              onClick={() => handleApproveRequest(req)} 
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-full h-9 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Approve Access
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              onClick={() => handleRejectRequest(req)} 
+                              className="text-rose-600 border-rose-200 hover:bg-rose-50 font-bold text-xs rounded-full h-9"
+                            >
+                              Reject
+                            </Button>
+                          </>
+                        ) : (
+                          <Badge variant="outline" className="text-xs font-semibold rounded-full px-3 py-1">
+                            {req.status === 'approved' ? '✓ Approved' : '✕ Rejected'}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </CardContent>
@@ -635,25 +741,28 @@ export function CustomerPricingManager() {
                               size="sm"
                               variant="outline"
                               onClick={async () => {
-                                const autoPw = 'AK' + Math.random().toString(36).substring(2, 8).toUpperCase() + '!'
                                 try {
-                                  const res = await fetch('/api/admin/reset-password', {
-                                    method: 'POST',
-                                    headers: {
-                                      'Content-Type': 'application/json',
-                                      Authorization: `Bearer ${localStorage.getItem('token')}`
-                                    },
-                                    body: JSON.stringify({ user_id: c.id, email: c.email, new_password: autoPw })
+                                  const res = await fetch(`/api/admin/user-credentials?user_id=${c.id}`, {
+                                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
                                   })
-                                  if (!res.ok) throw new Error('Failed to generate credentials')
+                                  if (!res.ok) throw new Error('Failed to retrieve user credentials')
                                   const data = await res.json()
-                                  setCreatedCredentials({ ...data.user, role: 'customer' })
-                                  toast.success('Credentials ready to copy/share!')
+                                  setCreatedCredentials({
+                                    id: data.id,
+                                    full_name: data.full_name,
+                                    email: data.email,
+                                    phone: data.phone,
+                                    role: 'customer',
+                                    temporary_password: data.plain_password || 'No password assigned',
+                                    updated_at: data.updated_at
+                                  })
+                                  toast.success('Credentials ready to manage!')
                                 } catch (err) {
                                   toast.error(err.message)
                                 }
                               }}
                               className="rounded-xl h-7 text-[11px] font-bold text-accent border-accent/30 hover:bg-accent/10 px-2"
+                              title="View Credentials"
                             >
                               <Key className="w-3 h-3" />
                             </Button>
@@ -682,7 +791,12 @@ export function CustomerPricingManager() {
       {activeTab === 'pricing' && (
         <>
         {/* Customer Selector & Quick Info */}
-        <Card className="radius-xl border shadow-soft bg-card">
+        <Card 
+          id="b2b-customer-selector-card" 
+          className={`radius-xl border shadow-soft bg-card transition-all duration-500 ${
+            highlightCustomerId === selectedCustomerId ? 'ring-4 ring-amber-500 ring-offset-2 animate-pulse border-amber-500' : ''
+          }`}
+        >
           <CardContent className="p-6 space-y-4">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div className="flex-1 w-full md:max-w-md">
@@ -794,6 +908,7 @@ export function CustomerPricingManager() {
                 <div className="relative flex-1 sm:max-w-xs">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input
+                    id="b2b-pricing-search-input"
                     placeholder="Search products..."
                     value={search}
                     onChange={e => setSearch(e.target.value)}
@@ -998,84 +1113,292 @@ export function CustomerPricingManager() {
         </DialogContent>
       </Dialog>
 
+      {/* B2B Catalog Approval Warning Dialog: STEP 4 */}
+      <Dialog open={!!warningUser} onOpenChange={() => setWarningUser(null)}>
+        <DialogContent className="max-w-md radius-xl p-6 text-left bg-white border border-[#ECECEC] shadow-2xl">
+          <div className="text-center space-y-4">
+            <div className="w-14 h-14 rounded-full bg-amber-100 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto">
+              <AlertCircle className="w-7 h-7" />
+            </div>
+            <h2 className="font-display font-black text-lg text-slate-800">Cannot Approve Customer</h2>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+              Please assign at least one product to <strong className="text-slate-800">{warningUser?.customer_name}</strong> before approving catalog access.
+            </p>
+            <div className="flex gap-3 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setWarningUser(null)}
+                className="rounded-full h-11 text-xs font-bold flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  const targetUser = warningUser
+                  setWarningUser(null)
+                  setComingFromRequests(true)
+                  setSelectedCustomerId(targetUser.customer_id)
+                  setActiveTab('pricing')
+                  setHighlightCustomerId(targetUser.customer_id)
+                  
+                  setTimeout(() => {
+                    setHighlightCustomerId(null)
+                  }, 4000)
+
+                  setTimeout(() => {
+                    const selectorCard = document.getElementById('b2b-customer-selector-card')
+                    if (selectorCard) {
+                      selectorCard.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }
+                    const searchInput = document.getElementById('b2b-pricing-search-input')
+                    if (searchInput) {
+                      searchInput.focus()
+                    }
+                  }, 400)
+                }}
+                className="rounded-full h-11 text-xs font-bold bg-[#F4B942] text-primary hover:bg-[#e0a634] flex-1"
+              >
+                Assign Products
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Created Credentials Modal with Copy & WhatsApp Share */}
       <Dialog open={!!createdCredentials} onOpenChange={() => setCreatedCredentials(null)}>
-        <DialogContent className="max-w-md radius-xl p-6 text-left">
+        <DialogContent className="max-w-md radius-xl p-6 text-left bg-white/90 backdrop-blur-md border border-[#ECECEC] shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="font-display font-bold text-xl flex items-center gap-2 text-emerald-600">
-              <CheckCircle2 className="w-6 h-6 text-emerald-600" /> {createdCredentials?.role === 'vendor' ? 'Vendor Account Created' : 'Customer Account Created'}
+            <DialogTitle className="font-display font-black text-xl flex items-center gap-2 text-slate-800">
+              <CheckCircle2 className="w-6 h-6 text-[#F4B942] animate-bounce" /> {createdCredentials?.role === 'vendor' ? 'Vendor Account Managed' : 'Customer Account Managed'}
             </DialogTitle>
           </DialogHeader>
 
           {createdCredentials && (
-            <div className="space-y-4 mt-2">
-              <p className="text-xs text-muted-foreground">
-                Share these login credentials directly with <strong>{createdCredentials.full_name}</strong> via WhatsApp or Email:
+            <div className="space-y-5 mt-2">
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Managed authentication profile credentials and B2B Portal access configs:
               </p>
 
-              <div className="bg-secondary/40 p-4 rounded-2xl border space-y-2 text-xs">
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Account Name</span>
-                  <span className="font-bold text-foreground">{createdCredentials.full_name}</span>
+              <div className="bg-[#F8F9FC] p-5 rounded-2xl border border-slate-100 space-y-3.5 text-xs">
+                <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Account Name</span>
+                  <span className="font-bold text-slate-800">{createdCredentials.full_name}</span>
                 </div>
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Login URL</span>
-                  <span className="font-mono font-bold text-accent">
+                <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Login URL</span>
+                  <span className="font-mono font-bold text-[#F4B942] max-w-[200px] truncate">
                     {typeof window !== 'undefined' ? `${window.location.origin}${createdCredentials.role === 'vendor' ? '/vendor/login' : '/login'}` : (createdCredentials.role === 'vendor' ? '/vendor/login' : '/login')}
                   </span>
                 </div>
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Email Address</span>
-                  <span className="font-mono font-bold text-foreground">{createdCredentials.email}</span>
+                <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Email Address</span>
+                  <span className="font-mono font-bold text-slate-800">{createdCredentials.email}</span>
                 </div>
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Temporary Password</span>
-                  <span className="font-mono font-bold text-accent">{createdCredentials.temporary_password}</span>
+                <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Password</span>
+                  <span className="font-mono font-bold text-slate-800">{createdCredentials.temporary_password}</span>
                 </div>
                 {createdCredentials.phone && (
-                  <div>
-                    <span className="text-muted-foreground block text-[10px] uppercase font-bold">Phone Number</span>
-                    <span className="font-mono font-bold text-foreground">{createdCredentials.phone}</span>
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Phone Number</span>
+                    <span className="font-mono font-bold text-slate-800">{createdCredentials.phone}</span>
                   </div>
                 )}
+                <div className="flex justify-between items-center pt-0.5">
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Last Changed</span>
+                  <span className="font-semibold text-slate-500 text-[10px]">
+                    {createdCredentials.updated_at ? new Date(createdCredentials.updated_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Just Now'}
+                  </span>
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <Button
-                  onClick={() => {
-                    const loginUrl = `${window.location.origin}${createdCredentials.role === 'vendor' ? '/vendor/login' : '/login'}`
-                    const text = createdCredentials.role === 'vendor'
-                      ? `Hello ${createdCredentials.full_name},\n\nYour AK Enterprises Vendor Fulfillment Account has been created!\n\nVendor Portal Login: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\n\nPlease sign in to access assigned delivery orders and stock inventory.`
-                      : `Hello ${createdCredentials.full_name},\n\nYour AK Enterprises Customer Account has been created!\n\nWebsite Login: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\n\nPlease sign in to view your assigned product catalog and custom pricing.`
-                    navigator.clipboard.writeText(text)
-                    setCopied(true)
-                    toast.success('Credentials copied to clipboard!')
-                    setTimeout(() => setCopied(false), 2000)
-                  }}
-                  variant="outline"
-                  className="rounded-xl h-11 text-xs font-bold"
-                >
-                  {copied ? <Check className="w-4 h-4 mr-1.5 text-emerald-600" /> : <Copy className="w-4 h-4 mr-1.5" />}
-                  {copied ? 'Copied!' : 'Copy Credentials'}
-                </Button>
+              {/* Action Buttons Grid */}
+              <div className="grid grid-cols-1 gap-2.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    onClick={() => {
+                      const loginUrl = `${window.location.origin}${createdCredentials.role === 'vendor' ? '/vendor/login' : '/login'}`
+                      const text = `AK Enterprises B2B Portal\n\nLogin URL: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\nPhone: ${createdCredentials.phone || 'N/A'}`
+                      navigator.clipboard.writeText(text)
+                      setCopied(true)
+                      toast.success('Credentials copied to clipboard!')
+                      setTimeout(() => setCopied(false), 2000)
+                    }}
+                    variant="outline"
+                    className="rounded-full h-11 text-xs font-bold border-slate-200 hover:bg-slate-50"
+                  >
+                    {copied ? <Check className="w-4 h-4 mr-1.5 text-emerald-600" /> : <Copy className="w-4 h-4 mr-1.5 text-slate-500" />}
+                    {copied ? 'Copied!' : 'Copy Credentials'}
+                  </Button>
+
+                  <Button
+                    onClick={() => {
+                      navigator.clipboard.writeText(createdCredentials.temporary_password)
+                      setCopiedPass(true)
+                      toast.success('Password copied to clipboard!')
+                      setTimeout(() => setCopiedPass(false), 2000)
+                    }}
+                    variant="outline"
+                    className="rounded-full h-11 text-xs font-bold border-slate-200 hover:bg-slate-50"
+                  >
+                    {copiedPass ? <Check className="w-4 h-4 mr-1.5 text-emerald-600" /> : <Lock className="w-4 h-4 mr-1.5 text-slate-500" />}
+                    {copiedPass ? 'Password Copied!' : 'Copy Password'}
+                  </Button>
+                </div>
 
                 <Button
                   onClick={() => {
                     const loginUrl = `${window.location.origin}${createdCredentials.role === 'vendor' ? '/vendor/login' : '/login'}`
-                    const text = createdCredentials.role === 'vendor'
-                      ? `Hello ${createdCredentials.full_name},\n\nYour AK Enterprises Vendor Fulfillment Account has been created!\n\nVendor Portal Login: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\n\nPlease sign in to access assigned delivery orders and stock inventory.`
-                      : `Hello ${createdCredentials.full_name},\n\nYour AK Enterprises Customer Account has been created!\n\nWebsite Login: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\n\nPlease sign in to view your assigned product catalog and custom pricing.`
+                    const text = `*AK Enterprises B2B Portal*\n\nYour account credentials have been updated.\n\n*Login URL:* ${loginUrl}\n*Email:* ${createdCredentials.email}\n*Password:* ${createdCredentials.temporary_password}\n\n_Support details: Please contact procurement desk for customized pricing or warehouse support issues._`
                     const phone = createdCredentials.phone?.replace(/[^0-9]/g, '')
                     const url = phone ? `https://wa.me/91${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`
                     window.open(url, '_blank')
                   }}
-                  className="rounded-xl h-11 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white"
+                  className="rounded-full h-11 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm flex items-center justify-center gap-1.5"
                 >
-                  <MessageCircle className="w-4 h-4 mr-1.5" /> Share WhatsApp
+                  <MessageCircle className="w-4 h-4" /> Share WhatsApp
+                </Button>
+
+                <Button
+                  onClick={() => {
+                    setChangePwForm({ currentPassword: '', newPassword: '', confirmPassword: '', forceLogout: false })
+                    setChangePwOpen(true)
+                  }}
+                  className="rounded-full h-11 text-xs font-bold bg-[#F4B942] text-primary hover:bg-[#e0a634] shadow-sm flex items-center justify-center gap-1.5"
+                >
+                  <Key className="w-4 h-4" /> Change Password
                 </Button>
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Change Password Dialog */}
+      <Dialog open={changePwOpen} onOpenChange={setChangePwOpen}>
+        <DialogContent className="max-w-md radius-xl p-6 text-left bg-white border border-[#ECECEC] shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display font-black text-lg flex items-center gap-2 text-slate-800">
+              <Lock className="w-5 h-5 text-[#F4B942]" /> Change Login Password
+            </DialogTitle>
+          </DialogHeader>
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault()
+              if (!changePwForm.newPassword) {
+                toast.error('New Password is required')
+                return
+              }
+              if (changePwForm.newPassword.length < 8) {
+                toast.error('New password must be at least 8 characters')
+                return
+              }
+              if (changePwForm.newPassword !== changePwForm.confirmPassword) {
+                toast.error('New passwords do not match')
+                return
+              }
+
+              setChangePwLoading(true)
+              try {
+                const res = await fetch('/api/admin/reset-password', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                  },
+                  body: JSON.stringify({
+                    user_id: createdCredentials.id,
+                    email: createdCredentials.email,
+                    new_password: changePwForm.newPassword
+                  })
+                })
+
+                if (!res.ok) {
+                  const errData = await res.json()
+                  throw new Error(errData.error || errData.message || 'Failed to update password')
+                }
+
+                const data = await res.json()
+                setCreatedCredentials({
+                  ...createdCredentials,
+                  temporary_password: changePwForm.newPassword,
+                  updated_at: new Date().toISOString()
+                })
+                toast.success('Password updated successfully!')
+                setChangePwOpen(false)
+                fetchCustomerList()
+                fetchRequestsAndLogins()
+              } catch (err) {
+                toast.error(err.message)
+              } finally {
+                setChangePwLoading(false)
+              }
+            }}
+            className="space-y-4 pt-2 text-xs"
+          >
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">Current Password (optional)</label>
+              <PasswordInput
+                placeholder="Enter current password if known"
+                value={changePwForm.currentPassword}
+                onChange={e => setChangePwForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                className="h-10 rounded-xl"
+              />
+            </div>
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">New Password *</label>
+              <PasswordInput
+                required
+                placeholder="Min 8 characters"
+                value={changePwForm.newPassword}
+                onChange={e => setChangePwForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                className="h-10 rounded-xl"
+              />
+            </div>
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">Confirm New Password *</label>
+              <PasswordInput
+                required
+                placeholder="Re-enter new password"
+                value={changePwForm.confirmPassword}
+                onChange={e => setChangePwForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                className="h-10 rounded-xl"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 pt-1 pb-1">
+              <input
+                type="checkbox"
+                id="forceLogoutBox"
+                checked={changePwForm.forceLogout}
+                onChange={e => setChangePwForm(prev => ({ ...prev, forceLogout: e.target.checked }))}
+                className="w-4 h-4 rounded text-[#F4B942] focus:ring-[#F4B942] border-slate-300"
+              />
+              <label htmlFor="forceLogoutBox" className="font-bold text-slate-600 select-none cursor-pointer">
+                Force customer to login again
+              </label>
+            </div>
+
+            <div className="flex gap-3 pt-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setChangePwOpen(false)}
+                className="rounded-full h-11 text-xs font-bold flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={changePwLoading}
+                className="rounded-full h-11 text-xs font-bold bg-[#F4B942] text-primary hover:bg-[#e0a634] flex-1"
+              >
+                {changePwLoading ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
 

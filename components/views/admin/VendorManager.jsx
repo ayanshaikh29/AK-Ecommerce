@@ -28,6 +28,12 @@ export function VendorManager() {
   // Credentials Modal State
   const [createdCredentials, setCreatedCredentials] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [copiedPass, setCopiedPass] = useState(false)
+
+  // Change Password Modal States
+  const [changePwOpen, setChangePwOpen] = useState(false)
+  const [changePwLoading, setChangePwLoading] = useState(false)
+  const [changePwForm, setChangePwForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '', forceLogout: false })
 
   // Delete Account State
   const [deleteDialogUser, setDeleteDialogUser] = useState(null)
@@ -337,25 +343,28 @@ export function VendorManager() {
                     size="sm"
                     variant="outline"
                     onClick={async () => {
-                      const autoPw = 'VND' + Math.random().toString(36).substring(2, 8).toUpperCase() + '!'
                       try {
-                        const res = await fetch('/api/admin/reset-password', {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${localStorage.getItem('token')}`
-                          },
-                          body: JSON.stringify({ email: v.email, new_password: autoPw })
+                        const res = await fetch(`/api/admin/user-credentials?user_id=${v.user_id || v.id}`, {
+                          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
                         })
-                        if (!res.ok) throw new Error('Failed to generate vendor credentials')
+                        if (!res.ok) throw new Error('Failed to retrieve vendor credentials')
                         const data = await res.json()
-                        setCreatedCredentials({ ...data.user, full_name: v.name || data.user.full_name, role: 'vendor' })
-                        toast.success('Vendor credentials ready to copy/share!')
+                        setCreatedCredentials({
+                          id: data.id,
+                          full_name: data.full_name,
+                          email: data.email,
+                          phone: data.phone,
+                          role: 'vendor',
+                          temporary_password: data.plain_password || 'No password assigned',
+                          updated_at: data.updated_at
+                        })
+                        toast.success('Vendor credentials ready to manage!')
                       } catch (err) {
                         toast.error(err.message)
                       }
                     }}
                     className="flex-1 rounded-xl h-8 text-xs font-bold text-accent border-accent/30 hover:bg-accent/10"
+                    title="View Credentials"
                   >
                     <Key className="w-3.5 h-3.5 mr-1" /> Credentials
                   </Button>
@@ -387,68 +396,236 @@ export function VendorManager() {
 
       {/* Created Vendor Credentials Modal */}
       <Dialog open={!!createdCredentials} onOpenChange={() => setCreatedCredentials(null)}>
-        <DialogContent className="max-w-md radius-xl p-6 text-left">
+        <DialogContent className="max-w-md radius-xl p-6 text-left bg-white/90 backdrop-blur-md border border-[#ECECEC] shadow-2xl">
           <DialogHeader>
-            <DialogTitle className="font-display font-bold text-xl flex items-center gap-2 text-emerald-600">
-              <CheckCircle2 className="w-6 h-6 text-emerald-600" /> Vendor Account Created
+            <DialogTitle className="font-display font-black text-xl flex items-center gap-2 text-slate-800">
+              <CheckCircle2 className="w-6 h-6 text-[#F4B942] animate-bounce" /> Vendor Account Managed
             </DialogTitle>
           </DialogHeader>
 
           {createdCredentials && (
-            <div className="space-y-4 mt-2">
-              <p className="text-xs text-muted-foreground">
-                Share these vendor portal login credentials with <strong>{createdCredentials.full_name}</strong>:
+            <div className="space-y-5 mt-2">
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Managed vendor profile credentials and logistics access configs:
               </p>
 
-              <div className="bg-secondary/40 p-4 rounded-2xl border space-y-2 text-xs">
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Vendor Name</span>
-                  <span className="font-bold text-foreground">{createdCredentials.full_name}</span>
+              <div className="bg-[#F8F9FC] p-5 rounded-2xl border border-slate-100 space-y-3.5 text-xs">
+                <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Vendor Name</span>
+                  <span className="font-bold text-slate-800">{createdCredentials.full_name}</span>
                 </div>
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Vendor Portal URL</span>
-                  <span className="font-mono font-bold text-accent">{typeof window !== 'undefined' ? `${window.location.origin}/vendor/login` : '/vendor/login'}</span>
+                <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Vendor Portal URL</span>
+                  <span className="font-mono font-bold text-[#F4B942] max-w-[200px] truncate">
+                    {typeof window !== 'undefined' ? `${window.location.origin}/vendor/login` : '/vendor/login'}
+                  </span>
                 </div>
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Email Address</span>
-                  <span className="font-mono font-bold text-foreground">{createdCredentials.email}</span>
+                <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Email Address</span>
+                  <span className="font-mono font-bold text-slate-800">{createdCredentials.email}</span>
                 </div>
-                <div>
-                  <span className="text-muted-foreground block text-[10px] uppercase font-bold">Temporary Password</span>
-                  <span className="font-mono font-bold text-accent">{createdCredentials.temporary_password}</span>
+                <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Password</span>
+                  <span className="font-mono font-bold text-slate-800">{createdCredentials.temporary_password}</span>
+                </div>
+                {createdCredentials.phone && (
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Phone Number</span>
+                    <span className="font-mono font-bold text-slate-800">{createdCredentials.phone}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-0.5">
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Last Changed</span>
+                  <span className="font-semibold text-slate-500 text-[10px]">
+                    {createdCredentials.updated_at ? new Date(createdCredentials.updated_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Just Now'}
+                  </span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <Button
-                  onClick={() => {
-                    const text = `Hello ${createdCredentials.full_name},\n\nYour AK Enterprises Vendor Fulfillment Portal Account has been created!\n\nVendor Portal Login: ${window.location.origin}/vendor/login\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\n\nPlease sign in to access assigned delivery orders and warehouse stock inventory.`
-                    navigator.clipboard.writeText(text)
-                    setCopied(true)
-                    toast.success('Vendor credentials copied to clipboard!')
-                    setTimeout(() => setCopied(false), 2000)
-                  }}
-                  variant="outline"
-                  className="rounded-xl h-11 text-xs font-bold"
-                >
-                  {copied ? <Check className="w-4 h-4 mr-1.5 text-emerald-600" /> : <Copy className="w-4 h-4 mr-1.5" />}
-                  {copied ? 'Copied!' : 'Copy Credentials'}
-                </Button>
+              {/* Action Buttons Grid */}
+              <div className="grid grid-cols-1 gap-2.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    onClick={() => {
+                      const loginUrl = `${window.location.origin}/vendor/login`
+                      const text = `AK Enterprises B2B Portal\n\nLogin URL: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\nPhone: ${createdCredentials.phone || 'N/A'}`
+                      navigator.clipboard.writeText(text)
+                      setCopied(true)
+                      toast.success('Vendor credentials copied!')
+                      setTimeout(() => setCopied(false), 2000)
+                    }}
+                    variant="outline"
+                    className="rounded-full h-11 text-xs font-bold border-slate-200 hover:bg-slate-50"
+                  >
+                    {copied ? <Check className="w-4 h-4 mr-1.5 text-emerald-600" /> : <Copy className="w-4 h-4 mr-1.5 text-slate-500" />}
+                    {copied ? 'Copied!' : 'Copy Credentials'}
+                  </Button>
+
+                  <Button
+                    onClick={() => {
+                      navigator.clipboard.writeText(createdCredentials.temporary_password)
+                      setCopiedPass(true)
+                      toast.success('Vendor password copied!')
+                      setTimeout(() => setCopiedPass(false), 2000)
+                    }}
+                    variant="outline"
+                    className="rounded-full h-11 text-xs font-bold border-slate-200 hover:bg-slate-50"
+                  >
+                    {copiedPass ? <Check className="w-4 h-4 mr-1.5 text-emerald-600" /> : <Lock className="w-4 h-4 mr-1.5 text-slate-500" />}
+                    {copiedPass ? 'Password Copied!' : 'Copy Password'}
+                  </Button>
+                </div>
 
                 <Button
                   onClick={() => {
-                    const text = `Hello ${createdCredentials.full_name},\n\nYour AK Enterprises Vendor Fulfillment Portal Account has been created!\n\nVendor Portal Login: ${window.location.origin}/vendor/login\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\n\nPlease sign in to access assigned delivery orders and warehouse stock inventory.`
+                    const loginUrl = `${window.location.origin}/vendor/login`
+                    const text = `*AK Enterprises B2B Portal*\n\nYour vendor portal account credentials have been updated.\n\n*Login URL:* ${loginUrl}\n*Email:* ${createdCredentials.email}\n*Password:* ${createdCredentials.temporary_password}\n\n_Support details: Please contact procurement desk for customized pricing or warehouse support issues._`
                     const phone = createdCredentials.phone?.replace(/[^0-9]/g, '')
                     const url = phone ? `https://wa.me/91${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`
                     window.open(url, '_blank')
                   }}
-                  className="rounded-xl h-11 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white"
+                  className="rounded-full h-11 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm flex items-center justify-center gap-1.5"
                 >
-                  <MessageCircle className="w-4 h-4 mr-1.5" /> Share WhatsApp
+                  <MessageCircle className="w-4 h-4" /> Share WhatsApp
+                </Button>
+
+                <Button
+                  onClick={() => {
+                    setChangePwForm({ currentPassword: '', newPassword: '', confirmPassword: '', forceLogout: false })
+                    setChangePwOpen(true)
+                  }}
+                  className="rounded-full h-11 text-xs font-bold bg-[#F4B942] text-primary hover:bg-[#e0a634] shadow-sm flex items-center justify-center gap-1.5"
+                >
+                  <Key className="w-4 h-4" /> Change Password
                 </Button>
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Change Password Dialog */}
+      <Dialog open={changePwOpen} onOpenChange={setChangePwOpen}>
+        <DialogContent className="max-w-md radius-xl p-6 text-left bg-white border border-[#ECECEC] shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display font-black text-lg flex items-center gap-2 text-slate-800">
+              <Lock className="w-5 h-5 text-[#F4B942]" /> Change Vendor Password
+            </DialogTitle>
+          </DialogHeader>
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault()
+              if (!changePwForm.newPassword) {
+                toast.error('New Password is required')
+                return
+              }
+              if (changePwForm.newPassword.length < 8) {
+                toast.error('New password must be at least 8 characters')
+                return
+              }
+              if (changePwForm.newPassword !== changePwForm.confirmPassword) {
+                toast.error('New passwords do not match')
+                return
+              }
+
+              setChangePwLoading(true)
+              try {
+                const res = await fetch('/api/admin/reset-password', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                  },
+                  body: JSON.stringify({
+                    user_id: createdCredentials.id,
+                    email: createdCredentials.email,
+                    new_password: changePwForm.newPassword
+                  })
+                })
+
+                if (!res.ok) {
+                  const errData = await res.json()
+                  throw new Error(errData.error || errData.message || 'Failed to update vendor password')
+                }
+
+                setCreatedCredentials({
+                  ...createdCredentials,
+                  temporary_password: changePwForm.newPassword,
+                  updated_at: new Date().toISOString()
+                })
+                toast.success('Vendor password updated successfully!')
+                setChangePwOpen(false)
+                fetchVendors()
+              } catch (err) {
+                toast.error(err.message)
+              } finally {
+                setChangePwLoading(false)
+              }
+            }}
+            className="space-y-4 pt-2 text-xs"
+          >
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">Current Password (optional)</label>
+              <PasswordInput
+                placeholder="Enter current password if known"
+                value={changePwForm.currentPassword}
+                onChange={e => setChangePwForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                className="h-10 rounded-xl"
+              />
+            </div>
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">New Password *</label>
+              <PasswordInput
+                required
+                placeholder="Min 8 characters"
+                value={changePwForm.newPassword}
+                onChange={e => setChangePwForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                className="h-10 rounded-xl"
+              />
+            </div>
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">Confirm New Password *</label>
+              <PasswordInput
+                required
+                placeholder="Re-enter new password"
+                value={changePwForm.confirmPassword}
+                onChange={e => setChangePwForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                className="h-10 rounded-xl"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 pt-1 pb-1">
+              <input
+                type="checkbox"
+                id="forceLogoutBoxVendor"
+                checked={changePwForm.forceLogout}
+                onChange={e => setChangePwForm(prev => ({ ...prev, forceLogout: e.target.checked }))}
+                className="w-4 h-4 rounded text-[#F4B942] focus:ring-[#F4B942] border-slate-300"
+              />
+              <label htmlFor="forceLogoutBoxVendor" className="font-bold text-slate-600 select-none cursor-pointer">
+                Force partner to login again
+              </label>
+            </div>
+
+            <div className="flex gap-3 pt-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setChangePwOpen(false)}
+                className="rounded-full h-11 text-xs font-bold flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={changePwLoading}
+                className="rounded-full h-11 text-xs font-bold bg-[#F4B942] text-primary hover:bg-[#e0a634] flex-1"
+              >
+                {changePwLoading ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
 

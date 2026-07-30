@@ -1,5 +1,5 @@
 'use client'
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Image from 'next/image'
 import { useRouter, useParams } from 'next/navigation'
 import { toast } from 'sonner'
@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Grid3x3, Plus, Upload, ClipboardList, ImageIcon, 
   Users, Settings, LogOut, Package, TrendingUp, AlertTriangle, 
   Trash2, Video, FileText, Building2, Bell, BellRing, Menu, X, MessageSquare,
-  Loader2, ShieldCheck, Truck, CheckCircle2, XCircle, Activity
+  Loader2, ShieldCheck, Truck, CheckCircle2, XCircle, Activity, Search
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
@@ -158,6 +158,13 @@ export function AdminApp() {
     initSupabase()
   }, [authChecked])
 
+  // Clear sidebar orders unread badge when section is orders
+  useEffect(() => {
+    if (section === 'orders') {
+      setUnreadOrders([])
+    }
+  }, [section])
+
   // Subscribe to realtime orders, catalog requests, and customer logins
   useEffect(() => {
     if (!supabaseClient) return
@@ -169,10 +176,28 @@ export function AdminApp() {
         { event: 'INSERT', schema: 'public', table: 'orders' },
         async (payload) => {
           const newOrder = payload.new
-          try {
-            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav')
-            audio.play()
-          } catch (e) {}
+          
+          // Sound Cue respect to muted settings state
+          const isSoundMuted = localStorage.getItem('admin_sound_muted') === 'true'
+          if (!isSoundMuted) {
+            try {
+              const AudioCtx = window.AudioContext || window.webkitAudioContext
+              if (AudioCtx) {
+                const ctx = new AudioCtx()
+                const osc = ctx.createOscillator()
+                const gain = ctx.createGain()
+                osc.type = 'sine'
+                osc.frequency.setValueAtTime(587.33, ctx.currentTime) // D5
+                osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15) // A5
+                gain.gain.setValueAtTime(0.15, ctx.currentTime)
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
+                osc.connect(gain)
+                gain.connect(ctx.destination)
+                osc.start()
+                osc.stop(ctx.currentTime + 0.4)
+              }
+            } catch (e) {}
+          }
 
           let customerName = 'Customer'
           try {
@@ -188,9 +213,12 @@ export function AdminApp() {
             placed_at: newOrder.placed_at || new Date().toISOString()
           }
 
-          toast.success(`New Order #${newOrder.order_number}!`, { description: `Placed by ${customerName} for ₹${newOrder.total}.` })
+          toast.success(`🛒 New Order Received`, { 
+            description: `Order #${newOrder.order_number} by ${customerName} for ₹${Number(newOrder.total || 0).toLocaleString('en-IN')}`
+          })
           setUnreadOrders(prev => [{ ...newOrder, customerName }, ...prev])
           setActiveOrderPopup(orderInfo)
+          setPopupCountdown(8) // Auto hide after 8 seconds
           setRefreshTrigger(prev => prev + 1)
         }
       )
@@ -203,10 +231,26 @@ export function AdminApp() {
         { event: 'INSERT', schema: 'public', table: 'catalog_requests' },
         async (payload) => {
           const req = payload.new
-          try {
-            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav')
-            audio.play()
-          } catch (e) {}
+          const isSoundMuted = localStorage.getItem('admin_sound_muted') === 'true'
+          if (!isSoundMuted) {
+            try {
+              const AudioCtx = window.AudioContext || window.webkitAudioContext
+              if (AudioCtx) {
+                const ctx = new AudioCtx()
+                const osc = ctx.createOscillator()
+                const gain = ctx.createGain()
+                osc.type = 'sine'
+                osc.frequency.setValueAtTime(523.25, ctx.currentTime)
+                osc.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.15)
+                gain.gain.setValueAtTime(0.12, ctx.currentTime)
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
+                osc.connect(gain)
+                gain.connect(ctx.destination)
+                osc.start()
+                osc.stop(ctx.currentTime + 0.4)
+              }
+            } catch (e) {}
+          }
 
           toast.info(`Catalog Access Request from ${req.customer_name}!`, { description: `${req.email || req.phone}: ${req.note}` })
           setRefreshTrigger(prev => prev + 1)
@@ -388,34 +432,41 @@ export function AdminApp() {
                 </button>
               </div>
               <nav className="space-y-1">
-                {[
-                  ['dashboard','Dashboard',LayoutDashboard],
-                  ['customer-pricing','Customers',ShieldCheck],
-                  ['orders','Orders',ClipboardList],
-                  ['inventory','Stock Inventory',Package],
-                  ['vendors','Vendor Partners',Truck],
-                  ['billing','Billing & Invoices',FileText],
-                  ['products','Products',Grid3x3],
-                  ['product-new','Add Product',Plus],
-                  ['reports','Sales Reports',TrendingUp],
-                  ['settings','Settings',Settings]
-                ].map(([s,l,I]) => {
-                  const isActive = section === s || 
-                    (s === 'products' && section === 'product-edit') ||
-                    (s === 'product-new' && section === 'csv') ||
-                    (s === 'settings' && ['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners'].includes(section))
+              {[
+                ['dashboard','Dashboard',LayoutDashboard],
+                ['customer-pricing','Customers',ShieldCheck],
+                ['orders','Orders',ClipboardList],
+                ['inventory','Stock Inventory',Package],
+                ['vendors','Vendor Partners',Truck],
+                ['billing','Billing & Invoices',FileText],
+                ['products','Products',Grid3x3],
+                ['product-new','Add Product',Plus],
+                ['reports','Sales Reports',TrendingUp],
+                ['settings','Settings',Settings]
+              ].map(([s,l,I]) => {
+                const isActive = section === s || 
+                  (s === 'products' && section === 'product-edit') ||
+                  (s === 'product-new' && section === 'csv') ||
+                  (s === 'settings' && ['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners'].includes(section))
 
-                  return (
-                    <button 
-                      key={s} 
-                      onClick={() => { router.push('/admin/' + s); setMobileMenuOpen(false) }} 
-                      className={`w-full text-left flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition ${isActive ? 'gold-gradient text-primary font-bold shadow-soft' : 'text-white/80 hover:bg-white/10'}`}
-                    >
+                return (
+                  <button 
+                    key={s} 
+                    onClick={() => { router.push('/admin/' + s); setMobileMenuOpen(false) }} 
+                    className={`w-full text-left flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition ${isActive ? 'gold-gradient text-primary font-bold shadow-soft' : 'text-white/80 hover:bg-white/10'}`}
+                  >
+                    <span className="flex items-center gap-2">
                       <I className="w-4 h-4"/>{l}
-                    </button>
-                  )
-                })}
-              </nav>
+                    </span>
+                    {s === 'orders' && unreadOrders.length > 0 && (
+                      <span className="px-2 py-0.5 bg-amber-500 text-white font-extrabold text-[10px] rounded-full animate-bounce shadow-soft">
+                        {unreadOrders.length}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </nav>
             </div>
             <button 
               onClick={() => { logout(); setMobileMenuOpen(false) }} 
@@ -461,9 +512,16 @@ export function AdminApp() {
                   <button 
                     key={s} 
                     onClick={() => router.push('/admin/' + s)} 
-                    className={`w-full text-left flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm transition ${isActive ? 'gold-gradient text-primary font-bold shadow-soft' : 'text-white/80 hover:bg-white/10'}`}
+                    className={`w-full text-left flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition ${isActive ? 'gold-gradient text-primary font-bold shadow-soft' : 'text-white/80 hover:bg-white/10'}`}
                   >
-                    <I className="w-4 h-4"/>{l}
+                    <span className="flex items-center gap-2">
+                      <I className="w-4 h-4"/>{l}
+                    </span>
+                    {s === 'orders' && unreadOrders.length > 0 && (
+                      <span className="px-2 py-0.5 bg-amber-500 text-white font-extrabold text-[10px] rounded-full animate-bounce shadow-soft">
+                        {unreadOrders.length}
+                      </span>
+                    )}
                   </button>
                 )
               })}
@@ -1225,13 +1283,109 @@ function AdminCSV() {
 }
 
 function AdminOrders({ refreshTrigger, router }) {
-  const [orders, setOrders] = useState(null); const [status, setStatus] = useState('all'); const [selected, setSelected] = useState(null)
-  const load = () => fetch('/api/orders' + (status !== 'all' ? `?status=${status}` : ''), { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }).then(r=>r.json()).then(setOrders)
-  useEffect(() => { load() }, [status, refreshTrigger])
-  useRealtimeOrders(load)
+  const [orders, setOrders] = useState([])
+  const [totalCount, setTotalCount] = useState(0)
+  const [loading, setLoading] = useState(true)
+  
+  // Filtering & Pagination State
+  const [range, setRange] = useState('last-12-months')
+  const [status, setStatus] = useState('all')
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(50)
+  const [totalPages, setTotalPages] = useState(1)
+  
+  // Custom Date Range
+  const [customStartDate, setCustomStartDate] = useState('')
+  const [customEndDate, setCustomEndDate] = useState('')
+  const [showCustomDates, setShowCustomDates] = useState(false)
+
+  // Selected for quick status update dialog
+  const [selected, setSelected] = useState(null)
+  const [highlightOrderId, setHighlightOrderId] = useState(null)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const q = new URLSearchParams()
+      q.set('range', range)
+      q.set('status', status)
+      q.set('search', search)
+      q.set('page', String(page))
+      q.set('limit', String(limit))
+      
+      if (range === 'custom') {
+        if (customStartDate) q.set('startDate', customStartDate)
+        if (customEndDate) q.set('endDate', customEndDate)
+      }
+
+      const res = await fetch('/api/orders?' + q.toString(), {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setOrders(data.orders || [])
+        setTotalCount(data.totalCount || 0)
+        setTotalPages(data.totalPages || 1)
+      } else {
+        toast.error('Failed to load orders')
+      }
+    } catch (e) {
+      toast.error('Network error loading orders')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    load()
+  }, [range, status, page, limit, refreshTrigger])
+
+  // Reload when search finishes typing (debounced or triggered manually)
+  const handleSearchSubmit = (e) => {
+    e.preventDefault()
+    setPage(1)
+    load()
+  }
+
+  // Prepend live newly placed orders from useRealtimeOrders hook
+  useRealtimeOrders(useCallback(() => {
+    // Rely on Supabase realtime triggers to pull updates
+    const token = localStorage.getItem('token')
+    const q = new URLSearchParams({ page: '1', limit: '50', range, status, search })
+    fetch('/api/orders?' + q.toString(), { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data && data.orders) {
+          // Identify if there's a new order added
+          const oldIds = new Set(orders.map(o => o.id))
+          const newlyAdded = data.orders.find(o => !oldIds.has(o.id))
+          
+          setOrders(data.orders)
+          setTotalCount(data.totalCount || 0)
+          setTotalPages(data.totalPages || 1)
+
+          if (newlyAdded) {
+            setHighlightOrderId(newlyAdded.id)
+            setTimeout(() => {
+              setHighlightOrderId(null)
+            }, 5000)
+          }
+        }
+      })
+      .catch(console.error)
+  }, [orders, range, status, search]))
+
   const updateStatus = async (id, newStatus) => { 
     try { 
-      const res = await fetch('/api/orders/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify({ status: newStatus }) })
+      const res = await fetch('/api/orders/' + id, { 
+        method: 'PUT', 
+        headers: { 
+          'Content-Type': 'application/json', 
+          Authorization: `Bearer ${localStorage.getItem('token')}` 
+        }, 
+        body: JSON.stringify({ status: newStatus }) 
+      })
       const data = await res.json().catch(() => ({}))
       if (res.ok) {
         toast.success(`Order status updated to ${newStatus.toUpperCase()}`)
@@ -1242,32 +1396,361 @@ function AdminOrders({ refreshTrigger, router }) {
       }
     } catch (e) { toast.error(e.message) } 
   }
-  const statuses = ['pending', 'confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled']
+
+  // Analytics Calculation using the current loaded datasets
+  const analytics = useMemo(() => {
+    let delivered = 0
+    let cancelled = 0
+    let totalRevenue = 0
+    const vendorCounts = {}
+    const customerSpent = {}
+    const productCounts = {}
+    const categoryRevenue = {}
+    
+    orders.forEach(o => {
+      const grandTotal = Number(o.total || 0)
+      if (o.status === 'delivered') {
+        delivered++
+        totalRevenue += grandTotal
+      } else if (o.status === 'cancelled' || o.status === 'rejected' || o.status === 'vendor_rejected') {
+        cancelled++
+      } else {
+        totalRevenue += grandTotal
+      }
+
+      // Top Vendors
+      if (o.vendor_name) {
+        vendorCounts[o.vendor_name] = (vendorCounts[o.vendor_name] || 0) + 1
+      }
+
+      // Top Customers
+      const custName = o.address?.full_name || 'Guest Customer'
+      customerSpent[custName] = (customerSpent[custName] || 0) + grandTotal
+
+      // Top Products & Categories
+      ;(o.items || []).forEach(it => {
+        const pName = it.product_name_snapshot || 'Product'
+        const qty = Number(it.quantity || 0)
+        const itemVal = qty * Number(it.price_snapshot || 0)
+        productCounts[pName] = (productCounts[pName] || 0) + qty
+
+        // Derive sub-market category name
+        const cat = it.products?.subcategory || 'General Stationery'
+        categoryRevenue[cat] = (categoryRevenue[cat] || 0) + itemVal
+      })
+    })
+
+    const avgOrderVal = orders.length > 0 ? totalRevenue / orders.length : 0
+
+    const topVendors = Object.entries(vendorCounts).sort((a,b)=>b[1]-a[1]).slice(0, 3).map(e => e[0])
+    const topCustomers = Object.entries(customerSpent).sort((a,b)=>b[1]-a[1]).slice(0, 3).map(e => e[0])
+    const topProducts = Object.entries(productCounts).sort((a,b)=>b[1]-a[1]).slice(0, 3).map(e => e[0])
+    const topCategories = Object.entries(categoryRevenue).sort((a,b)=>b[1]-a[1]).slice(0, 3).map(e => e[0])
+
+    return {
+      revenue: totalRevenue,
+      delivered,
+      cancelled,
+      avgOrderVal,
+      topVendors,
+      topCustomers,
+      topProducts,
+      topCategories
+    }
+  }, [orders])
+
+  const exportData = (format) => {
+    if (orders.length === 0) {
+      toast.error('No orders available to export')
+      return
+    }
+
+    if (format === 'csv') {
+      const headers = ['Order ID', 'Invoice Number', 'Date', 'Customer Name', 'Customer Email', 'Phone', 'Shipping City', 'State', 'Vendor Assigned', 'Payment Method', 'Payment Status', 'Grand Total', 'Status']
+      const rows = orders.map(o => [
+        o.order_number,
+        `INV-${o.order_number}`,
+        new Date(o.placed_at).toLocaleDateString('en-IN'),
+        o.address?.full_name || 'N/A',
+        o.user_email || 'Guest',
+        o.address?.phone || '',
+        o.address?.city || '',
+        o.address?.state || '',
+        o.vendor_name || 'Unassigned',
+        o.payment_method || 'COD',
+        o.payment_status || 'Pending',
+        o.total || 0,
+        o.status || 'pending'
+      ])
+
+      const csvContent = "data:text/csv;charset=utf-8," 
+        + [headers, ...rows].map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(",")).join("\n")
+      
+      const encodedUri = encodeURI(csvContent)
+      const link = document.createElement("a")
+      link.setAttribute("href", encodedUri)
+      link.setAttribute("download", `orders_export_${range}.csv`)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      toast.success('CSV export completed successfully!')
+    } else {
+      toast.info(`${format.toUpperCase()} export is processing. Use CSV for instant spreadsheet files.`)
+    }
+  }
+
+  const statuses = ['pending', 'confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'rejected']
+  
   return (
-    <div className="slide-up">
-      <div className="flex justify-between items-center mb-6"><h1 className="font-display text-4xl font-extrabold">Orders</h1>
-        <Select value={status} onValueChange={setStatus}><SelectTrigger className="w-40 rounded-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All</SelectItem>{statuses.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select>
+    <div className="slide-up space-y-6">
+      
+      {/* Page Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="font-display text-4xl font-extrabold tracking-tight">Order Records System</h1>
+          <p className="text-sm text-muted-foreground">Manage and filter historical sales, delivery timelines, and logistics partner dispatches.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 shrink-0">
+          <Button onClick={() => exportData('csv')} size="sm" className="rounded-xl flex items-center gap-1.5 font-bold">
+            Export CSV
+          </Button>
+          <Button onClick={() => exportData('excel')} size="sm" variant="outline" className="rounded-xl flex items-center gap-1.5 font-bold">
+            Export Excel
+          </Button>
+        </div>
       </div>
-      <Card className="radius-lg shadow-soft"><CardContent className="p-0 overflow-x-auto"><table className="w-full text-sm min-w-[800px]">
-        <thead className="bg-secondary"><tr><th className="text-left p-3">Order #</th><th className="text-left p-3">Date</th><th className="text-left p-3">Customer</th><th className="text-left p-3">Total</th><th className="text-left p-3">Status</th><th className="text-left p-3">Vendor</th><th className="p-3"></th></tr></thead>
-        <tbody>{!orders ? <tr><td colSpan="7" className="p-8 text-center">Loading...</td></tr> : orders.length === 0 ? <tr><td colSpan="7" className="p-8 text-center text-muted-foreground">No orders</td></tr> : orders.map(o => (
-          <tr key={o.id} className="border-t hover:bg-secondary/50">
-            <td className="p-3 font-mono font-bold">{o.order_number}</td>
-            <td className="p-3">{new Date(o.placed_at).toLocaleDateString('en-IN')}</td>
-            <td className="p-3">{o.address?.full_name}</td>
-            <td className="p-3 font-bold">{formatINR(o.total)}</td>
-            <td className="p-3"><Badge className="capitalize rounded-full">{(o.status || '').replace(/_/g, ' ')}</Badge></td>
-            <td className="p-3 font-medium text-xs text-muted-foreground">{o.vendor_name || 'Unassigned'}</td>
-            <td className="p-3"><Button size="sm" variant="outline" onClick={() => router.push(`/admin/orders/${o.id}`)} className="rounded-full">View</Button></td>
-          </tr>
-        ))}</tbody>
-      </table></CardContent></Card>
-      <Dialog open={!!selected} onOpenChange={() => setSelected(null)}><DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto radius-lg"><DialogHeader><DialogTitle className="font-display">Order {selected?.order_number}</DialogTitle></DialogHeader>{selected && <div className="space-y-4">
-        <div><p className="text-sm text-muted-foreground">Customer</p><p className="font-semibold">{selected.address.full_name} — {selected.address.phone}</p><p className="text-sm">{selected.address.line1}, {selected.address.line2 && selected.address.line2 + ', '}{selected.address.city}, {selected.address.state} {selected.address.pincode}</p>{selected.address.gst && <p className="text-xs mt-1">GST: {selected.address.gst}</p>}</div>
-        <div><p className="text-sm text-muted-foreground mb-1">Items</p>{selected.items.map((it, i) => <div key={i} className="flex gap-2 py-1"><Image src={it.image} width={40} height={48} className="w-10 h-12 object-cover rounded-lg" alt="" loading="lazy"/><div className="flex-1 text-sm"><p>{it.product_name_snapshot}</p><p className="text-muted-foreground">Qty {it.quantity} · {formatINR(it.price_snapshot)}</p></div></div>)}</div>
-        <div className="flex justify-between font-display font-extrabold text-lg"><span>Total (COD)</span><span>{formatINR(selected.total)}</span></div>
-        <div><p className="text-sm mb-2">Update status:</p><div className="flex flex-wrap gap-2">{statuses.map(s => <Button key={s} size="sm" variant={selected.status === s ? 'default' : 'outline'} onClick={() => updateStatus(selected.id, s)} className="capitalize rounded-full">{s}</Button>)}</div></div>
-      </div>}</DialogContent></Dialog>
+
+      {/* Analytics Summary Banner */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="radius-xl shadow-soft p-4 border relative overflow-hidden bg-primary text-primary-foreground">
+          <span className="text-[10px] uppercase font-bold text-primary-foreground/60 tracking-wider">Revenue (Filtered)</span>
+          <p className="text-xl font-black mt-1">{formatINR(analytics.revenue)}</p>
+        </Card>
+        <Card className="radius-xl shadow-soft p-4 border relative overflow-hidden">
+          <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Avg Order Value</span>
+          <p className="text-xl font-black mt-1 text-foreground">{formatINR(analytics.avgOrderVal)}</p>
+        </Card>
+        <Card className="radius-xl shadow-soft p-4 border relative overflow-hidden">
+          <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Delivered</span>
+          <p className="text-xl font-black mt-1 text-emerald-600">{analytics.delivered} orders</p>
+        </Card>
+        <Card className="radius-xl shadow-soft p-4 border relative overflow-hidden">
+          <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Cancelled / Rejected</span>
+          <p className="text-xl font-black mt-1 text-destructive">{analytics.cancelled} orders</p>
+        </Card>
+      </div>
+
+      {/* Search & Advanced Filters Bar */}
+      <Card className="radius-lg shadow-soft border">
+        <CardContent className="p-4 space-y-4">
+          <form onSubmit={handleSearchSubmit} className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Search by Order ID, Customer, Vendor, Product, Phone, Email, Invoice..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="pl-10 h-11 rounded-xl text-sm"
+              />
+            </div>
+            <Button type="submit" className="h-11 rounded-xl px-5 font-bold">Search</Button>
+          </form>
+
+          <div className="flex flex-wrap gap-4 items-end text-xs font-semibold">
+            
+            {/* Time Filter */}
+            <div className="w-full sm:w-44">
+              <label className="text-[10px] uppercase font-bold text-muted-foreground mb-1 block">Time Period</label>
+              <Select 
+                value={range} 
+                onValueChange={(val) => {
+                  setRange(val)
+                  setPage(1)
+                  setShowCustomDates(val === 'custom')
+                }}
+              >
+                <SelectTrigger className="h-10 rounded-xl">
+                  <SelectValue placeholder="Select Range" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="yesterday">Yesterday</SelectItem>
+                  <SelectItem value="last-7-days">Last 7 Days</SelectItem>
+                  <SelectItem value="last-30-days">Last 30 Days</SelectItem>
+                  <SelectItem value="last-90-days">Last 90 Days</SelectItem>
+                  <SelectItem value="last-6-months">Last 6 Months</SelectItem>
+                  <SelectItem value="last-12-months">Last 12 Months (Default)</SelectItem>
+                  <SelectItem value="all">All Time</SelectItem>
+                  <SelectItem value="custom">Custom Date Range</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Custom Dates Inputs */}
+            {showCustomDates && (
+              <div className="flex gap-2 items-center">
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-muted-foreground mb-1 block">Start Date</label>
+                  <Input type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} className="h-10 rounded-xl" />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-muted-foreground mb-1 block">End Date</label>
+                  <Input type="date" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} className="h-10 rounded-xl" />
+                </div>
+                <Button onClick={() => { setPage(1); load() }} className="h-10 rounded-xl font-bold self-end">Apply Range</Button>
+              </div>
+            )}
+
+            {/* Status Filter */}
+            <div className="w-full sm:w-44">
+              <label className="text-[10px] uppercase font-bold text-muted-foreground mb-1 block">Fulfillment Status</label>
+              <Select value={status} onValueChange={(val) => { setStatus(val); setPage(1) }}>
+                <SelectTrigger className="h-10 rounded-xl">
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  {statuses.map(s => (
+                    <SelectItem key={s} value={s} className="capitalize">{s.replace(/_/g, ' ')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Reset */}
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setRange('last-12-months')
+                setStatus('all')
+                setSearch('')
+                setPage(1)
+                setCustomStartDate('')
+                setCustomEndDate('')
+                setShowCustomDates(false)
+              }}
+              className="h-10 rounded-xl text-xs font-bold"
+            >
+              Reset Filters
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Orders Table Container */}
+      <Card className="radius-lg shadow-soft">
+        <CardContent className="p-0 overflow-x-auto">
+          <table className="w-full text-sm min-w-[950px] text-left">
+            <thead className="bg-secondary/40 text-muted-foreground text-xs uppercase border-b">
+              <tr>
+                <th className="p-4">Order / Invoice #</th>
+                <th className="p-4">Date</th>
+                <th className="p-4">Customer Details</th>
+                <th className="p-4">Logistics Partner</th>
+                <th className="p-4">Payment</th>
+                <th className="p-4 text-right">Grand Total</th>
+                <th className="p-4">Fulfillment Status</th>
+                <th className="p-4 text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {loading ? (
+                <tr>
+                  <td colSpan="8" className="p-8 text-center text-muted-foreground">
+                    Syncing historical database...
+                  </td>
+                </tr>
+              ) : orders.length === 0 ? (
+                <tr>
+                  <td colSpan="8" className="p-8 text-center text-muted-foreground">
+                    No orders registered in the selected range.
+                  </td>
+                </tr>
+              ) : (
+                orders.map(o => (
+                  <tr 
+                    key={o.id} 
+                    className={`transition-all duration-500 ${
+                      highlightOrderId === o.id 
+                        ? 'bg-amber-500/10 hover:bg-amber-500/15 border-l-4 border-amber-500 animate-pulse' 
+                        : 'hover:bg-secondary/20'
+                    }`}
+                  >
+                    <td className="p-4">
+                      <span className="font-mono font-bold text-foreground block">#{o.order_number}</span>
+                      <span className="text-[10px] text-muted-foreground font-mono">INV-{o.order_number}</span>
+                    </td>
+                    <td className="p-4 text-xs text-muted-foreground">
+                      {new Date(o.placed_at).toLocaleDateString('en-IN', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric'
+                      })}
+                    </td>
+                    <td className="p-4">
+                      <span className="font-semibold text-foreground block text-sm">{o.address?.full_name || 'Guest User'}</span>
+                      <span className="text-xs text-muted-foreground block font-mono">{o.user_email || ''}</span>
+                    </td>
+                    <td className="p-4 text-xs">
+                      <span className="font-semibold text-foreground block">{o.vendor_name || 'Unassigned'}</span>
+                      {o.assigned_at && (
+                        <span className="text-[9px] text-muted-foreground">Assigned: {new Date(o.assigned_at).toLocaleDateString()}</span>
+                      )}
+                    </td>
+                    <td className="p-4 text-xs">
+                      <Badge variant="outline" className="font-bold text-[9px] block w-fit mb-0.5">{o.payment_method || 'COD'}</Badge>
+                      <span className={`text-[10px] font-extrabold ${o.payment_status === 'Received' ? 'text-emerald-600' : 'text-amber-600'}`}>{o.payment_status || 'Pending'}</span>
+                    </td>
+                    <td className="p-4 text-right font-mono font-extrabold text-primary">
+                      {formatINR(o.total)}
+                    </td>
+                    <td className="p-4">
+                      <Badge className="capitalize rounded-full font-bold px-2.5 py-0.5 text-[10px] w-fit block">
+                        {(o.status || '').replace(/_/g, ' ')}
+                      </Badge>
+                    </td>
+                    <td className="p-4 text-center">
+                      <Button size="sm" variant="outline" onClick={() => router.push(`/admin/orders/${o.id}`)} className="rounded-xl h-8 px-3">
+                        Manage
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex justify-between items-center text-xs font-semibold px-2">
+          <span className="text-muted-foreground">
+            Showing Page <strong>{page}</strong> of <strong>{totalPages}</strong> ({totalCount} total orders)
+          </span>
+          <div className="flex gap-2">
+            <Button
+              disabled={page === 1}
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              variant="outline"
+              size="sm"
+              className="rounded-xl h-9 px-3"
+            >
+              Previous
+            </Button>
+            <Button
+              disabled={page === totalPages}
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              variant="outline"
+              size="sm"
+              className="rounded-xl h-9 px-3"
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
