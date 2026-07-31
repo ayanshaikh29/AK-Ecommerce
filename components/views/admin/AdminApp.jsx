@@ -1692,7 +1692,15 @@ function AdminOrders({ refreshTrigger, router }) {
                       <span className="text-xs text-muted-foreground block font-mono">{o.user_email || ''}</span>
                     </td>
                     <td className="p-4 text-xs">
-                      <span className="font-semibold text-foreground block">{o.vendor_name || 'Unassigned'}</span>
+                      {o.vendor_name ? (
+                        <span className={`font-semibold block ${o.vendor_name.includes('No vendor assigned') ? 'text-destructive font-bold' : 'text-foreground'}`}>
+                          {o.vendor_name}
+                        </span>
+                      ) : (
+                        <span className="font-semibold text-destructive font-bold block">
+                          No vendor assigned to this customer — please assign one in Customer Pricing
+                        </span>
+                      )}
                       {o.assigned_at && (
                         <span className="text-[9px] text-muted-foreground">Assigned: {new Date(o.assigned_at).toLocaleDateString()}</span>
                       )}
@@ -2835,40 +2843,58 @@ function AdminOrderDetail({ orderId }) {
                 <Badge className="capitalize rounded-full font-bold">{(order.status || '').replace(/_/g, ' ')}</Badge>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <Button
-                  onClick={() => updateStatus('confirmed')}
-                  disabled={order.status === 'confirmed'}
-                  className="rounded-xl h-10 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5"
-                >
-                  <CheckCircle2 className="w-4 h-4" /> Approve Order
-                </Button>
-                <Button
-                  onClick={() => updateStatus('rejected')}
-                  disabled={order.status === 'rejected'}
-                  variant="outline"
-                  className="rounded-xl h-10 font-extrabold text-xs border-destructive/40 text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1.5"
-                >
-                  <XCircle className="w-4 h-4" /> Reject Order
-                </Button>
-              </div>
-
-              <div>
-                <Label className="text-xs text-muted-foreground mb-2 block font-semibold">Manual Status Override</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  {statuses.map(st => (
-                    <Button
-                      key={st}
-                      onClick={() => updateStatus(st)}
-                      variant={order.status === st ? 'default' : 'outline'}
-                      size="sm"
-                      className="capitalize rounded-full text-xs"
-                    >
-                      {st.replace(/_/g, ' ')}
-                    </Button>
-                  ))}
+              {order.status === 'pending' ? (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <Button
+                    onClick={() => updateStatus('confirmed')}
+                    className="rounded-xl h-10 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> Approve Order
+                  </Button>
+                  <Button
+                    onClick={() => updateStatus('rejected')}
+                    variant="outline"
+                    className="rounded-xl h-10 font-extrabold text-xs border-destructive/40 text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1.5"
+                  >
+                    <XCircle className="w-4 h-4" /> Reject Order
+                  </Button>
                 </div>
-              </div>
+              ) : (
+                <div className="pt-2">
+                  {order.status === 'rejected' ? (
+                    <div className="flex items-center gap-2 bg-destructive/10 border border-destructive/20 text-destructive text-xs font-extrabold p-3.5 rounded-xl">
+                      <XCircle className="w-4 h-4" /> ❌ Rejected: {order.rejection_reason || 'Order rejected by Admin.'}
+                    </div>
+                  ) : order.status === 'delivered' ? (
+                    <div className="flex items-center gap-2 bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-extrabold p-3.5 rounded-xl">
+                      <CheckCircle2 className="w-4 h-4" /> ✅ Completed (Delivered)
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-extrabold p-3.5 rounded-xl">
+                      <CheckCircle2 className="w-4 h-4" /> ✅ Approved (Fulfillment In Progress)
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {order.status === 'pending' && (
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-2 block font-semibold">Manual Status Override</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {statuses.map(st => (
+                      <Button
+                        key={st}
+                        onClick={() => updateStatus(st)}
+                        variant={order.status === st ? 'default' : 'outline'}
+                        size="sm"
+                        className="capitalize rounded-full text-xs"
+                      >
+                        {st.replace(/_/g, ' ')}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -2882,7 +2908,7 @@ function AdminOrderDetail({ orderId }) {
                 {order.vendor_name ? (
                   <div>
                     <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Assigned Partner Unit</span>
-                    <span className={`font-semibold text-sm block ${order.vendor_name.includes('No vendor available') ? 'text-destructive font-bold' : 'text-foreground'}`}>
+                    <span className={`font-semibold text-sm block ${order.vendor_name.includes('No vendor') ? 'text-destructive font-bold' : 'text-foreground'}`}>
                       {order.vendor_name}
                     </span>
                     {order.vendor_email && (
@@ -2899,10 +2925,8 @@ function AdminOrderDetail({ orderId }) {
                 ) : (
                   <div>
                     <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Fulfillment Status</span>
-                    <span className="font-medium text-xs text-muted-foreground mt-1 block">
-                      {order.status === 'pending' 
-                        ? 'Vendor will be assigned automatically upon accepting/approving the order.' 
-                        : 'Unassigned / Pending Vendor Assignment'}
+                    <span className="font-semibold text-xs text-destructive mt-1 block">
+                      No vendor assigned to this customer — please assign one in Customer Pricing
                     </span>
                   </div>
                 )}

@@ -37,7 +37,7 @@ export function OrdersView() {
       })
       if (res.ok) {
         const data = await res.json()
-        setOrders(data)
+        setOrders(Array.isArray(data) ? data : (data?.orders || []))
       }
     } catch (e) {
       console.error(e)
@@ -162,7 +162,7 @@ export function OrdersView() {
           {filteredOrders.map(o => {
             const firstItem = o.items?.[0]
             const remainingCount = (o.items?.length || 0) - 1
-            const statusTheme = STATUS_THEMES[o.status.toLowerCase()] || STATUS_THEMES.pending
+            const statusTheme = STATUS_THEMES[(o.status || 'pending').toLowerCase()] || STATUS_THEMES.pending
             
             return (
               <Card 

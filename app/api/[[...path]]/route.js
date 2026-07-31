@@ -1402,7 +1402,10 @@ async function route(req, method) {
       let finalStatus = targetStatus
 
       // Handle Admin Accept Order (move from pending -> confirmed)
-      if (targetStatus === 'confirmed' && orderToUpdate.status !== 'confirmed') {
+      if (targetStatus === 'confirmed') {
+        if (orderToUpdate.status !== 'pending') {
+          return err('Order has already been processed.', 400)
+        }
         // Deduct stock & log stock movements (auto-adjusting stock if needed for B2B wholesale orders)
         for (const item of (orderToUpdate.order_items || [])) {
           const prod = item.products
@@ -1427,67 +1430,45 @@ async function route(req, method) {
           }
         }
 
-        // --- VENDOR AUTO-ASSIGNMENT LOGIC ---
-        // 1. Fetch all vendors
-        const { data: allVendors } = await supabase.from('vendors').select('*')
-        const vendorsList = allVendors || []
+        // --- CUSTOMER-LEVEL VENDOR ASSIGNMENT LOGIC ---
+        // Fetch order's placing user assigned_vendor_id
+        const { data: orderUser } = await supabase.from('users').select('assigned_vendor_id').eq('id', orderToUpdate.user_id).maybeSingle()
+        const assignedVendorId = orderUser?.assigned_vendor_id
 
-        // 2. Fetch disabled vendors list
-        const { data: disabledStore } = await supabase.from('settings').select('marquee_messages').eq('id', 'disabled_vendors').maybeSingle()
-        const disabledList = disabledStore?.marquee_messages || []
+        let chosenVendor = null
+        if (assignedVendorId) {
+          // Verify vendor is enabled (i.e. not in disabled list)
+          const { data: disabledStore } = await supabase.from('settings').select('marquee_messages').eq('id', 'disabled_vendors').maybeSingle()
+          const disabledList = disabledStore?.marquee_messages || []
 
-        // 3. Filter active (enabled) vendors
-        const enabledVendors = vendorsList.filter(v => !disabledList.includes(v.id))
-
-        if (enabledVendors.length === 0) {
-          // If NO enabled vendors exist at all, leave the order unassigned and clearly flag it
-          finalStatus = 'confirmed'
-          updatePayload.assigned_vendor_id = null
-          updatePayload.vendor_name = 'No vendor available — please enable a vendor partner'
-          updatePayload.vendor_email = ''
-          updatePayload.assigned_at = null
-          updatePayload.assigned_by = 'Auto-Assign System'
-        } else {
-          // If there are enabled vendors, select one
-          let chosenVendor = null
-          if (enabledVendors.length === 1) {
-            chosenVendor = enabledVendors[0]
-          } else {
-            // Find whoever has the fewest active/unfulfilled assigned orders
-            const activeStatuses = ['confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery']
-            const { data: activeOrders } = await supabase.from('orders').select('assigned_vendor_id').in('status', activeStatuses)
-            
-            const counts = {}
-            enabledVendors.forEach(v => { counts[v.id] = 0 })
-            if (activeOrders) {
-              activeOrders.forEach(o => {
-                if (o.assigned_vendor_id && counts[o.assigned_vendor_id] !== undefined) {
-                  counts[o.assigned_vendor_id]++
-                }
-              })
+          if (!disabledList.includes(assignedVendorId)) {
+            const { data: vendorRecord } = await supabase.from('vendors').select('*').eq('id', assignedVendorId).maybeSingle()
+            if (vendorRecord) {
+              chosenVendor = vendorRecord
             }
-
-            let minCount = Infinity
-            enabledVendors.forEach(v => {
-              if (counts[v.id] < minCount) {
-                minCount = counts[v.id]
-                chosenVendor = v
-              }
-            })
-          }
-
-          if (chosenVendor) {
-            finalStatus = 'vendor_assigned' // Transition straight to vendor_assigned
-            updatePayload.assigned_vendor_id = chosenVendor.id
-            updatePayload.vendor_name = chosenVendor.name || ''
-            updatePayload.vendor_email = chosenVendor.email || ''
-            updatePayload.assigned_at = now
-            updatePayload.assigned_by = 'Auto-Assign System'
-          } else {
-            finalStatus = 'confirmed'
           }
         }
+
+        if (chosenVendor) {
+          finalStatus = 'vendor_assigned' // Transition straight to vendor_assigned
+          updatePayload.assigned_vendor_id = chosenVendor.id
+          updatePayload.vendor_name = chosenVendor.name || ''
+          updatePayload.vendor_email = chosenVendor.email || ''
+          updatePayload.assigned_at = now
+          updatePayload.assigned_by = 'Customer Vendor System'
+        } else {
+          // If customer has no vendor assigned, or the assigned vendor is disabled
+          finalStatus = 'confirmed'
+          updatePayload.assigned_vendor_id = null
+          updatePayload.vendor_name = 'No vendor assigned to this customer — please assign one in Customer Pricing'
+          updatePayload.vendor_email = ''
+          updatePayload.assigned_at = null
+          updatePayload.assigned_by = 'Customer Vendor System'
+        }
       } else if (targetStatus === 'rejected') {
+        if (orderToUpdate.status !== 'pending') {
+          return err('Order has already been processed.', 400)
+        }
         finalStatus = 'rejected'
         updatePayload.rejection_reason = body.rejection_reason || 'Order rejected by Admin'
       } else if (targetStatus) {
@@ -1959,7 +1940,7 @@ async function route(req, method) {
     // Fetch unique customer accounts from users table
     const { data: usersData } = await supabase
       .from('users')
-      .select('id, email, full_name, phone, role, created_at')
+      .select('id, email, full_name, phone, role, created_at, assigned_vendor_id')
       .neq('role', 'admin')
       .order('created_at', { ascending: false })
 
@@ -1984,7 +1965,8 @@ async function route(req, method) {
       email: u.email,
       phone: u.phone && u.phone.trim() ? u.phone : 'Not provided',
       created_at: u.created_at || new Date().toISOString(),
-      last_login_at: lastLoginMap[u.id] || u.created_at || null
+      last_login_at: lastLoginMap[u.id] || u.created_at || null,
+      assigned_vendor_id: u.assigned_vendor_id || null
     }))
 
     return json(roster)
@@ -2726,7 +2708,8 @@ Current Conversation History:\n` +
       full_name: full_name.trim(),
       phone: phone ? phone.trim() : '',
       role: role === 'vendor' ? 'vendor' : 'customer',
-      created_at: nowStr
+      created_at: nowStr,
+      assigned_vendor_id: body.assigned_vendor_id || null
     }
 
     let { error: dbErr } = await supabase.from('users').insert({
@@ -2995,6 +2978,271 @@ Current Conversation History:\n` +
         return err('Failed to update status: ' + error.message, 500)
       }
       return json({ ok: true, ...updateData })
+    }
+  }
+
+  // ==================== VENDOR REPORTS EXPORT PDF ====================
+  if (p[0] === 'vendor' && p[1] === 'reports' && p[2] === 'export' && method === 'GET') {
+    if (!user) return err('Unauthorized', 401)
+    const vendor = await getVendorByUserId(user.id, user.email)
+    if (!vendor) return err('Vendor not found', 404)
+
+    try {
+      const { jsPDF } = require('jspdf')
+      require('jspdf-autotable')
+
+      // Fetch last 6 months orders
+      const sixMonthsAgo = new Date()
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+      const sixMonthsAgoStr = sixMonthsAgo.toISOString()
+
+      const { data: dbOrders, error } = await supabase
+        .from('orders')
+        .select('id, order_number, status, total, placed_at, addresses(full_name), order_items(id, product_name_snapshot, quantity, price_snapshot)')
+        .eq('assigned_vendor_id', vendor.id)
+        .gte('placed_at', sixMonthsAgoStr)
+        .order('placed_at', { ascending: false })
+
+      if (error) {
+        console.error('[Vendor Reports Query Fail]:', error)
+        return err('Failed to compile report: ' + error.message, 500)
+      }
+
+      // Calculations and statistics metrics compile
+      const ordersList = dbOrders || []
+      const totalOrders = ordersList.length
+      const approvedOrders = ordersList.filter(o => ['confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered'].includes(o.status)).length
+      const pendingOrders = ordersList.filter(o => o.status === 'pending').length
+      const rejectedOrders = ordersList.filter(o => ['rejected', 'vendor_rejected', 'cancelled'].includes(o.status)).length
+      
+      const totalRevenue = ordersList.reduce((sum, o) => sum + (o.total || 0), 0)
+      const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
+
+      let totalQty = 0
+      const productCounts = {}
+      const customerCounts = {}
+
+      ordersList.forEach(o => {
+        const clientName = o.addresses?.full_name || 'Anonymous Client'
+        customerCounts[clientName] = (customerCounts[clientName] || 0) + (o.total || 0)
+
+        const items = o.order_items || []
+        items.forEach(it => {
+          const qty = it.quantity || 0
+          totalQty += qty
+
+          const pName = it.product_name_snapshot || 'Unknown item'
+          productCounts[pName] = (productCounts[pName] || 0) + qty
+        })
+      })
+
+      // Top Selling Product
+      let topProduct = '—'
+      let topProductQty = 0
+      Object.entries(productCounts).forEach(([name, qty]) => {
+        if (qty > topProductQty) {
+          topProductQty = qty
+          topProduct = name
+        }
+      })
+
+      // Best Customer
+      let bestCustomer = '—'
+      let bestCustomerSpent = 0
+      Object.entries(customerCounts).forEach(([name, spent]) => {
+        if (spent > bestCustomerSpent) {
+          bestCustomerSpent = spent
+          bestCustomer = name
+        }
+      })
+
+      // Monthly aggregates
+      const months = []
+      const monthRev = {}
+      const monthCnt = {}
+
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date()
+        d.setMonth(d.getMonth() - i)
+        const mKey = d.toLocaleString('en-US', { month: 'short', year: 'numeric' })
+        months.push(mKey)
+        monthRev[mKey] = 0
+        monthCnt[mKey] = 0
+      }
+
+      ordersList.forEach(o => {
+        const od = new Date(o.placed_at)
+        const mKey = od.toLocaleString('en-US', { month: 'short', year: 'numeric' })
+        if (monthRev[mKey] !== undefined) {
+          monthRev[mKey] += (o.total || 0)
+          monthCnt[mKey]++
+        }
+      })
+
+      const approvalRate = totalOrders > 0 ? Math.round((approvedOrders / totalOrders) * 100) : 0
+
+      // PDF document initialize
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+
+      // Custom Corporate Styling (Deep Maroon Accent)
+      const PRIMARY = [80, 7, 19]     // #500713
+      const TEXT_DARK = [17, 24, 39]  // #111827
+      const SECONDARY_LIGHT = [249, 250, 251]
+
+      // Draw Top Branding Header Band
+      doc.setFillColor(...PRIMARY)
+      doc.rect(0, 0, 210, 25, 'F')
+
+      doc.setTextColor(255, 255, 255)
+      doc.setFont('Helvetica', 'bold')
+      doc.setFontSize(18)
+      doc.text('AK ENTERPRISES', 15, 12)
+      doc.setFontSize(8)
+      doc.setFont('Helvetica', 'normal')
+      doc.text('B2B PORTAL | LOGISTICS PARTNER FULFILLMENT REPORT', 15, 17)
+
+      // Generated timestamp metadata details
+      doc.setFontSize(8)
+      const generatedDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+      const lastSixStr = new Date(sixMonthsAgo).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+      doc.text(`Generated: ${generatedDate}`, 155, 10)
+      doc.text(`Reporting Period: ${lastSixStr} - ${generatedDate}`, 122, 15)
+
+      // Profile details
+      doc.setTextColor(...TEXT_DARK)
+      doc.setFontSize(10)
+      doc.setFont('Helvetica', 'bold')
+      doc.text('LOGISTICS PARTNER PROFILE', 15, 36)
+      doc.line(15, 38, 195, 38)
+
+      doc.setFont('Helvetica', 'normal')
+      doc.setFontSize(9)
+      doc.text(`Partner Name:   ${vendor.name || 'N/A'}`, 15, 45)
+      doc.text(`Email Address:  ${vendor.email || 'N/A'}`, 15, 50)
+      doc.text(`Phone Number:   ${vendor.phone || 'N/A'}`, 15, 55)
+
+      doc.text(`Active Deliveries:  ${approvedOrders - ordersList.filter(o => o.status === 'delivered').length}`, 115, 45)
+      doc.text(`Fulfillment Unit:   AK-B2B Logistics Pune`, 115, 50)
+      doc.text(`Document Status:   Official Performance Ledger`, 115, 55)
+
+      // Statistics Section
+      doc.setFont('Helvetica', 'bold')
+      doc.setFontSize(10)
+      doc.text('KEY PERFORMANCE METRICS (LAST 6 MONTHS)', 15, 68)
+      doc.line(15, 70, 195, 70)
+
+      doc.setFont('Helvetica', 'bold')
+      doc.setFontSize(8.5)
+      const kpis = [
+        ['Total Assigned Orders', `${totalOrders} orders`],
+        ['Fulfillment Success', `${approvedOrders} accepted`],
+        ['Pending Review', `${pendingOrders} pending`],
+        ['Declined/Cancelled', `${rejectedOrders} orders`],
+        ['Assigned Total Revenue', `Rs ${totalRevenue.toLocaleString('en-IN')}`],
+        ['Total Quantity Sold', `${totalQty} units`],
+        ['Average Order Value', `Rs ${Math.round(avgOrderValue).toLocaleString('en-IN')}`],
+        ['Top Selling Product', topProduct.length > 25 ? topProduct.substring(0, 24) + '...' : topProduct],
+        ['Top B2B Client Account', bestCustomer.length > 25 ? bestCustomer.substring(0, 24) + '...' : bestCustomer]
+      ]
+
+      let kpiY = 76
+      kpis.forEach(([label, value], i) => {
+        const col = i % 2 === 0 ? 15 : 110
+        doc.setFillColor(249, 250, 251)
+        doc.rect(col, kpiY, 82, 7, 'F')
+        doc.setTextColor(75, 85, 99)
+        doc.setFont('Helvetica', 'normal')
+        doc.text(label, col + 2, kpiY + 4.8)
+        doc.setTextColor(...PRIMARY)
+        doc.setFont('Helvetica', 'bold')
+        doc.text(value, col + 55, kpiY + 4.8)
+        if (i % 2 === 1) kpiY += 9
+      })
+
+      // Monthly charts/table simulation
+      doc.setTextColor(...TEXT_DARK)
+      doc.setFont('Helvetica', 'bold')
+      doc.setFontSize(10)
+      doc.text('MONTH-ON-MONTH STATISTICS', 15, 126)
+      doc.line(15, 128, 195, 128)
+
+      const monthlyHeaders = [['Billing Month', 'Total Orders Count', 'Generated Revenue (INR)']]
+      const monthlyData = months.map(m => [
+        m,
+        `${monthCnt[m] || 0} shipments`,
+        `Rs ${(monthRev[m] || 0).toLocaleString('en-IN')}`
+      ])
+
+      doc.autoTable({
+        startY: 132,
+        head: monthlyHeaders,
+        body: monthlyData,
+        theme: 'striped',
+        headStyles: { fillColor: PRIMARY, fontSize: 8.5 },
+        styles: { fontSize: 8, font: 'Helvetica' },
+        margin: { left: 15, right: 15 }
+      })
+
+      // Orders Details Table
+      doc.setFont('Helvetica', 'bold')
+      doc.setFontSize(10)
+      doc.text('DETAILED SHIPMENTS LOG', 15, doc.previousAutoTable.finalY + 12)
+      doc.line(15, doc.previousAutoTable.finalY + 14, 195, doc.previousAutoTable.finalY + 14)
+
+      const logHeaders = [['Invoice No', 'B2B Client', 'Products Snapshot', 'Qty', 'Total Valuation', 'Status', 'Date']]
+      const logData = ordersList.map(o => {
+        const pNames = (o.order_items || []).map(it => it.product_name_snapshot).join(', ')
+        const cleanDate = new Date(o.placed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+        return [
+          `INV-${o.order_number}`,
+          o.addresses?.full_name || 'Guest User',
+          pNames.length > 25 ? pNames.substring(0, 24) + '...' : pNames,
+          String((o.order_items || []).reduce((s, it) => s + (it.quantity || 0), 0)),
+          `Rs ${(o.total || 0).toLocaleString('en-IN')}`,
+          (o.status || '').replace(/_/g, ' ').toUpperCase(),
+          cleanDate
+        ]
+      })
+
+      doc.autoTable({
+        startY: doc.previousAutoTable.finalY + 18,
+        head: logHeaders,
+        body: logData,
+        theme: 'striped',
+        headStyles: { fillColor: PRIMARY, fontSize: 8 },
+        styles: { fontSize: 7.5, font: 'Helvetica' },
+        margin: { left: 15, right: 15 }
+      })
+
+      // Performance Summary Text
+      const finalY = doc.previousAutoTable.finalY
+      doc.setFont('Helvetica', 'bold')
+      doc.setFontSize(10)
+      doc.text('OVERALL PERFORMANCE SUMMARY', 15, finalY + 12)
+      doc.line(15, finalY + 14, 195, finalY + 14)
+
+      doc.setFont('Helvetica', 'normal')
+      doc.setFontSize(9)
+      const summaryText = `During the last six months, the vendor completed ${totalOrders} orders with a total revenue of Rs ${totalRevenue.toLocaleString('en-IN')}. Approval rate was ${approvalRate}%. Best selling product was ${topProduct}.`
+      doc.text(summaryText, 15, finalY + 20, { maxWidth: 180 })
+
+      // Sign-off footer
+      doc.setFontSize(7.5)
+      doc.setTextColor(156, 163, 175)
+      doc.text('This is an official computer-generated performance summary ledgers. Subject to B2B logistics partner terms.', 15, finalY + 34)
+
+      // Send PDF stream
+      const pdfBuffer = doc.output('arraybuffer')
+      return new NextResponse(pdfBuffer, {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="Vendor_Report_Last_6_Months_${(vendor.name || 'Vendor').replace(/\s+/g, '_')}.pdf"`
+        }
+      })
+
+    } catch (e) {
+      console.error('[Vendor PDF Generation Error]:', e)
+      return err('PDF compile failed: ' + e.message, 500)
     }
   }
 
@@ -3411,7 +3659,7 @@ Current Conversation History:\n` +
       const supabase = db()
 
       // Fetch user info (removed 'status' as it is not present in the users schema)
-      const { data: userData, error: userErr } = await supabase.from('users').select('id, email, full_name, phone, role, created_at').eq('id', targetUserId).maybeSingle()
+      const { data: userData, error: userErr } = await supabase.from('users').select('id, email, full_name, phone, role, created_at, assigned_vendor_id').eq('id', targetUserId).maybeSingle()
       if (userErr) {
         console.error('[User Profile] DB error fetching users table for ID:', targetUserId, 'Error:', {
           message: userErr.message,
@@ -3531,6 +3779,39 @@ Current Conversation History:\n` +
     } catch (e) {
       console.error('[User Profile] Unexpected error handling request:', e)
       return err('Failed to load profile: ' + e.message, 500)
+    }
+  }
+
+  // ==================== ADMIN UPDATE USER PROFILE (VENDOR ASSIGNMENT) ====================
+  if (p[0] === 'admin' && p[1] === 'user-profile' && method === 'PUT') {
+    if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
+
+    const targetUserId = body.user_id
+    const assignedVendorId = body.assigned_vendor_id !== undefined ? body.assigned_vendor_id : undefined
+
+    if (!targetUserId) return err('User ID required', 400)
+
+    try {
+      const supabase = db()
+      const updatePayload = { updated_at: new Date().toISOString() }
+      if (assignedVendorId !== undefined) {
+        updatePayload.assigned_vendor_id = assignedVendorId
+      }
+
+      const { error: updateErr } = await supabase
+        .from('users')
+        .update(updatePayload)
+        .eq('id', targetUserId)
+
+      if (updateErr) {
+        console.error('[User Profile Update Error]:', updateErr)
+        return err('Failed to update customer: ' + updateErr.message, 500)
+      }
+
+      return json({ ok: true, message: 'Customer vendor assignment updated successfully' })
+    } catch (e) {
+      console.error('[User Profile Update Unexpected]:', e)
+      return err('Internal error: ' + e.message, 500)
     }
   }
 

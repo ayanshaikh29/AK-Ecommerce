@@ -78,6 +78,7 @@ export function CustomerPricingManager() {
   const [copiedPass, setCopiedPass] = useState(false)
   const [highlightCustomerId, setHighlightCustomerId] = useState(null)
   const [comingFromRequests, setComingFromRequests] = useState(false)
+  const [vendors, setVendors] = useState([])
 
   // Change Password Modal States
   const [changePwOpen, setChangePwOpen] = useState(false)
@@ -92,6 +93,7 @@ export function CustomerPricingManager() {
   const [profileUserId, setProfileUserId] = useState(null)
   const [profileData, setProfileData] = useState(null)
   const [profileLoading, setProfileLoading] = useState(false)
+  const [updatingVendorId, setUpdatingVendorId] = useState(false)
 
   const handleCreateCustomer = async (e) => {
     e.preventDefault()
@@ -114,7 +116,8 @@ export function CustomerPricingManager() {
         full_name: newCustForm.full_name,
         email: newCustForm.email,
         phone: newCustForm.phone,
-        password: newCustForm.password
+        password: newCustForm.password,
+        assigned_vendor_id: newCustForm.assigned_vendor_id || null
       }
       console.log('[Create Account] Sending password:', payload.password, 'Length:', payload.password.length)
       const res = await fetch('/api/admin/create-account', {
@@ -135,7 +138,7 @@ export function CustomerPricingManager() {
       toast.success(`${newCustForm.role === 'vendor' ? 'Vendor' : 'Customer'} account created successfully!`)
       setCreateDialogOpen(false)
       setCreatedCredentials({ ...data.user, role: newCustForm.role })
-      setNewCustForm({ role: 'customer', full_name: '', email: '', phone: '', password: '' })
+      setNewCustForm({ role: 'customer', full_name: '', email: '', phone: '', password: '', assigned_vendor_id: '' })
       setConfirmPassword('')
       fetchCustomerList()
     } catch (err) {
@@ -251,6 +254,11 @@ export function CustomerPricingManager() {
     fetch('/api/categories', { headers: { Authorization: `Bearer ${token}` } })
       .then(res => res.ok ? res.json() : [])
       .then(data => setMasterCategoriesList(data || []))
+      .catch(console.error)
+
+    fetch('/api/admin/vendors', { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setVendors(data || []))
       .catch(console.error)
   }, [])
 
@@ -1079,6 +1087,23 @@ export function CustomerPricingManager() {
                 className="h-10 rounded-xl text-xs"
               />
             </div>
+            {newCustForm.role === 'customer' && (
+              <div>
+                <label className="text-xs font-bold block mb-1">Assign Vendor Partner (Optional)</label>
+                <select
+                  value={newCustForm.assigned_vendor_id || ''}
+                  onChange={e => setNewCustForm(prev => ({ ...prev, assigned_vendor_id: e.target.value }))}
+                  className="w-full h-10 rounded-xl text-xs bg-card border border-border px-3 font-semibold text-foreground focus:ring-accent"
+                >
+                  <option value="">Unassigned</option>
+                  {(vendors || []).filter(v => v.is_enabled !== false).map(v => (
+                    <option key={v.id} value={v.id}>
+                      🚚 {v.name} ({v.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="text-xs font-bold block mb-1">Access Password *</label>
               <PasswordInput
@@ -1452,6 +1477,61 @@ export function CustomerPricingManager() {
                       <div className="flex justify-between"><span className="text-muted-foreground">Last Login</span><span>{profileData.user.last_login_at ? new Date(profileData.user.last_login_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</span></div>
                     </div>
                   </div>
+
+                  {/* Vendor Assignment Panel (For Customers Only) */}
+                  {profileData.user.role === 'customer' && (
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Logistics Fulfillment Vendor</h3>
+                      <div className="bg-secondary/40 p-4 rounded-2xl border space-y-3 text-xs">
+                        <div>
+                          <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Assigned Vendor Partner</label>
+                          <select
+                            value={profileData.user.assigned_vendor_id || ''}
+                            onChange={async (e) => {
+                              const newVId = e.target.value || null
+                              setUpdatingVendorId(true)
+                              try {
+                                const res = await fetch('/api/admin/user-profile', {
+                                  method: 'PUT',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                                  },
+                                  body: JSON.stringify({
+                                    user_id: profileData.user.id,
+                                    assigned_vendor_id: newVId
+                                  })
+                                })
+                                if (!res.ok) throw new Error('Failed to update vendor assignment')
+                                setProfileData(prev => ({
+                                  ...prev,
+                                  user: {
+                                    ...prev.user,
+                                    assigned_vendor_id: newVId
+                                  }
+                                }))
+                                toast.success('Vendor assignment updated successfully!')
+                                fetchCustomerList()
+                              } catch (err) {
+                                toast.error(err.message)
+                              } finally {
+                                setUpdatingVendorId(false)
+                              }
+                            }}
+                            disabled={updatingVendorId}
+                            className="w-full h-10 rounded-xl text-xs bg-background border border-border px-3 font-semibold text-foreground focus:ring-accent"
+                          >
+                            <option value="">Unassigned (No Vendor Linked)</option>
+                            {(vendors || []).filter(v => v.is_enabled !== false).map(v => (
+                              <option key={v.id} value={v.id}>
+                                🚚 {v.name} ({v.email})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Order Statistics */}
                   <div className="space-y-3">
