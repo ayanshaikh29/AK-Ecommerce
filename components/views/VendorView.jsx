@@ -297,13 +297,26 @@ export function VendorView() {
               <h1 className="font-display text-2xl font-black text-slate-900 mt-1">Order #{selectedOrder.order_number}</h1>
               <p className="text-xs text-slate-400 mt-1">Assigned on {new Date(selectedOrder.placed_at).toLocaleString('en-IN')}</p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-3 flex-wrap">
               <Button 
                 onClick={() => import('@/lib/invoice').then(({ downloadInvoice }) => downloadInvoice(selectedOrder))} 
                 className="rounded-full bg-slate-900 text-white font-bold text-xs h-10 px-6 hover:bg-slate-800 shadow-sm"
               >
                 <Download className="w-4 h-4 mr-2" /> Download Invoice
               </Button>
+              {selectedOrder.zoho_challan_id && (
+                <Button
+                  onClick={() => {
+                    const link = document.createElement('a')
+                    link.href = `/api/zoho/challan/${selectedOrder.zoho_challan_id}`
+                    link.setAttribute('download', `delivery-challan-${selectedOrder.order_number}.pdf`)
+                    link.click()
+                  }}
+                  className="rounded-full bg-blue-600 text-white font-bold text-xs h-10 px-6 hover:bg-blue-700 shadow-sm"
+                >
+                  <Download className="w-4 h-4 mr-2" /> Delivery Challan (Zoho)
+                </Button>
+              )}
             </div>
           </div>
 
@@ -604,12 +617,6 @@ export function VendorView() {
             Assigned Orders ({orders.length})
           </button>
           <button
-            onClick={() => { setActiveTab('inventory'); setStatusFilter('all') }}
-            className={`flex-1 py-2 px-4 rounded-full font-bold text-xs transition ${activeTab === 'inventory' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-          >
-            Stock Inventory ({inventory.length})
-          </button>
-          <button
             onClick={() => { setActiveTab('performance'); setStatusFilter('all') }}
             className={`flex-1 py-2 px-4 rounded-full font-bold text-xs transition ${activeTab === 'performance' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           >
@@ -761,48 +768,7 @@ export function VendorView() {
           </div>
         )}
 
-        {/* Stock Inventory Tab content with premium progress bars */}
-        {activeTab === 'inventory' && (
-          <div className="space-y-4 slide-up">
-            
-            <div className="bg-white p-6 border border-[#ECECEC] rounded-3xl shadow-xs">
-              <h2 className="font-display font-black text-sm text-slate-800">Warehouse Stock Inventory</h2>
-              <p className="text-[10px] text-slate-400 mt-0.5">Read-only warehouse level inventory allocations and custom stock warnings.</p>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {inventory.map(p => {
-                const isLow = p.stock_quantity <= 10
-                const percent = Math.min(100, Math.round((p.stock_quantity / 1200) * 100))
-
-                return (
-                  <Card key={p.id} className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs p-5 space-y-4">
-                    <div className="flex justify-between items-start gap-2">
-                      <div>
-                        <h4 className="font-bold text-xs text-slate-800 line-clamp-1">{p.name}</h4>
-                        <span className="text-[9px] text-slate-400 font-mono">SKU: {p.sku || 'N/A'}</span>
-                      </div>
-                      <Badge className={`font-bold text-[9px] rounded-full px-2 py-0.5 ${isLow ? 'bg-rose-500/10 text-rose-600 border border-rose-500/20' : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'}`}>
-                        {isLow ? 'Restock Soon' : 'In Stock'}
-                      </Badge>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between text-[10px] font-bold text-slate-500">
-                        <span>Allocated Level</span>
-                        <span>{p.stock_quantity} pcs</span>
-                      </div>
-                      <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                        <div className={`h-1.5 rounded-full ${isLow ? 'bg-rose-500' : 'bg-[#F4B942]'}`} style={{ width: `${percent}%` }} />
-                      </div>
-                    </div>
-                  </Card>
-                )
-              })}
-            </div>
-
-          </div>
-        )}
 
         {/* Performance & Reports Tab */}
         {activeTab === 'performance' && (

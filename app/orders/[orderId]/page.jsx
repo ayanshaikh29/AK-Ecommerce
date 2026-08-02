@@ -153,6 +153,21 @@ export default function OrderDetailsPage() {
           <Button onClick={handleDownloadInvoice} variant="outline" size="sm" className="rounded-full h-9 px-4 flex items-center gap-2 shadow-sm">
             <FileText className="w-4 h-4" /> Invoice
           </Button>
+          {order.zoho_invoice_id && (
+            <Button
+              onClick={() => {
+                const link = document.createElement('a')
+                link.href = `/api/zoho/invoice/${order.zoho_invoice_id}`
+                link.setAttribute('download', `invoice-${order.order_number}.pdf`)
+                link.click()
+              }}
+              variant="outline"
+              size="sm"
+              className="rounded-full h-9 px-4 flex items-center gap-2 shadow-sm border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/5"
+            >
+              <FileText className="w-4 h-4" /> Tax Invoice (Zoho)
+            </Button>
+          )}
           {/* Cancel Order Button - only for pending/confirmed */}
           {['pending', 'confirmed'].includes(order.status?.toLowerCase()) && (
             <Button
@@ -246,7 +261,7 @@ export default function OrderDetailsPage() {
                 <p className="font-bold text-foreground">{order.address.full_name}</p>
                 <p className="font-semibold text-foreground/80">{order.address.phone}</p>
                 <p>{order.address.line1}</p>
-                {order.address.line2 && <p>{order.address.line2}</p>}
+                {order.address.line2 && order.address.line2 !== order.address.line1 && <p>{order.address.line2}</p>}
                 <p>{order.address.city}, {order.address.state} - <span className="font-semibold text-foreground">{order.address.pincode}</span></p>
               </div>
             ) : (

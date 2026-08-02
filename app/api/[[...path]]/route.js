@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { v4 as uuidv4 } from 'uuid'
 import crypto from 'crypto'
+import { syncZohoContact, createZohoInvoice, createZohoChallan, getZohoInvoicePdf, getZohoChallanPdf } from '@/lib/zoho'
 import { 
   getMinOrderQuantity, 
   setMinOrderQuantity, 
@@ -1628,12 +1629,120 @@ async function route(req, method) {
         }
       }
 
+      // Trigger Order Status Email via Edge Function
+      const emailTargetStatus = updatePayload.status || body.status || targetStatus
+      if (emailTargetStatus && ['confirmed', 'shipped', 'delivered'].includes(emailTargetStatus.toLowerCase())) {
+        try {
+          supabase.functions.invoke('send-order-email', {
+            body: { orderId: p[1], type: emailTargetStatus.toLowerCase() }
+          }).catch(invokeErr => {
+            console.error('[Email Function Invoke Warning]:', invokeErr.message || invokeErr)
+          })
+        } catch (funcErr) {
+          console.error('[Email Function Try Warning]:', funcErr.message || funcErr)
+        }
+      }
+
+      // --- Zoho Books Sync (async, non-blocking) ---
+      // Trigger on first confirmation (pending -> confirmed or vendor_assigned)
+      if (['confirmed', 'vendor_assigned'].includes(finalStatus) && orderToUpdate.status === 'pending' && !orderToUpdate.zoho_invoice_id) {
+        ;(async () => {
+          try {
+            // Fetch full order details for Zoho sync
+            const { data: fullOrder } = await supabase
+              .from('orders')
+              .select('*, addresses(*), order_items(*, products(id, name, hsn_code, gst_rate))')
+              .eq('id', p[1])
+              .maybeSingle()
+
+            if (!fullOrder) return
+
+            // Fetch customer user info for GST
+            const { data: custUser } = await supabase.from('users').select('email, full_name, phone, gst_number').eq('id', fullOrder.user_id).maybeSingle()
+
+            const orderForZoho = {
+              order_number: fullOrder.order_number,
+              total: fullOrder.total,
+              shipping_address: fullOrder.addresses,
+              items: (fullOrder.order_items || []).map(it => ({
+                product_id: it.product_id,
+                product_name_snapshot: it.product_name_snapshot,
+                price_snapshot: it.price_snapshot,
+                quantity: it.quantity,
+                hsn_code: it.products?.hsn_code || '',
+                gst_rate: it.products?.gst_rate || 18
+              }))
+            }
+
+            const customerForZoho = {
+              email: custUser?.email || fullOrder.customer_email || '',
+              full_name: custUser?.full_name || fullOrder.customer_name || '',
+              phone: custUser?.phone || '',
+              gst_number: custUser?.gst_number || fullOrder.addresses?.gst_number || '',
+              shipping_address: fullOrder.addresses
+            }
+
+            const contactId = await syncZohoContact(customerForZoho)
+            const [invoiceId, challanId] = await Promise.allSettled([
+              createZohoInvoice({ order: orderForZoho, contactId }),
+              createZohoChallan({ order: orderForZoho, contactId })
+            ])
+
+            const zohoUpdate = {}
+            if (invoiceId.status === 'fulfilled' && invoiceId.value) zohoUpdate.zoho_invoice_id = invoiceId.value
+            if (challanId.status === 'fulfilled' && challanId.value) zohoUpdate.zoho_challan_id = challanId.value
+
+            if (Object.keys(zohoUpdate).length > 0) {
+              await supabase.from('orders').update(zohoUpdate).eq('id', p[1])
+              console.log('[Zoho Sync] Order', fullOrder.order_number, 'synced:', zohoUpdate)
+            }
+          } catch (zohoErr) {
+            console.error('[Zoho Sync Error]', zohoErr.message)
+          }
+        })()
+      }
+
       return json({ ok: true, status: updatePayload.status || orderToUpdate.status })
     }
   }
 
   // ==================== COUPONS ====================
 
+
+  // ==================== ZOHO PDF DOWNLOAD ENDPOINTS ====================
+  // GET /api/zoho/invoice/:invoiceId  — stream Zoho invoice PDF
+  if (p[0] === 'zoho' && p[1] === 'invoice' && p[2] && method === 'GET') {
+    if (!user || !['admin', 'customer'].includes(user.role)) return err('Unauthorized', 401)
+    try {
+      const { buffer, headers: zohoHeaders, statusCode } = await getZohoInvoicePdf(p[2])
+      return new NextResponse(buffer, {
+        status: statusCode,
+        headers: {
+          'Content-Type': zohoHeaders['content-type'] || 'application/pdf',
+          'Content-Disposition': `attachment; filename="invoice-${p[2]}.pdf"`
+        }
+      })
+    } catch (e) {
+      return err('Failed to fetch invoice PDF from Zoho: ' + e.message, 500)
+    }
+  }
+
+  // GET /api/zoho/challan/:challanId  — stream Zoho delivery challan PDF
+  if (p[0] === 'zoho' && p[1] === 'challan' && p[2] && method === 'GET') {
+    if (!user) return err('Unauthorized', 401)
+    try {
+      const { buffer, headers: zohoHeaders, statusCode } = await getZohoChallanPdf(p[2])
+      return new NextResponse(buffer, {
+        status: statusCode,
+        headers: {
+          'Content-Type': zohoHeaders['content-type'] || 'application/pdf',
+          'Content-Disposition': `attachment; filename="delivery-challan-${p[2]}.pdf"`
+        }
+      })
+    } catch (e) {
+      return err('Failed to fetch challan PDF from Zoho: ' + e.message, 500)
+    }
+  }
 
   // ==================== RETURN REQUESTS ====================
   if (p[0] === 'return-requests') {
@@ -1673,6 +1782,60 @@ async function route(req, method) {
       const { error } = await supabase.from('return_requests').update({ status, updated_at: new Date().toISOString() }).eq('id', p[1])
       if (error) return err('Failed to update return request: ' + error.message, 500)
       return json({ ok: true })
+    }
+  }
+
+  // ==================== PRODUCT REQUESTS ====================
+  if (p[0] === 'product-requests') {
+    if (!user) return err('Unauthorized', 401)
+    const supabase = db()
+
+    if (method === 'GET') {
+      if (user.role !== 'admin') return err('Forbidden', 403)
+      const { data, error } = await supabase
+        .from('product_requests')
+        .select('*, users(full_name, email, phone)')
+        .order('created_at', { ascending: false })
+      if (error) return err('Failed to fetch product requests: ' + error.message, 500)
+      return json(data || [])
+    }
+
+    if (method === 'POST') {
+      const { product_name, description, quantity_needed } = body
+      if (!product_name) return err('Product name is required', 400)
+
+      const { data, error } = await supabase
+        .from('product_requests')
+        .insert({
+          customer_id: user.id,
+          product_name,
+          description,
+          quantity_needed: quantity_needed || 1,
+          status: 'pending'
+        })
+        .select()
+        .single()
+
+      if (error) return err('Failed to submit product request: ' + error.message, 500)
+      return json(data)
+    }
+
+    if (method === 'PUT' && p[1]) {
+      if (user.role !== 'admin') return err('Forbidden', 403)
+      const { status } = body
+      if (!status || !['pending', 'fulfilled'].includes(status)) {
+        return err('Invalid status value', 400)
+      }
+
+      const { data, error } = await supabase
+        .from('product_requests')
+        .update({ status })
+        .eq('id', p[1])
+        .select()
+        .single()
+
+      if (error) return err('Failed to update product request: ' + error.message, 500)
+      return json(data)
     }
   }
 

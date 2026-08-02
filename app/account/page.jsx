@@ -16,7 +16,7 @@ export default function AccountPage() {
   const [mounted, setMounted] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState({ full_name: '', email: '', phone: '' })
+  const [form, setForm] = useState({ full_name: '', email: '', phone: '', gst_number: '' })
 
   useEffect(() => {
     setMounted(true)
@@ -27,7 +27,8 @@ export default function AccountPage() {
       setForm({
         full_name: user.full_name || '',
         email: user.email || '',
-        phone: user.phone || ''
+        phone: user.phone || '',
+        gst_number: user.gst_number || ''
       })
     }
   }, [user, mounted])
@@ -150,7 +151,13 @@ export default function AccountPage() {
             <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">B2B Membership</h3>
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">GST Identification (GSTIN)</p>
-              <p className="font-medium text-foreground">{user.gstin || 'Not registered (Available during checkout)'}</p>
+              <p className="font-medium text-foreground">
+                {user.gst_number ? (
+                  <span className="text-emerald-600 font-bold">{user.gst_number} (Registered)</span>
+                ) : (
+                  'Not registered (Available during checkout)'
+                )}
+              </p>
               <p className="text-xs text-muted-foreground pt-2">All orders from this account automatically receive GST tax compliant invoices with tax credits.</p>
             </div>
           </CardContent>
@@ -222,6 +229,15 @@ export default function AccountPage() {
                     value={form.phone} 
                     onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} 
                     placeholder="Enter phone number" 
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="gst_number">GST Number (optional)</Label>
+                  <Input 
+                    id="gst_number"
+                    value={form.gst_number} 
+                    onChange={e => setForm(f => ({ ...f, gst_number: e.target.value }))} 
+                    placeholder="Enter GST number" 
                   />
                 </div>
                 <div className="flex gap-3 pt-2">

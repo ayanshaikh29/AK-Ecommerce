@@ -5,10 +5,14 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { toast } from 'sonner'
-import { Grid3x3, Clock, PackageCheck, CheckCircle2, MessageCircle, ChevronRight, Heart, User, HeadphonesIcon, ShoppingBag, ArrowRight, Truck, Award, Sparkles, FileText, BatteryCharging, AlertCircle, ShoppingBasket } from 'lucide-react'
+import { Grid3x3, Clock, PackageCheck, CheckCircle2, MessageCircle, ChevronRight, Heart, User, HeadphonesIcon, ShoppingBag, ArrowRight, Truck, Award, Sparkles, FileText, BatteryCharging, AlertCircle, ShoppingBasket, ClipboardList, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useAppContext } from '@/components/providers/AppProvider'
 import { useRealtimeOrders, useRealtimePricing } from '@/lib/hooks/useRealtime'
 
@@ -19,6 +23,41 @@ export function CustomerDashboardView({ user }) {
   const router = useRouter()
 
   const [loading, setLoading] = useState(true)
+  const [requestOpen, setRequestOpen] = useState(false)
+  const [requestForm, setRequestForm] = useState({ name: '', description: '', quantity: '1', notes: '' })
+  const [requestLoading, setRequestLoading] = useState(false)
+
+  const handleRequestSubmit = async (e) => {
+    e.preventDefault()
+    if (!requestForm.name.trim()) {
+      toast.error('Product name is required')
+      return
+    }
+    setRequestLoading(true)
+    try {
+      const res = await fetch('/api/product-requests', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          product_name: requestForm.name.trim(),
+          description: requestForm.description.trim(),
+          quantity_needed: Number(requestForm.quantity) || 1,
+          notes: requestForm.notes.trim()
+        })
+      })
+      if (!res.ok) throw new Error('Failed to submit product request')
+      toast.success('Product request submitted successfully!')
+      setRequestForm({ name: '', description: '', quantity: '1', notes: '' })
+      setRequestOpen(false)
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setRequestLoading(false)
+    }
+  }
   const [products, setProducts] = useState([])
   const [orders, setOrders] = useState([])
   const [moq, setMoq] = useState(6000)
@@ -103,21 +142,37 @@ export function CustomerDashboardView({ user }) {
       </motion.div>
 
       {/* Quick Actions */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
         {[
           { label: 'Browse Products', icon: Grid3x3, href: '/products', color: 'gold-gradient text-primary' },
           { label: 'My Orders', icon: ShoppingBag, href: '/orders', color: 'bg-blue-500/10 text-blue-600' },
           { label: 'Wishlist', icon: Heart, href: '/wishlist', color: 'bg-red-500/10 text-red-500' },
           { label: 'My Profile', icon: User, href: '/account', color: 'bg-purple-500/10 text-purple-600' },
+          { label: 'Request Product', icon: ClipboardList, onClick: () => setRequestOpen(true), color: 'bg-amber-500/10 text-amber-600' },
           { label: 'Support', icon: HeadphonesIcon, href: '/contact', color: 'bg-emerald-500/10 text-emerald-600' }
-        ].map((item, i) => (
-          <Link key={i} href={item.href} className="group bg-card border border-border/80 rounded-2xl p-5 text-left hover:border-accent/50 transition-all duration-300 shadow-soft hover:shadow-glow">
-            <div className={`w-11 h-11 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform ${item.color}`}>
-              <item.icon className="w-5 h-5" />
-            </div>
-            <p className="font-bold text-sm text-foreground group-hover:text-accent transition-colors">{item.label}</p>
-          </Link>
-        ))}
+        ].map((item, i) => {
+          const Icon = item.icon
+          const content = (
+            <>
+              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform ${item.color}`}>
+                <Icon className="w-5 h-5" />
+              </div>
+              <p className="font-bold text-sm text-foreground group-hover:text-accent transition-colors">{item.label}</p>
+            </>
+          )
+          if (item.href) {
+            return (
+              <Link key={i} href={item.href} className="group bg-card border border-border/80 rounded-2xl p-5 text-left hover:border-accent/50 transition-all duration-300 shadow-soft hover:shadow-glow">
+                {content}
+              </Link>
+            )
+          }
+          return (
+            <button key={i} onClick={item.onClick} className="group bg-card border border-border/80 rounded-2xl p-5 text-left hover:border-accent/50 transition-all duration-300 shadow-soft hover:shadow-glow w-full text-left">
+              {content}
+            </button>
+          )
+        })}
       </motion.div>
 
       {/* Order Stats & Recent Orders */}
@@ -284,6 +339,70 @@ export function CustomerDashboardView({ user }) {
           </div>
         </motion.section>
       )}
+      {/* Product Request Modal */}
+      <Dialog open={requestOpen} onOpenChange={setRequestOpen}>
+        <DialogContent className="max-w-md radius-lg p-6 text-left">
+          <DialogHeader>
+            <DialogTitle className="font-display text-lg font-bold">Request New Product</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleRequestSubmit} className="space-y-4 mt-4">
+            <div>
+              <Label htmlFor="req_name">Product Name *</Label>
+              <Input
+                id="req_name"
+                required
+                value={requestForm.name}
+                onChange={e => setRequestForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. A4 Copy Paper 80GSM"
+                className="h-11 rounded-xl"
+              />
+            </div>
+            <div>
+              <Label htmlFor="req_qty">Quantity Needed *</Label>
+              <Input
+                id="req_qty"
+                type="number"
+                required
+                min="1"
+                value={requestForm.quantity}
+                onChange={e => setRequestForm(f => ({ ...f, quantity: e.target.value }))}
+                placeholder="e.g. 50"
+                className="h-11 rounded-xl"
+              />
+            </div>
+            <div>
+              <Label htmlFor="req_desc">Specifications / Description</Label>
+              <Textarea
+                id="req_desc"
+                rows={3}
+                value={requestForm.description}
+                onChange={e => setRequestForm(f => ({ ...f, description: e.target.value }))}
+                placeholder="Specify dimensions, brand preference, or details..."
+                className="rounded-xl"
+              />
+            </div>
+            <div>
+              <Label htmlFor="req_notes">Additional Notes / Remarks</Label>
+              <Input
+                id="req_notes"
+                value={requestForm.notes}
+                onChange={e => setRequestForm(f => ({ ...f, notes: e.target.value }))}
+                placeholder="e.g. Need delivery by next week"
+                className="h-11 rounded-xl"
+              />
+            </div>
+            <div className="flex gap-2 pt-4">
+              <Button type="submit" disabled={requestLoading} className="flex-1 rounded-full">
+                {requestLoading ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : null}
+                Submit Request
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setRequestOpen(false)} className="rounded-full">
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

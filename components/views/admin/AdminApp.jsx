@@ -437,7 +437,7 @@ export function AdminApp() {
                 ['customer-pricing','Customers',ShieldCheck],
                 ['orders','Orders',ClipboardList],
                 ['inventory','Stock Inventory',Package],
-                ['vendors','Vendor Partners',Truck],
+                ['vendors','Zonal Admins',Truck],
                 ['billing','Billing & Invoices',FileText],
                 ['products','Products',Grid3x3],
                 ['product-new','Add Product',Plus],
@@ -496,7 +496,7 @@ export function AdminApp() {
                 ['customer-pricing','Customers',ShieldCheck],
                 ['orders','Orders',ClipboardList],
                 ['inventory','Stock Inventory',Package],
-                ['vendors','Vendor Partners',Truck],
+                ['vendors','Zonal Admins',Truck],
                 ['billing','Billing & Invoices',FileText],
                 ['products','Products',Grid3x3],
                 ['product-new','Add Product',Plus],
@@ -943,9 +943,19 @@ function AdminProducts({ router }) {
           </h1>
           <p className="text-xs text-muted-foreground mt-1">Manage catalog items, pricing, inventory stock, and visibility status.</p>
         </div>
-        <Button onClick={() => router.push('/admin/product-new')} className="rounded-xl gold-gradient text-primary font-bold text-xs shadow-soft">
-          <Plus className="w-4 h-4 mr-1.5"/> Add Product
-        </Button>
+        <div className="flex gap-2.5">
+          <QuickAddCategory 
+            onCategoryAdded={() => toast.success('Category added!')}
+            trigger={
+              <Button type="button" className="rounded-xl bg-secondary hover:bg-secondary/80 border border-border/80 text-foreground font-bold text-xs shadow-soft h-10 px-4 flex items-center">
+                <Plus className="w-4 h-4 mr-1.5"/> Add Category
+              </Button>
+            }
+          />
+          <Button onClick={() => router.push('/admin/product-new')} className="rounded-xl gold-gradient text-primary font-bold text-xs shadow-soft h-10 px-4 flex items-center">
+            <Plus className="w-4 h-4 mr-1.5"/> Add Product
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center gap-3 mb-6">
@@ -1153,7 +1163,16 @@ function AdminProductForm({ router, editId }) {
           <div><Label>Product Name *</Label><Input required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} className="h-11 rounded-xl"/></div>
           <div><Label>Description</Label><Textarea rows={4} value={f.description} onChange={e => setF({ ...f, description: e.target.value })} className="rounded-xl"/></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div><Label>Category *</Label><Select value={f.category_id} onValueChange={v => setF({ ...f, category_id: v })}><SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Select"/></SelectTrigger><SelectContent>{cats.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                <Label className="mb-0">Category *</Label>
+                <QuickAddCategory cats={cats} onCategoryAdded={newCat => {
+                  setCats([...cats, newCat])
+                  setF(prev => ({ ...prev, category_id: newCat.id }))
+                }} />
+              </div>
+              <Select value={f.category_id} onValueChange={v => setF({ ...f, category_id: v })}><SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Select"/></SelectTrigger><SelectContent>{cats.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>
+            </div>
             <div><Label>Sub-category</Label><Input value={f.subcategory} onChange={e => setF({ ...f, subcategory: e.target.value })} className="h-11 rounded-xl"/></div>
             <div><Label>Price (₹) *</Label><Input required type="number" value={f.price} onChange={e => setF({ ...f, price: e.target.value })} className="h-11 rounded-xl"/></div>
             <div><Label>MRP (₹)</Label><Input type="number" value={f.mrp} onChange={e => setF({ ...f, mrp: e.target.value })} className="h-11 rounded-xl"/></div>
@@ -1908,6 +1927,213 @@ function AdminClients() {
                 </div>
               </div>
               <div className="px-6 py-4 border-t bg-secondary/20 flex gap-2 shrink-0">
+                <Button type="submit" className="flex-1 rounded-full">Save</Button>
+                <Button type="button" variant="outline" onClick={() => setEditing(null)} className="rounded-full">Cancel</Button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+function QuickAddCategory({ cats, onCategoryAdded, trigger }) {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [minOrder, setMinOrder] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const handleAdd = async (e) => {
+    e.preventDefault()
+    if (!name.trim()) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/categories', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          name: name.trim(),
+          min_order_value: minOrder !== '' ? Number(minOrder) : null
+        })
+      })
+      if (!res.ok) throw new Error('Failed to create category')
+      const newCat = await res.json()
+      toast.success('Category created successfully')
+      setName('')
+      setMinOrder('')
+      setOpen(false)
+      if (onCategoryAdded) onCategoryAdded(newCat)
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      {trigger ? (
+        React.cloneElement(trigger, { onClick: () => setOpen(true) })
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-xs font-bold text-primary hover:underline flex items-center gap-0.5"
+        >
+          <Plus className="w-3.5 h-3.5" /> Add New
+        </button>
+      )}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-md radius-lg p-6 text-left">
+          <DialogHeader>
+            <DialogTitle className="font-display text-lg font-bold">Quick Add Category</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleAdd} className="space-y-4 mt-4">
+            <div>
+              <Label>Category Name *</Label>
+              <Input
+                required
+                value={name}
+                onChange={e => setName(e.target.value)}
+                className="h-11 rounded-xl"
+                placeholder="e.g. Office Stationery"
+              />
+            </div>
+            <div>
+              <Label>Minimum Order Value (₹, optional)</Label>
+              <Input
+                type="number"
+                value={minOrder}
+                onChange={e => setMinOrder(e.target.value)}
+                className="h-11 rounded-xl"
+                placeholder="e.g. 500 (blank for no minimum)"
+              />
+            </div>
+            <div className="flex gap-2 pt-4">
+              <Button type="submit" disabled={saving} className="flex-1 rounded-full">
+                {saving ? 'Creating...' : 'Create Category'}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setOpen(false)} className="rounded-full">
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+function AdminCategories() {
+  const [list, setList] = useState(null)
+  const [editing, setEditing] = useState(null)
+  const load = () => fetch('/api/categories').then(r=>r.json()).then(setList)
+  useEffect(() => { load() }, [])
+  const empty = { name: '', min_order_value: '' }
+  
+  const save = async e => {
+    e.preventDefault();
+    try {
+      const body = {
+        name: editing.name,
+        min_order_value: editing.min_order_value !== '' && editing.min_order_value !== null ? +editing.min_order_value : null
+      }
+      let res
+      if (editing.id) {
+        res = await fetch('/api/categories/' + editing.id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+          body: JSON.stringify(body)
+        })
+      } else {
+        res = await fetch('/api/categories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+          body: JSON.stringify(body)
+        })
+      }
+      if (!res.ok) throw new Error('Failed to save category')
+      toast.success('Category saved successfully')
+      setEditing(null)
+      load()
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  const del = async id => {
+    if (!confirm('Are you sure you want to delete this category? All products under this category might lose their connection.')) return
+    try {
+      const res = await fetch('/api/categories/' + id, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      if (!res.ok) throw new Error('Delete failed')
+      toast.success('Category deleted')
+      load()
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  return (
+    <div className="slide-up text-left">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div>
+          <h1 className="font-display text-3xl font-extrabold text-foreground">Product Categories</h1>
+          <p className="text-sm text-muted-foreground mt-1">Manage product categories and set category-specific Minimum Order Values (MOV) for orders.</p>
+        </div>
+        <Button onClick={() => setEditing({ ...empty })} className="rounded-full btn-shine shrink-0">
+          <Plus className="w-4 h-4 mr-1"/>Add Category
+        </Button>
+      </div>
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {!list ? Array(3).fill(0).map((_, i) => <div key={i} className="h-24 skeleton"/>) : list.map(c => (
+          <Card key={c.id} className="radius-lg shadow-soft card-lift">
+            <CardContent className="pt-6 flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-base">{c.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5 font-mono">Slug: {c.slug}</p>
+                {c.min_order_value ? (
+                  <Badge variant="default" className="text-xs mt-2 bg-emerald-600 hover:bg-emerald-700">
+                    Min order: {formatINR(c.min_order_value)}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" className="text-xs mt-2 text-muted-foreground">
+                    No minimum value
+                  </Badge>
+                )}
+              </div>
+              <div className="space-x-1 flex shrink-0">
+                <Button size="sm" variant="outline" onClick={() => setEditing(c)} className="rounded-full">Edit</Button>
+                <Button size="sm" variant="ghost" onClick={() => del(c.id)} className="rounded-full">
+                  <Trash2 className="w-4 h-4 text-destructive"/>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      <Dialog open={!!editing} onOpenChange={() => setEditing(null)}>
+        <DialogContent className="max-w-md radius-lg flex flex-col p-6 text-left">
+          <DialogHeader>
+            <DialogTitle className="font-display text-lg font-bold">{editing?.id ? 'Edit' : 'Add'} Category</DialogTitle>
+          </DialogHeader>
+          {editing && (
+            <form onSubmit={save} className="space-y-4 mt-4">
+              <div>
+                <Label>Category Name *</Label>
+                <Input required value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. Office Stationery"/>
+              </div>
+              <div>
+                <Label>Minimum Order Value (₹, optional)</Label>
+                <Input type="number" value={editing.min_order_value || ''} onChange={e => setEditing({ ...editing, min_order_value: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. 500 (blank for no min value)"/>
+              </div>
+              <div className="flex gap-2 pt-4">
                 <Button type="submit" className="flex-1 rounded-full">Save</Button>
                 <Button type="button" variant="outline" onClick={() => setEditing(null)} className="rounded-full">Cancel</Button>
               </div>
@@ -2754,7 +2980,38 @@ function AdminOrderDetail({ orderId }) {
           <h1 className="font-display text-3xl font-extrabold">Order #{order.order_number}</h1>
           <p className="text-xs text-muted-foreground">Placed on {new Date(order.placed_at).toLocaleString('en-IN')}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {order.zoho_invoice_id && (
+            <Button
+              onClick={() => {
+                const token = localStorage.getItem('token')
+                const link = document.createElement('a')
+                link.href = `/api/zoho/invoice/${order.zoho_invoice_id}`
+                link.setAttribute('download', `invoice-${order.order_number}.pdf`)
+                link.click()
+              }}
+              variant="outline"
+              className="rounded-full text-xs gap-1.5"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              Zoho Invoice
+            </Button>
+          )}
+          {order.zoho_challan_id && (
+            <Button
+              onClick={() => {
+                const link = document.createElement('a')
+                link.href = `/api/zoho/challan/${order.zoho_challan_id}`
+                link.setAttribute('download', `challan-${order.order_number}.pdf`)
+                link.click()
+              }}
+              variant="outline"
+              className="rounded-full text-xs gap-1.5"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              Delivery Challan
+            </Button>
+          )}
           <Button onClick={handlePrint} variant="outline" className="rounded-full">
             Print Invoice
           </Button>

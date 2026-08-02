@@ -61,7 +61,7 @@ export function CheckoutView() {
       .catch(() => {})
 
     if (user) {
-      setAddress(a => ({ ...a, full_name: user.full_name || '', phone: user.phone || '' }))
+      setAddress(a => ({ ...a, full_name: user.full_name || '', phone: user.phone || '', gst: user.gst_number || '' }))
 
       // Fetch saved addresses
       fetch('/api/addresses', {
@@ -82,7 +82,7 @@ export function CheckoutView() {
                 city: defAddr.city || '',
                 state: defAddr.state || '',
                 pincode: defAddr.pincode || '',
-                gst: ''
+                gst: defAddr.gst || user.gst_number || ''
               })
             }
           }
@@ -141,7 +141,7 @@ export function CheckoutView() {
       city: addr.city || '',
       state: addr.state || '',
       pincode: addr.pincode || '',
-      gst: ''
+      gst: addr.gst || ''
     })
     setShowAddressPicker(false)
   }

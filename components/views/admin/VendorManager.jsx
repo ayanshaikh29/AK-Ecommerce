@@ -160,7 +160,7 @@ export function VendorManager() {
       })
       if (res.ok) {
         const data = await res.json()
-        toast.success('Vendor partner created successfully!')
+        toast.success('Zonal Admin created successfully!')
         setName('')
         setEmail('')
         setPassword('')
@@ -171,7 +171,7 @@ export function VendorManager() {
         fetchVendors()
       } else {
         const err = await res.json()
-        toast.error(err.error || err.message || 'Failed to create vendor partner')
+        toast.error(err.error || err.message || 'Failed to create Zonal Admin')
       }
     } catch (e) {
       toast.error(e.message)
@@ -186,10 +186,10 @@ export function VendorManager() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h3 className="font-display font-extrabold text-2xl text-foreground flex items-center gap-2">
-            <Truck className="w-6 h-6 text-accent" /> Vendor & Delivery Partners
+            <Truck className="w-6 h-6 text-accent" /> Zonal Admins
           </h3>
           <p className="text-xs text-muted-foreground mt-1">
-            Manage fulfillment vendor logins and logistics partner accounts.
+            Manage zonal admin logins and regional coordinator accounts.
           </p>
         </div>
 
@@ -201,19 +201,19 @@ export function VendorManager() {
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <Button size="sm" className="rounded-xl gold-gradient text-primary font-bold shadow-soft">
-                <Plus className="w-4 h-4 mr-1.5" /> Create Vendor Partner
+                <Plus className="w-4 h-4 mr-1.5" /> Create Zonal Admin
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-md rounded-2xl">
               <DialogHeader>
                 <DialogTitle className="font-display font-extrabold text-xl text-foreground flex items-center gap-2">
-                  <UserCheck className="w-5 h-5 text-accent" /> Register Vendor Partner Account
+                  <UserCheck className="w-5 h-5 text-accent" /> Register Zonal Admin Account
                 </DialogTitle>
               </DialogHeader>
 
               <form onSubmit={handleSubmit} className="space-y-4 pt-2">
                 <div>
-                  <label className="text-xs font-semibold mb-1 block">Vendor Company / Partner Name *</label>
+                  <label className="text-xs font-semibold mb-1 block">Zonal Admin Name *</label>
                   <Input
                     required
                     value={name}
@@ -232,6 +232,7 @@ export function VendorManager() {
                     onChange={e => setEmail(e.target.value)}
                     placeholder="vendor@logistics.com"
                     className="h-10 rounded-xl"
+                    autoComplete="new-password"
                   />
                 </div>
 
@@ -253,6 +254,7 @@ export function VendorManager() {
                     onChange={e => setPassword(e.target.value)}
                     placeholder="Min 8 characters"
                     className="h-10 rounded-xl"
+                    autoComplete="new-password"
                   />
                   {password && password.length < 8 && (
                     <p className="text-[11px] text-red-500 mt-1">Password must be at least 8 characters</p>
@@ -266,6 +268,7 @@ export function VendorManager() {
                     onChange={e => setConfirmPassword(e.target.value)}
                     placeholder="Re-enter password"
                     className="h-10 rounded-xl"
+                    autoComplete="new-password"
                   />
                   {confirmPassword && password !== confirmPassword && (
                     <p className="text-[11px] text-red-500 mt-1">Passwords do not match</p>
@@ -273,7 +276,7 @@ export function VendorManager() {
                 </div>
 
                 <Button type="submit" disabled={submitting} className="w-full h-11 rounded-full gold-gradient text-primary font-bold text-xs mt-2">
-                  {submitting ? 'Registering...' : 'Create Vendor Partner Account'}
+                  {submitting ? 'Registering...' : 'Create Zonal Admin Account'}
                 </Button>
               </form>
             </DialogContent>
@@ -283,13 +286,13 @@ export function VendorManager() {
 
       {/* Vendors Table / List */}
       {loading ? (
-        <div className="py-16 text-center text-xs text-muted-foreground">Loading vendor partners...</div>
+        <div className="py-16 text-center text-xs text-muted-foreground">Loading Zonal Admins...</div>
       ) : vendors.length === 0 ? (
         <Card className="radius-xl shadow-soft text-center py-12">
           <CardContent>
             <Truck className="w-12 h-12 text-muted-foreground/40 mx-auto mb-3" />
-            <p className="text-sm font-bold text-foreground">No Vendor Partners Registered</p>
-            <p className="text-xs text-muted-foreground mt-1">Click "Create Vendor Partner" to register a logistics fulfillment account.</p>
+            <p className="text-sm font-bold text-foreground">No Zonal Admins Registered</p>
+            <p className="text-xs text-muted-foreground mt-1">Click "Create Zonal Admin" to register a zonal admin account.</p>
           </CardContent>
         </Card>
       ) : (
@@ -303,7 +306,7 @@ export function VendorManager() {
                   </h4>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 font-bold mt-1">
-                      Vendor Partner
+                      Zonal Admin
                     </Badge>
                     {v.is_enabled ? (
                       <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold mt-1">

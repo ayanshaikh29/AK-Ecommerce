@@ -49,6 +49,7 @@ export function CustomerPricingManager() {
   // Catalog requests & customer logins state
   const [catalogRequests, setCatalogRequests] = useState([])
   const [customerLogins, setCustomerLogins] = useState([])
+  const [productRequests, setProductRequests] = useState([])
   const [reqLoading, setReqLoading] = useState(false)
 
   // Bulk action state
@@ -100,6 +101,17 @@ export function CustomerPricingManager() {
     if (!newCustForm.full_name || !newCustForm.email || !newCustForm.password) {
       toast.error('Full Name, Email, and Password are required')
       return
+    }
+    if (newCustForm.role === 'customer') {
+      const activeVendors = (vendors || []).filter(v => v.is_enabled !== false)
+      if (activeVendors.length === 0) {
+        toast.error('Please create a Zonal Admin account first before adding customers')
+        return
+      }
+      if (!newCustForm.assigned_vendor_id) {
+        toast.error('Please select a Zonal Admin to assign to the B2B customer')
+        return
+      }
     }
     if (newCustForm.password.length < 8) {
       toast.error('Password must be at least 8 characters')
@@ -222,9 +234,10 @@ export function CustomerPricingManager() {
     setReqLoading(true)
     const token = localStorage.getItem('token')
     try {
-      const [reqRes, loginRes] = await Promise.all([
+      const [reqRes, loginRes, prodReqRes] = await Promise.all([
         fetch('/api/admin/catalog-requests', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/admin/customer-logins', { headers: { Authorization: `Bearer ${token}` } })
+        fetch('/api/admin/customer-logins', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/product-requests', { headers: { Authorization: `Bearer ${token}` } })
       ])
       if (reqRes.ok) {
         const rData = await reqRes.json()
@@ -234,10 +247,35 @@ export function CustomerPricingManager() {
         const lData = await loginRes.json()
         setCustomerLogins(lData || [])
       }
+      if (prodReqRes.ok) {
+        const prData = await prodReqRes.json()
+        setProductRequests(prData || [])
+      }
     } catch (e) {
       console.error(e)
     } finally {
       setReqLoading(false)
+    }
+  }
+
+  const handleFulfillRequest = async (reqId) => {
+    try {
+      const res = await fetch(`/api/product-requests/${reqId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ status: 'fulfilled' })
+      })
+      if (res.ok) {
+        toast.success('Product request marked as fulfilled!')
+        fetchRequestsAndLogins()
+      } else {
+        toast.error('Failed to update product request')
+      }
+    } catch (e) {
+      toast.error(e.message)
     }
   }
 
@@ -589,6 +627,17 @@ export function CustomerPricingManager() {
               )}
             </button>
             <button
+              onClick={() => setActiveTab('product_requests')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition relative ${activeTab === 'product_requests' ? 'gold-gradient text-primary shadow-soft' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Product Requests
+              {productRequests.filter(r => r.status === 'pending').length > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-amber-500 text-white font-extrabold rounded-full animate-pulse">
+                  {productRequests.filter(r => r.status === 'pending').length}
+                </span>
+              )}
+            </button>
+            <button
               onClick={() => setActiveTab('logins')}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeTab === 'logins' ? 'gold-gradient text-primary shadow-soft' : 'text-muted-foreground hover:text-foreground'}`}
             >
@@ -697,6 +746,59 @@ export function CustomerPricingManager() {
                           </Badge>
                         )}
                       </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* TAB: PRODUCT REQUESTS */}
+      {activeTab === 'product_requests' && (
+        <Card className="radius-xl shadow-soft">
+          <CardContent className="p-6">
+            <h2 className="font-display text-lg font-bold mb-4">Customer Product Requests</h2>
+            {reqLoading ? (
+              <div className="py-8 text-center text-xs text-muted-foreground">Loading product requests...</div>
+            ) : productRequests.length === 0 ? (
+              <div className="py-12 text-center text-xs text-muted-foreground">No product requests found.</div>
+            ) : (
+              <div className="space-y-3">
+                {productRequests.map(req => {
+                  const reqTime = req.created_at ? new Date(req.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+                  const customer = req.users || {}
+                  return (
+                    <div key={req.id} className="p-5 border rounded-2xl bg-secondary/15 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-bold text-foreground">{req.product_name}</span>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            req.status === 'fulfilled' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {req.status?.toUpperCase()}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          Quantity: <span className="font-semibold text-foreground">{req.quantity_needed}</span>
+                          {req.description && ` | Specs: "${req.description}"`}
+                        </p>
+                        <div className="text-[10px] text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span>Requested By: <strong className="text-foreground">{customer.full_name || 'Guest'}</strong> ({customer.email})</span>
+                          <span>•</span>
+                          <span>Time: {reqTime}</span>
+                        </div>
+                      </div>
+                      {req.status === 'pending' && (
+                        <Button 
+                          onClick={() => handleFulfillRequest(req.id)}
+                          size="sm" 
+                          className="rounded-full text-xs h-9 px-4 bg-emerald-600 hover:bg-emerald-700 text-white animate-fade-in"
+                        >
+                          Mark Fulfilled
+                        </Button>
+                      )}
                     </div>
                   )
                 })}
@@ -1053,8 +1155,8 @@ export function CustomerPricingManager() {
                 onChange={e => setNewCustForm(prev => ({ ...prev, role: e.target.value }))}
                 className="w-full h-10 rounded-xl text-xs bg-card border border-border px-3 font-bold text-foreground focus:ring-accent"
               >
-                <option value="customer">👥 B2B Customer Account</option>
-                <option value="vendor">🚚 Vendor / Logistics Partner Account</option>
+                <option value="customer">👥 Branch Manager</option>
+                <option value="vendor">🚚 Zonal Admin Account</option>
               </select>
             </div>
             <div>
@@ -1089,19 +1191,40 @@ export function CustomerPricingManager() {
             </div>
             {newCustForm.role === 'customer' && (
               <div>
-                <label className="text-xs font-bold block mb-1">Assign Vendor Partner (Optional)</label>
-                <select
-                  value={newCustForm.assigned_vendor_id || ''}
-                  onChange={e => setNewCustForm(prev => ({ ...prev, assigned_vendor_id: e.target.value }))}
-                  className="w-full h-10 rounded-xl text-xs bg-card border border-border px-3 font-semibold text-foreground focus:ring-accent"
-                >
-                  <option value="">Unassigned</option>
-                  {(vendors || []).filter(v => v.is_enabled !== false).map(v => (
-                    <option key={v.id} value={v.id}>
-                      🚚 {v.name} ({v.email})
-                    </option>
-                  ))}
-                </select>
+                <label className="text-xs font-bold block mb-1">Assign Zonal Admin *</label>
+                {(() => {
+                  const activeVendors = (vendors || []).filter(v => v.is_enabled !== false)
+                  if (activeVendors.length === 0) {
+                    return (
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-600 flex flex-col gap-2">
+                        <p>Please create a Zonal Admin account first before adding customers.</p>
+                        <Button 
+                          type="button" 
+                          onClick={() => setNewCustForm(prev => ({ ...prev, role: 'vendor' }))}
+                          size="sm" 
+                          variant="outline" 
+                          className="w-full text-xs font-bold mt-1 h-8 rounded-lg"
+                        >
+                          Create Zonal Admin
+                        </Button>
+                      </div>
+                    )
+                  }
+                  return (
+                    <select
+                      value={newCustForm.assigned_vendor_id || ''}
+                      onChange={e => setNewCustForm(prev => ({ ...prev, assigned_vendor_id: e.target.value }))}
+                      className="w-full h-10 rounded-xl text-xs bg-card border border-border px-3 font-semibold text-foreground focus:ring-accent"
+                    >
+                      <option value="">-- Select Zonal Admin --</option>
+                      {activeVendors.map(v => (
+                        <option key={v.id} value={v.id}>
+                          🚚 {v.name} ({v.email})
+                        </option>
+                      ))}
+                    </select>
+                  )
+                })()}
               </div>
             )}
             <div>
@@ -1481,10 +1604,10 @@ export function CustomerPricingManager() {
                   {/* Vendor Assignment Panel (For Customers Only) */}
                   {profileData.user.role === 'customer' && (
                     <div className="space-y-3">
-                      <h3 className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Logistics Fulfillment Vendor</h3>
+                      <h3 className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Zonal Admin Assignment</h3>
                       <div className="bg-secondary/40 p-4 rounded-2xl border space-y-3 text-xs">
                         <div>
-                          <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Assigned Vendor Partner</label>
+                          <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Assigned Zonal Admin</label>
                           <select
                             value={profileData.user.assigned_vendor_id || ''}
                             onChange={async (e) => {

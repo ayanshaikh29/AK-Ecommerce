@@ -46,7 +46,7 @@ export default function VendorLoginPage() {
       document.cookie = `user_role=${data.user.role}; path=/; max-age=31536000`
       setUser(data.user)
 
-      toast.success(`Welcome back, ${data.user.full_name || 'Vendor Partner'}`)
+      toast.success(`Welcome back, ${data.user.full_name || 'Zonal Admin'}`)
       router.push('/vendor')
     } catch (err) {
       toast.error(err.message)

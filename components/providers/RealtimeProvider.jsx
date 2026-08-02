@@ -196,6 +196,24 @@ export function RealtimeProvider({ children }) {
       }
     )
 
+    // 5. Product Requests realtime changes
+    channel.on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'product_requests' },
+      (payload) => {
+        const { new: newRow } = payload
+        setCustomerSequence(s => s + 1)
+        setLastEvent({ table: 'product_requests', eventType: 'INSERT', newRow, timestamp: Date.now() })
+
+        if (user?.role === 'admin') {
+          playAlertSound()
+          toast.success('New Product Request!', {
+            description: `Customer requested: "${newRow.product_name}" (Qty: ${newRow.quantity_needed})`
+          })
+        }
+      }
+    )
+
     // 5. Notifications table realtime changes
     channel.on(
       'postgres_changes',
