@@ -2893,6 +2893,13 @@ function AdminOrderDetail({ orderId }) {
   }
 
   const handleDownloadInvoice = () => {
+    if (order.zoho_invoice_id) {
+      const link = document.createElement('a')
+      link.href = `/api/zoho/invoice/${order.zoho_invoice_id}`
+      link.setAttribute('download', `invoice-${order.order_number}.pdf`)
+      link.click()
+      return
+    }
     import('@/lib/invoice').then(({ downloadInvoice }) => {
       downloadInvoice(order)
     }).catch(err => {

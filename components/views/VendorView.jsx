@@ -299,24 +299,20 @@ export function VendorView() {
             </div>
             <div className="flex gap-3 flex-wrap">
               <Button 
-                onClick={() => import('@/lib/invoice').then(({ downloadInvoice }) => downloadInvoice(selectedOrder))} 
-                className="rounded-full bg-slate-900 text-white font-bold text-xs h-10 px-6 hover:bg-slate-800 shadow-sm"
-              >
-                <Download className="w-4 h-4 mr-2" /> Download Invoice
-              </Button>
-              {selectedOrder.zoho_challan_id && (
-                <Button
-                  onClick={() => {
+                onClick={() => {
+                  if (selectedOrder.zoho_challan_id) {
                     const link = document.createElement('a')
                     link.href = `/api/zoho/challan/${selectedOrder.zoho_challan_id}`
                     link.setAttribute('download', `delivery-challan-${selectedOrder.order_number}.pdf`)
                     link.click()
-                  }}
-                  className="rounded-full bg-blue-600 text-white font-bold text-xs h-10 px-6 hover:bg-blue-700 shadow-sm"
-                >
-                  <Download className="w-4 h-4 mr-2" /> Delivery Challan (Zoho)
-                </Button>
-              )}
+                    return
+                  }
+                  import('@/lib/invoice').then(({ downloadInvoice }) => downloadInvoice(selectedOrder, true))
+                }} 
+                className="rounded-full bg-slate-900 text-white font-bold text-xs h-10 px-6 hover:bg-slate-800 shadow-sm"
+              >
+                <Download className="w-4 h-4 mr-2" /> Download Invoice
+              </Button>
             </div>
           </div>
 
@@ -340,9 +336,8 @@ export function VendorView() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-bold text-slate-800 truncate text-sm">{it.product_name_snapshot}</p>
-                          <p className="text-xs text-slate-400 mt-1">Qty {it.quantity} · Unit Price {formatINR(it.price_snapshot)}</p>
+                          <p className="text-xs text-slate-400 mt-1">Quantity: <span className="font-semibold text-slate-700">{it.quantity}</span></p>
                         </div>
-                        <span className="font-black text-slate-800 text-sm">{formatINR(it.price_snapshot * it.quantity)}</span>
                       </div>
                     ))}
                   </div>

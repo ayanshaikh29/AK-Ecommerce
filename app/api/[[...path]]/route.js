@@ -3196,7 +3196,7 @@ Current Conversation History:\n` +
     if (method === 'GET') {
       // NOTE: vendor_accepted & vendor_accepted_at columns do NOT exist in DB.
       // Derive vendor_accepted from status field instead.
-      let query = supabase.from('orders').select('id, order_number, status, total, payment_method, placed_at, updated_at, addresses(*), order_items(id, product_name_snapshot, quantity)')
+      let query = supabase.from('orders').select('id, order_number, status, total, payment_method, placed_at, updated_at, addresses(*), order_items(id, product_name_snapshot, quantity, price_snapshot, hsn_code)')
       if (user.role !== 'admin' && vendor) {
         query = query.eq('assigned_vendor_id', vendor.id)
       }
