@@ -35,8 +35,9 @@ async function run() {
     await client.connect();
     console.log('Connected successfully!');
     
-    console.log('Running migration...');
-    const sql = `ALTER TABLE public.users ADD COLUMN IF NOT EXISTS assigned_vendor_id UUID REFERENCES public.vendors(id) ON DELETE SET NULL;`;
+    console.log('Running migration from schema-profile-fields.sql...');
+    const sqlPath = path.join(__dirname, '..', 'schema-profile-fields.sql');
+    const sql = fs.readFileSync(sqlPath, 'utf8');
     await client.query(sql);
     console.log('Migration ran successfully!');
     
@@ -44,14 +45,11 @@ async function run() {
     const checkSql = `
       SELECT column_name, data_type 
       FROM information_schema.columns 
-      WHERE table_name = 'users' AND column_name = 'assigned_vendor_id';
+      WHERE table_name = 'users';
     `;
     const res = await client.query(checkSql);
-    if (res.rows.length > 0) {
-      console.log('Verification Success: assigned_vendor_id exists on users table!');
-    } else {
-      console.error('Verification Failure: column was not found after migration.');
-    }
+    const cols = res.rows.map(r => r.column_name);
+    console.log('Verification: columns currently on users table:', cols);
   } catch (err) {
     console.error('Migration failed:', err.message);
   } finally {

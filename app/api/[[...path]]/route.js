@@ -98,7 +98,9 @@ function injectMetadata(body) {
 
 function hashPw(pw) { return crypto.createHmac('sha256', SECRET).update(pw).digest('hex') }
 function sign(payload) {
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
+  // Add a schema version string to force-invalidate older tokens
+  const payloadWithVersion = { ...payload, _v: 'v2_gst' }
+  const body = Buffer.from(JSON.stringify(payloadWithVersion)).toString('base64url')
   const sig = crypto.createHmac('sha256', SECRET).update(body).digest('base64url')
   return `${body}.${sig}`
 }
@@ -108,7 +110,14 @@ function verify(token) {
   if (!body || !sig) return null
   const expected = crypto.createHmac('sha256', SECRET).update(body).digest('base64url')
   if (expected !== sig) return null
-  try { return JSON.parse(Buffer.from(body, 'base64url').toString()) } catch { return null }
+  try {
+    const parsed = JSON.parse(Buffer.from(body, 'base64url').toString())
+    // Enforce token version invalidation
+    if (parsed._v !== 'v2_gst') return null
+    return parsed
+  } catch {
+    return null
+  }
 }
 async function getUser(req) {
   const auth = req.headers.get('authorization') || ''
@@ -129,13 +138,10 @@ async function getUser(req) {
     }
 
     if (dbUser) {
-      // DB user is the source of truth
       parsed.id = dbUser.id
       parsed.role = dbUser.role
       parsed.full_name = dbUser.full_name
       parsed.phone = dbUser.phone || ''
-    } else {
-      console.warn(`[getUser] No DB row found for email=${parsed.email}. Using token id=${parsed.id}`)
     }
   }
   return parsed
@@ -464,7 +470,7 @@ async function route(req, method) {
       if (pErr) console.error('Profile creation failed:', pErr.message)
 
       const token = sign({ id: newUuid, email: u.email, role: u.role, name: u.full_name, gst_number: u.gst_number || '' })
-      return json({ token, user: { id: newUuid, email: u.email, full_name: u.full_name, role: u.role, phone: u.phone, gst_number: u.gst_number || null } })
+      return json({ token, user: { id: newUuid, email: u.email, full_name: u.full_name, role: u.role, phone: u.phone, gst_number: u.gst_number || null, company_name: u.company_name || null, address: u.address || null, city: u.city || null, state: u.state || null, pincode: u.pincode || null } })
     }
     if (p[1] === 'login' && method === 'POST') {
       const { email, password } = body
@@ -541,13 +547,19 @@ async function route(req, method) {
         }
       }
 
+      console.log('[DEBUG LOGIN] token payload being signed:', JSON.stringify({ id: u.id, email: u.email, role: u.role, name: u.full_name, gst_number: u.gst_number || '' }))
       const token = sign({ id: u.id, email: u.email, role: u.role, name: u.full_name, gst_number: u.gst_number || '' })
-      return json({ token, user: { id: u.id, email: u.email, full_name: u.full_name, role: u.role, phone: u.phone, gst_number: u.gst_number || null } })
+      return json({ token, user: { id: u.id, email: u.email, full_name: u.full_name, role: u.role, phone: u.phone, gst_number: u.gst_number || null, company_name: u.company_name || null, address: u.address || null, city: u.city || null, state: u.state || null, pincode: u.pincode || null } })
     }
 
     if (p[1] === 'me' && method === 'GET') {
       if (!user) return err('Unauthorized', 401)
-      const { data: u } = await supabase.from('users').select('id, email, full_name, phone, role, gst_number').eq('id', user.id).maybeSingle()
+      const { data: u, error: uErr } = await supabase.from('users').select('id, email, full_name, phone, role, gst_number, company_name, address, city, state, pincode').eq('id', user.id).maybeSingle()
+      if (uErr) {
+        console.error('[ME error]:', uErr.message)
+        return err('Unable to load user profile. Please contact the administrator if this problem persists.', 500)
+      }
+      console.log('[DEBUG ME] decoded token payload:', JSON.stringify({ ...user, password: undefined }), '| DB role lookup ->', JSON.stringify(u))
       return json({ user: u })
     }
     if (p[1] === 'forgot-password' && method === 'POST') {
@@ -864,23 +876,81 @@ async function route(req, method) {
 
   if (p[0] === 'profile' && method === 'PUT') {
     if (!user) return err('Unauthorized', 401)
-    const { full_name, phone, email, gst_number } = body
-    if (!email || !full_name) return err('Email and Name are required')
+    const { full_name, phone, email, gst_number, company_name, address, city, state, pincode } = body
     
-    const { data: emailExists } = await supabase.from('users').select('id').eq('email', email).neq('id', user.id).maybeSingle()
+    // Validation
+    if (!full_name || !full_name.trim()) return err('Full Name is required', 400)
+    if (!email || !email.trim()) return err('Email is required', 400)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email.trim())) return err('Please enter a valid email address', 400)
+    
+    if (pincode && pincode.trim()) {
+      if (!/^\d{6}$/.test(pincode.trim())) {
+        return err('Pincode must be exactly 6 digits', 400)
+      }
+    }
+    
+    if (gst_number && gst_number.trim()) {
+      const gst = gst_number.trim().toUpperCase()
+      if (gst.length !== 15) {
+        return err('GST Number must be exactly 15 characters', 400)
+      }
+      const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/
+      if (!gstRegex.test(gst)) {
+        return err('Invalid GST Number format (e.g. 27AAAAA1111A1Z1)', 400)
+      }
+    }
+    
+    const { data: emailExists, error: emailCheckErr } = await supabase.from('users').select('id').eq('email', email.trim().toLowerCase()).neq('id', user.id).maybeSingle()
+    if (emailCheckErr) {
+      console.error('Email check database error:', emailCheckErr)
+      return err('Unable to save profile. Please contact the administrator if this problem persists.', 500)
+    }
     if (emailExists) return err('Email is already in use by another account', 409)
 
-    const userUpdatePayload = { full_name, phone, email }
-    if (gst_number !== undefined) userUpdatePayload.gst_number = gst_number || null
+    const userUpdatePayload = {
+      full_name: full_name.trim(),
+      email: email.trim().toLowerCase(),
+      phone: phone ? phone.trim() : null,
+      gst_number: gst_number ? gst_number.trim().toUpperCase() : null,
+      company_name: company_name ? company_name.trim() : null,
+      address: address ? address.trim() : null,
+      city: city ? city.trim() : null,
+      state: state ? state.trim() : null,
+      pincode: pincode ? pincode.trim() : null
+    }
 
     const { error: uErr } = await supabase.from('users').update(userUpdatePayload).eq('id', user.id)
-    if (uErr) return err('Profile update failed (users): ' + uErr.message, 500)
+    if (uErr) {
+      console.error('User update database error:', uErr)
+      return err('Unable to save profile. Please contact the administrator if this problem persists.', 500)
+    }
     
-    const { error: pErr } = await supabase.from('profiles').update({ full_name, phone }).eq('id', user.id)
+    const { error: pErr } = await supabase.from('profiles').update({ full_name: full_name.trim(), phone: phone ? phone.trim() : '' }).eq('id', user.id)
     if (pErr) console.error('Profile update warning (profiles):', pErr.message)
 
-    const token = sign({ id: user.id, email, role: user.role, name: full_name, gst_number: gst_number || user.gst_number || '' })
-    return json({ token, user: { id: user.id, email, full_name, role: user.role, phone, gst_number: gst_number || null } })
+    const updatedUser = {
+      id: user.id,
+      email: userUpdatePayload.email,
+      full_name: userUpdatePayload.full_name,
+      role: user.role,
+      phone: userUpdatePayload.phone,
+      gst_number: userUpdatePayload.gst_number,
+      company_name: userUpdatePayload.company_name,
+      address: userUpdatePayload.address,
+      city: userUpdatePayload.city,
+      state: userUpdatePayload.state,
+      pincode: userUpdatePayload.pincode
+    }
+
+    const token = sign({
+      id: user.id,
+      email: updatedUser.email,
+      role: user.role,
+      name: updatedUser.full_name,
+      gst_number: updatedUser.gst_number || ''
+    })
+    return json({ token, user: updatedUser })
   }
 
   if (p[0] === 'wishlist') {

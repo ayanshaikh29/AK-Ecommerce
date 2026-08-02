@@ -120,7 +120,8 @@ function AppContentInner({ children }) {
           product_name_snapshot: product.name, 
           price_snapshot: product.price, 
           quantity: qty, 
-          image: product.images?.[0] || product.image 
+          image: product.images?.[0] || product.image,
+          category_id: product.category_id
         }]
       }
       broadcastCartUpdate(nx)

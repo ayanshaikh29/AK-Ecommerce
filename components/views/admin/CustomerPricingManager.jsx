@@ -620,20 +620,9 @@ export function CustomerPricingManager() {
               className={`px-4 py-2 rounded-xl text-xs font-bold transition relative ${activeTab === 'requests' ? 'gold-gradient text-primary shadow-soft' : 'text-muted-foreground hover:text-foreground'}`}
             >
               Access Requests
-              {pendingReqsCount > 0 && (
+              {(pendingReqsCount + productRequests.filter(r => r.status === 'pending').length) > 0 && (
                 <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-amber-500 text-white font-extrabold rounded-full animate-pulse">
-                  {pendingReqsCount}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('product_requests')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition relative ${activeTab === 'product_requests' ? 'gold-gradient text-primary shadow-soft' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              Product Requests
-              {productRequests.filter(r => r.status === 'pending').length > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-amber-500 text-white font-extrabold rounded-full animate-pulse">
-                  {productRequests.filter(r => r.status === 'pending').length}
+                  {pendingReqsCount + productRequests.filter(r => r.status === 'pending').length}
                 </span>
               )}
             </button>
@@ -647,165 +636,166 @@ export function CustomerPricingManager() {
         </div>
       </div>
 
-      {/* TAB 2: ACCESS REQUESTS */}
+      {/* TAB 2: ACCESS & PRODUCT REQUESTS */}
       {activeTab === 'requests' && (
-        <Card className="radius-xl shadow-soft">
-          <CardContent className="p-6">
-            <h2 className="font-display text-lg font-bold mb-4">Pending Catalog Access Requests</h2>
-            {reqLoading ? (
-              <div className="py-8 text-center text-xs text-muted-foreground">Loading requests...</div>
-            ) : catalogRequests.length === 0 ? (
-              <div className="py-12 text-center text-xs text-muted-foreground">No catalog access requests found.</div>
-            ) : (
-              <div className="space-y-3">
-                {catalogRequests.map(req => {
-                  const reqTime = req.created_at ? new Date(req.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
-                  return (
-                    <div key={req.id} className="p-5 border rounded-2xl bg-secondary/15 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <p className="font-bold text-sm text-foreground">{req.customer_name || req.name || 'Enterprise Client'}</p>
-                          <span className="text-[10px] text-slate-400 font-mono font-bold bg-slate-100 px-2 py-0.5 rounded">
-                            🏢 {req.company || 'AK Corporate'}
-                          </span>
-                          <Badge className={`text-[9px] font-bold uppercase rounded-full ${
-                            req.status === 'pending' ? 'bg-amber-500/10 text-amber-600 border border-amber-500/25' : 
-                            req.status === 'approved' ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/25' : 
-                            'bg-rose-500/10 text-rose-600 border border-rose-500/25'
-                          }`}>
-                            {req.status}
-                          </Badge>
+        <div className="space-y-6 animate-fade-in">
+          {/* Card 1: Catalog Access Requests */}
+          <Card className="radius-xl shadow-soft">
+            <CardContent className="p-6">
+              <h2 className="font-display text-lg font-bold mb-4">Pending Catalog Access Requests</h2>
+              {reqLoading ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">Loading requests...</div>
+              ) : catalogRequests.length === 0 ? (
+                <div className="py-12 text-center text-xs text-muted-foreground">No catalog access requests found.</div>
+              ) : (
+                <div className="space-y-3">
+                  {catalogRequests.map(req => {
+                    const reqTime = req.created_at ? new Date(req.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+                    return (
+                      <div key={req.id} className="p-5 border rounded-2xl bg-secondary/15 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <p className="font-bold text-sm text-foreground">{req.customer_name || req.name || 'Enterprise Client'}</p>
+                            <span className="text-[10px] text-slate-400 font-mono font-bold bg-slate-100 px-2 py-0.5 rounded">
+                              🏢 {req.company || 'AK Corporate'}
+                            </span>
+                            <Badge className={`text-[9px] font-bold uppercase rounded-full ${
+                              req.status === 'pending' ? 'bg-amber-500/10 text-amber-600 border border-amber-500/25' : 
+                              req.status === 'approved' ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/25' : 
+                              'bg-rose-500/10 text-rose-600 border border-rose-500/25'
+                            }`}>
+                              {req.status}
+                            </Badge>
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-slate-500 font-medium">
+                            <span>📧 {req.email || 'No email'}</span>
+                            <span>📞 {req.phone || 'No phone'}</span>
+                            <span>🕒 {reqTime}</span>
+                            <span className="font-bold text-[#F4B942]">📦 Assigned: {req.assigned_products_count || 0} products</span>
+                          </div>
+                          {(req.message || req.note) && (
+                            <p className="text-xs text-slate-600 mt-1 bg-white p-2.5 rounded-xl border border-slate-100 leading-relaxed italic">
+                              "{req.message || req.note}"
+                            </p>
+                          )}
                         </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-[11px] text-slate-500 font-medium">
-                          <span>📧 {req.email || 'No email'}</span>
-                          <span>📞 {req.phone || 'No phone'}</span>
-                          <span>🕒 {reqTime}</span>
-                          <span className="font-bold text-[#F4B942]">📦 Assigned: {req.assigned_products_count || 0} products</span>
+
+                        <div className="flex flex-wrap items-center gap-2 shrink-0 w-full md:w-auto">
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => {
+                              setComingFromRequests(true)
+                              setSelectedCustomerId(req.customer_id)
+                              setActiveTab('pricing')
+                              setHighlightCustomerId(req.customer_id)
+                              
+                              // Remove highlight after 4 seconds
+                              setTimeout(() => {
+                                setHighlightCustomerId(null)
+                              }, 4000)
+
+                              // Focus search input after transitions complete
+                              setTimeout(() => {
+                                const selectorCard = document.getElementById('b2b-customer-selector-card')
+                                if (selectorCard) {
+                                  selectorCard.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                                }
+                                const searchInput = document.getElementById('b2b-pricing-search-input')
+                                if (searchInput) {
+                                  searchInput.focus()
+                                }
+                              }, 400)
+                            }}
+                            className="rounded-full font-bold h-9 text-xs border-[#F4B942] text-[#e0a634] hover:bg-[#F4B942]/10"
+                          >
+                            Assign Products
+                          </Button>
+
+                          {req.status === 'pending' ? (
+                            <>
+                              <Button 
+                                size="sm" 
+                                disabled={!req.assigned_products_count || req.assigned_products_count === 0}
+                                onClick={() => handleApproveRequest(req)} 
+                                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-full h-9 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Approve Access
+                              </Button>
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                onClick={() => handleRejectRequest(req)} 
+                                className="text-rose-600 border-rose-200 hover:bg-rose-50 font-bold text-xs rounded-full h-9"
+                              >
+                                Reject
+                              </Button>
+                            </>
+                          ) : (
+                            <Badge variant="outline" className="text-xs font-semibold rounded-full px-3 py-1">
+                              {req.status === 'approved' ? '✓ Approved' : '✕ Rejected'}
+                            </Badge>
+                          )}
                         </div>
-                        {(req.message || req.note) && (
-                          <p className="text-xs text-slate-600 mt-1 bg-white p-2.5 rounded-xl border border-slate-100 leading-relaxed italic">
-                            "{req.message || req.note}"
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Card 2: Product Requests */}
+          <Card className="radius-xl shadow-soft">
+            <CardContent className="p-6">
+              <h2 className="font-display text-lg font-bold mb-4">Customer Product Requests</h2>
+              {reqLoading ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">Loading product requests...</div>
+              ) : productRequests.length === 0 ? (
+                <div className="py-12 text-center text-xs text-muted-foreground">No product requests found.</div>
+              ) : (
+                <div className="space-y-3">
+                  {productRequests.map(req => {
+                    const reqTime = req.created_at ? new Date(req.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+                    const customer = req.users || {}
+                    return (
+                      <div key={req.id} className="p-5 border rounded-2xl bg-secondary/15 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-sm font-bold text-foreground">{req.product_name}</span>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                              req.status === 'fulfilled' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {req.status?.toUpperCase()}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mb-2">
+                            Quantity: <span className="font-semibold text-foreground">{req.quantity_needed}</span>
+                            {req.description && ` | Specs: "${req.description}"`}
                           </p>
+                          <div className="text-[10px] text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span>Requested By: <strong className="text-foreground">{customer.full_name || 'Guest'}</strong> ({customer.email})</span>
+                            <span>•</span>
+                            <span>Time: {reqTime}</span>
+                          </div>
+                        </div>
+                        {req.status === 'pending' && (
+                          <Button 
+                            onClick={() => handleFulfillRequest(req.id)}
+                            size="sm" 
+                            className="rounded-full text-xs h-9 px-4 bg-emerald-600 hover:bg-emerald-700 text-white animate-fade-in shrink-0 w-full md:w-auto text-center"
+                          >
+                            Mark Fulfilled
+                          </Button>
                         )}
                       </div>
-
-                      <div className="flex flex-wrap items-center gap-2 shrink-0 w-full md:w-auto">
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => {
-                            setComingFromRequests(true)
-                            setSelectedCustomerId(req.customer_id)
-                            setActiveTab('pricing')
-                            setHighlightCustomerId(req.customer_id)
-                            
-                            // Remove highlight after 4 seconds
-                            setTimeout(() => {
-                              setHighlightCustomerId(null)
-                            }, 4000)
-
-                            // Focus search input after transitions complete
-                            setTimeout(() => {
-                              const selectorCard = document.getElementById('b2b-customer-selector-card')
-                              if (selectorCard) {
-                                selectorCard.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                              }
-                              const searchInput = document.getElementById('b2b-pricing-search-input')
-                              if (searchInput) {
-                                searchInput.focus()
-                              }
-                            }, 400)
-                          }}
-                          className="rounded-full font-bold h-9 text-xs border-[#F4B942] text-[#e0a634] hover:bg-[#F4B942]/10"
-                        >
-                          Assign Products
-                        </Button>
-
-                        {req.status === 'pending' ? (
-                          <>
-                            <Button 
-                              size="sm" 
-                              disabled={!req.assigned_products_count || req.assigned_products_count === 0}
-                              onClick={() => handleApproveRequest(req)} 
-                              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-full h-9 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              Approve Access
-                            </Button>
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
-                              onClick={() => handleRejectRequest(req)} 
-                              className="text-rose-600 border-rose-200 hover:bg-rose-50 font-bold text-xs rounded-full h-9"
-                            >
-                              Reject
-                            </Button>
-                          </>
-                        ) : (
-                          <Badge variant="outline" className="text-xs font-semibold rounded-full px-3 py-1">
-                            {req.status === 'approved' ? '✓ Approved' : '✕ Rejected'}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* TAB: PRODUCT REQUESTS */}
-      {activeTab === 'product_requests' && (
-        <Card className="radius-xl shadow-soft">
-          <CardContent className="p-6">
-            <h2 className="font-display text-lg font-bold mb-4">Customer Product Requests</h2>
-            {reqLoading ? (
-              <div className="py-8 text-center text-xs text-muted-foreground">Loading product requests...</div>
-            ) : productRequests.length === 0 ? (
-              <div className="py-12 text-center text-xs text-muted-foreground">No product requests found.</div>
-            ) : (
-              <div className="space-y-3">
-                {productRequests.map(req => {
-                  const reqTime = req.created_at ? new Date(req.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
-                  const customer = req.users || {}
-                  return (
-                    <div key={req.id} className="p-5 border rounded-2xl bg-secondary/15 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm font-bold text-foreground">{req.product_name}</span>
-                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                            req.status === 'fulfilled' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {req.status?.toUpperCase()}
-                          </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mb-2">
-                          Quantity: <span className="font-semibold text-foreground">{req.quantity_needed}</span>
-                          {req.description && ` | Specs: "${req.description}"`}
-                        </p>
-                        <div className="text-[10px] text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
-                          <span>Requested By: <strong className="text-foreground">{customer.full_name || 'Guest'}</strong> ({customer.email})</span>
-                          <span>•</span>
-                          <span>Time: {reqTime}</span>
-                        </div>
-                      </div>
-                      {req.status === 'pending' && (
-                        <Button 
-                          onClick={() => handleFulfillRequest(req.id)}
-                          size="sm" 
-                          className="rounded-full text-xs h-9 px-4 bg-emerald-600 hover:bg-emerald-700 text-white animate-fade-in"
-                        >
-                          Mark Fulfilled
-                        </Button>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                    )
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* TAB 3: CLIENT LOGINS */}

@@ -16,7 +16,17 @@ export default function AccountPage() {
   const [mounted, setMounted] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState({ full_name: '', email: '', phone: '', gst_number: '' })
+  const [form, setForm] = useState({ 
+    full_name: '', 
+    email: '', 
+    phone: '', 
+    gst_number: '',
+    company_name: '',
+    address: '',
+    city: '',
+    state: '',
+    pincode: ''
+  })
 
   useEffect(() => {
     setMounted(true)
@@ -28,7 +38,12 @@ export default function AccountPage() {
         full_name: user.full_name || '',
         email: user.email || '',
         phone: user.phone || '',
-        gst_number: user.gst_number || ''
+        gst_number: user.gst_number || '',
+        company_name: user.company_name || '',
+        address: user.address || '',
+        city: user.city || '',
+        state: user.state || '',
+        pincode: user.pincode || ''
       })
     }
   }, [user, mounted])
@@ -126,7 +141,7 @@ export default function AccountPage() {
       <div className="grid md:grid-cols-2 gap-6 mb-8 slide-up" style={{ transitionDelay: '50ms' }}>
         <Card className="border border-border/40 bg-card/40 radius-lg">
           <CardContent className="p-5 space-y-4">
-            <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">Contact Details</h3>
+            <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">Contact & Company</h3>
             <div className="space-y-3">
               <div className="flex items-center gap-3 text-sm">
                 <Mail className="w-4.5 h-4.5 text-muted-foreground shrink-0" />
@@ -142,23 +157,42 @@ export default function AccountPage() {
                   <p className="font-medium text-foreground">{user.phone || 'Not provided'}</p>
                 </div>
               </div>
+              <div className="flex items-center gap-3 text-sm">
+                <User className="w-4.5 h-4.5 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Company Name</p>
+                  <p className="font-medium text-foreground">{user.company_name || 'Not provided'}</p>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
         
         <Card className="border border-border/40 bg-card/40 radius-lg">
           <CardContent className="p-5 space-y-4">
-            <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">B2B Membership</h3>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">GST Identification (GSTIN)</p>
-              <p className="font-medium text-foreground">
-                {user.gst_number ? (
-                  <span className="text-emerald-600 font-bold">{user.gst_number} (Registered)</span>
+            <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">B2B & Address Details</h3>
+            <div className="space-y-3 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground">GST Identification (GSTIN)</p>
+                <p className="font-medium text-foreground mt-0.5">
+                  {user.gst_number ? (
+                    <span className="text-emerald-600 font-bold">{user.gst_number} (Registered)</span>
+                  ) : (
+                    <span className="text-muted-foreground italic">Not registered</span>
+                  )}
+                </p>
+              </div>
+              <div className="border-t border-border/30 pt-2">
+                <p className="text-xs text-muted-foreground">Billing/Shipping Address</p>
+                {user.address ? (
+                  <div className="font-medium text-foreground mt-1 space-y-0.5">
+                    <p>{user.address}</p>
+                    <p>{[user.city, user.state].filter(Boolean).join(', ')}{user.pincode ? ` - ${user.pincode}` : ''}</p>
+                  </div>
                 ) : (
-                  'Not registered (Available during checkout)'
+                  <p className="text-muted-foreground italic mt-1">Address not provided</p>
                 )}
-              </p>
-              <p className="text-xs text-muted-foreground pt-2">All orders from this account automatically receive GST tax compliant invoices with tax credits.</p>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -195,51 +229,109 @@ export default function AccountPage() {
       {editOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 fade-in">
           <Card 
-            className="w-full max-w-md bg-card border shadow-dramatic radius-xl scale-in"
+            className="w-full max-w-lg bg-card border shadow-dramatic radius-xl scale-in"
             onClick={e => e.stopPropagation()}
           >
             <CardContent className="pt-6">
               <h3 className="font-display font-extrabold text-xl mb-4">Edit Profile</h3>
               <form onSubmit={handleEditProfile} className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="full_name">Full Name</Label>
-                  <Input 
-                    id="full_name"
-                    value={form.full_name} 
-                    onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} 
-                    placeholder="Enter your name" 
-                    required
-                  />
+                <div className="max-h-[60vh] overflow-y-auto px-1 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="full_name">Full Name</Label>
+                      <Input 
+                        id="full_name"
+                        value={form.full_name} 
+                        onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} 
+                        placeholder="Enter your name" 
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="email">Email Address</Label>
+                      <Input 
+                        id="email"
+                        type="email"
+                        value={form.email} 
+                        onChange={e => setForm(f => ({ ...f, email: e.target.value }))} 
+                        placeholder="Enter your email" 
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="phone">Phone Number</Label>
+                      <Input 
+                        id="phone"
+                        value={form.phone} 
+                        onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} 
+                        placeholder="Enter phone number" 
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="company_name">Company Name</Label>
+                      <Input 
+                        id="company_name"
+                        value={form.company_name} 
+                        onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))} 
+                        placeholder="Enter company name" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="gst_number">GST Number (optional)</Label>
+                    <Input 
+                      id="gst_number"
+                      value={form.gst_number} 
+                      onChange={e => setForm(f => ({ ...f, gst_number: e.target.value }))} 
+                      placeholder="Enter 15-digit GST number" 
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="address">Address</Label>
+                    <Input 
+                      id="address"
+                      value={form.address} 
+                      onChange={e => setForm(f => ({ ...f, address: e.target.value }))} 
+                      placeholder="Enter street address" 
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="city">City</Label>
+                      <Input 
+                        id="city"
+                        value={form.city} 
+                        onChange={e => setForm(f => ({ ...f, city: e.target.value }))} 
+                        placeholder="City" 
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="state">State</Label>
+                      <Input 
+                        id="state"
+                        value={form.state} 
+                        onChange={e => setForm(f => ({ ...f, state: e.target.value }))} 
+                        placeholder="State" 
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="pincode">Pincode</Label>
+                      <Input 
+                        id="pincode"
+                        value={form.pincode} 
+                        onChange={e => setForm(f => ({ ...f, pincode: e.target.value }))} 
+                        placeholder="6 digits" 
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="email">Email Address</Label>
-                  <Input 
-                    id="email"
-                    type="email"
-                    value={form.email} 
-                    onChange={e => setForm(f => ({ ...f, email: e.target.value }))} 
-                    placeholder="Enter your email" 
-                    required
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="phone">Phone Number</Label>
-                  <Input 
-                    id="phone"
-                    value={form.phone} 
-                    onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} 
-                    placeholder="Enter phone number" 
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="gst_number">GST Number (optional)</Label>
-                  <Input 
-                    id="gst_number"
-                    value={form.gst_number} 
-                    onChange={e => setForm(f => ({ ...f, gst_number: e.target.value }))} 
-                    placeholder="Enter GST number" 
-                  />
-                </div>
+
                 <div className="flex gap-3 pt-2">
                   <Button 
                     type="button" 
