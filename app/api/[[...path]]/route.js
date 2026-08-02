@@ -463,8 +463,8 @@ async function route(req, method) {
       })
       if (pErr) console.error('Profile creation failed:', pErr.message)
 
-      const token = sign({ id: newUuid, email: u.email, role: u.role, name: u.full_name })
-      return json({ token, user: { id: newUuid, email: u.email, full_name: u.full_name, role: u.role } })
+      const token = sign({ id: newUuid, email: u.email, role: u.role, name: u.full_name, gst_number: u.gst_number || '' })
+      return json({ token, user: { id: newUuid, email: u.email, full_name: u.full_name, role: u.role, phone: u.phone, gst_number: u.gst_number || null } })
     }
     if (p[1] === 'login' && method === 'POST') {
       const { email, password } = body
@@ -541,13 +541,13 @@ async function route(req, method) {
         }
       }
 
-      const token = sign({ id: u.id, email: u.email, role: u.role, name: u.full_name })
-      return json({ token, user: { id: u.id, email: u.email, full_name: u.full_name, role: u.role, phone: u.phone } })
+      const token = sign({ id: u.id, email: u.email, role: u.role, name: u.full_name, gst_number: u.gst_number || '' })
+      return json({ token, user: { id: u.id, email: u.email, full_name: u.full_name, role: u.role, phone: u.phone, gst_number: u.gst_number || null } })
     }
 
     if (p[1] === 'me' && method === 'GET') {
       if (!user) return err('Unauthorized', 401)
-      const { data: u } = await supabase.from('users').select('id, email, full_name, phone, role').eq('id', user.id).maybeSingle()
+      const { data: u } = await supabase.from('users').select('id, email, full_name, phone, role, gst_number').eq('id', user.id).maybeSingle()
       return json({ user: u })
     }
     if (p[1] === 'forgot-password' && method === 'POST') {
@@ -864,20 +864,23 @@ async function route(req, method) {
 
   if (p[0] === 'profile' && method === 'PUT') {
     if (!user) return err('Unauthorized', 401)
-    const { full_name, phone, email } = body
+    const { full_name, phone, email, gst_number } = body
     if (!email || !full_name) return err('Email and Name are required')
     
     const { data: emailExists } = await supabase.from('users').select('id').eq('email', email).neq('id', user.id).maybeSingle()
     if (emailExists) return err('Email is already in use by another account', 409)
 
-    const { error: uErr } = await supabase.from('users').update({ full_name, phone, email }).eq('id', user.id)
+    const userUpdatePayload = { full_name, phone, email }
+    if (gst_number !== undefined) userUpdatePayload.gst_number = gst_number || null
+
+    const { error: uErr } = await supabase.from('users').update(userUpdatePayload).eq('id', user.id)
     if (uErr) return err('Profile update failed (users): ' + uErr.message, 500)
     
     const { error: pErr } = await supabase.from('profiles').update({ full_name, phone }).eq('id', user.id)
     if (pErr) console.error('Profile update warning (profiles):', pErr.message)
 
-    const token = sign({ id: user.id, email, role: user.role, name: full_name })
-    return json({ token, user: { id: user.id, email, full_name, role: user.role, phone } })
+    const token = sign({ id: user.id, email, role: user.role, name: full_name, gst_number: gst_number || user.gst_number || '' })
+    return json({ token, user: { id: user.id, email, full_name, role: user.role, phone, gst_number: gst_number || null } })
   }
 
   if (p[0] === 'wishlist') {
@@ -1105,10 +1108,13 @@ async function route(req, method) {
 
       const mapped = (dbOrders || []).map(o => {
         const { status: statusStr, history: statusHistory } = buildStatusHistory(o)
+        // Filter out error-string vendor_name values (legacy data)
+        const vendorDisplay = (o.vendor_name && !o.vendor_name.startsWith('No vendor assigned')) ? o.vendor_name : null
         return {
           ...o,
           status: statusStr,
           status_history: statusHistory,
+          vendor_name: vendorDisplay,
           address: o.addresses,
           items: (o.order_items || []).map(it => ({
             ...it,
@@ -1153,6 +1159,17 @@ async function route(req, method) {
       if (getErr) return err('Failed to fetch order details: ' + getErr.message, 500)
       if (!o) return err('Not found', 404)
       if (user.role !== 'admin' && o.user_id !== user.id) return err('Forbidden', 403)
+
+      // Fetch user email from users table (not stored on order directly)
+      let userEmail = o.user_email || null
+      if (!userEmail && o.user_id) {
+        const { data: orderUser } = await supabase.from('users').select('email, gst_number').eq('id', o.user_id).maybeSingle()
+        userEmail = orderUser?.email || null
+        // Backfill gst_number from user if address doesn't have it
+        if (!o.addresses?.gst && orderUser?.gst_number) {
+          if (o.addresses) o.addresses.gst = orderUser.gst_number
+        }
+      }
       
       const { status: statusStr, history: statusHistory } = buildStatusHistory(o)
       
@@ -1160,6 +1177,7 @@ async function route(req, method) {
         ...o,
         status: statusStr,
         status_history: statusHistory,
+        user_email: userEmail,
         address: o.addresses,
         items: (o.order_items || []).map(it => ({
           ...it,
@@ -1459,12 +1477,13 @@ async function route(req, method) {
           updatePayload.assigned_by = 'Customer Vendor System'
         } else {
           // If customer has no vendor assigned, or the assigned vendor is disabled
+          // stay as 'confirmed' but do NOT store an error string as vendor_name
           finalStatus = 'confirmed'
           updatePayload.assigned_vendor_id = null
-          updatePayload.vendor_name = 'No vendor assigned to this customer — please assign one in Customer Pricing'
-          updatePayload.vendor_email = ''
+          updatePayload.vendor_name = null
+          updatePayload.vendor_email = null
           updatePayload.assigned_at = null
-          updatePayload.assigned_by = 'Customer Vendor System'
+          updatePayload.assigned_by = null
         }
       } else if (targetStatus === 'rejected') {
         if (orderToUpdate.status !== 'pending') {
@@ -1645,10 +1664,14 @@ async function route(req, method) {
 
       // --- Zoho Books Sync (async, non-blocking) ---
       // Trigger on first confirmation (pending -> confirmed or vendor_assigned)
-      if (['confirmed', 'vendor_assigned'].includes(finalStatus) && orderToUpdate.status === 'pending' && !orderToUpdate.zoho_invoice_id) {
+      // IMPORTANT: We check the live DB record AFTER the update to avoid race conditions
+      if (['confirmed', 'vendor_assigned'].includes(finalStatus) && orderToUpdate.status === 'pending') {
         ;(async () => {
           try {
-            // Fetch full order details for Zoho sync
+            // Small delay to ensure DB write is committed
+            await new Promise(r => setTimeout(r, 500))
+
+            // Fetch full order details AFTER the status update (fresh from DB)
             const { data: fullOrder } = await supabase
               .from('orders')
               .select('*, addresses(*), order_items(*, products(id, name, hsn_code, gst_rate))')
@@ -1657,6 +1680,22 @@ async function route(req, method) {
 
             if (!fullOrder) return
 
+            // IDEMPOTENCY: Skip if a Zoho invoice was already created for this order
+            if (fullOrder.zoho_invoice_id) {
+              console.log('[Zoho Sync] Skipping — invoice already exists:', fullOrder.zoho_invoice_id)
+              return
+            }
+
+            // VALIDATION: Ensure all items have valid non-zero prices before sending to Zoho
+            const validItems = (fullOrder.order_items || []).filter(it => (it.price_snapshot || 0) > 0 && (it.quantity || 0) > 0)
+            if (validItems.length === 0) {
+              console.error('[Zoho Sync] ABORTED — no valid line items with non-zero prices for order', fullOrder.order_number)
+              return
+            }
+            if (validItems.length < (fullOrder.order_items || []).length) {
+              console.warn('[Zoho Sync] Warning — some items have zero price, using only valid items:', validItems.length, 'of', fullOrder.order_items.length)
+            }
+
             // Fetch customer user info for GST
             const { data: custUser } = await supabase.from('users').select('email, full_name, phone, gst_number').eq('id', fullOrder.user_id).maybeSingle()
 
@@ -1664,7 +1703,7 @@ async function route(req, method) {
               order_number: fullOrder.order_number,
               total: fullOrder.total,
               shipping_address: fullOrder.addresses,
-              items: (fullOrder.order_items || []).map(it => ({
+              items: validItems.map(it => ({
                 product_id: it.product_id,
                 product_name_snapshot: it.product_name_snapshot,
                 price_snapshot: it.price_snapshot,
@@ -1678,23 +1717,25 @@ async function route(req, method) {
               email: custUser?.email || fullOrder.customer_email || '',
               full_name: custUser?.full_name || fullOrder.customer_name || '',
               phone: custUser?.phone || '',
-              gst_number: custUser?.gst_number || fullOrder.addresses?.gst_number || '',
+              gst_number: custUser?.gst_number || fullOrder.addresses?.gst_number || fullOrder.addresses?.gst || '',
               shipping_address: fullOrder.addresses
             }
 
             const contactId = await syncZohoContact(customerForZoho)
-            const [invoiceId, challanId] = await Promise.allSettled([
+            const [invoiceResult, challanResult] = await Promise.allSettled([
               createZohoInvoice({ order: orderForZoho, contactId }),
               createZohoChallan({ order: orderForZoho, contactId })
             ])
 
             const zohoUpdate = {}
-            if (invoiceId.status === 'fulfilled' && invoiceId.value) zohoUpdate.zoho_invoice_id = invoiceId.value
-            if (challanId.status === 'fulfilled' && challanId.value) zohoUpdate.zoho_challan_id = challanId.value
+            if (invoiceResult.status === 'fulfilled' && invoiceResult.value) zohoUpdate.zoho_invoice_id = invoiceResult.value
+            if (challanResult.status === 'fulfilled' && challanResult.value) zohoUpdate.zoho_challan_id = challanResult.value
 
             if (Object.keys(zohoUpdate).length > 0) {
               await supabase.from('orders').update(zohoUpdate).eq('id', p[1])
-              console.log('[Zoho Sync] Order', fullOrder.order_number, 'synced:', zohoUpdate)
+              console.log('[Zoho Sync] Order', fullOrder.order_number, 'synced successfully:', zohoUpdate)
+            } else {
+              console.warn('[Zoho Sync] No Zoho IDs returned for order', fullOrder.order_number)
             }
           } catch (zohoErr) {
             console.error('[Zoho Sync Error]', zohoErr.message)

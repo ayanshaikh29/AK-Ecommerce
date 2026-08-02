@@ -18,6 +18,29 @@ import { useAppContext } from '@/components/providers/AppProvider'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
+// GST helper matching checkout logic (supplier state = Maharashtra)
+const SUPPLIER_STATE = 'maharashtra'
+function computeGST(items, customerState) {
+  const st = (customerState || '').toLowerCase().trim()
+  const sameState = st === SUPPLIER_STATE || st === 'mh'
+  let totalTaxable = 0, totalCGST = 0, totalSGST = 0, totalIGST = 0
+  ;(items || []).forEach(it => {
+    const rate = Number(it.price_snapshot || 0)
+    const qty = Number(it.quantity || 0)
+    const gstPct = Number(it.products?.gst_percent ?? it.gst_percent ?? 18)
+    const basePrice = rate * qty / (1 + gstPct / 100)
+    const taxAmt = rate * qty - basePrice
+    totalTaxable += basePrice
+    if (sameState) {
+      totalCGST += taxAmt / 2
+      totalSGST += taxAmt / 2
+    } else {
+      totalIGST += taxAmt
+    }
+  })
+  return { sameState, totalTaxable, totalCGST, totalSGST, totalIGST }
+}
+
 const TIMELINE_STEPS = [
   { key: 'pending', label: 'Order Placed', description: 'Your B2B purchase order has been received.' },
   { key: 'confirmed', label: 'Admin Confirmed', description: 'Order verified and approved by operations.' },
@@ -283,16 +306,49 @@ export default function OrderDetailsPage() {
                   <span>Items Price</span>
                   <span className="font-medium text-foreground">{formatINR(order.subtotal)}</span>
                 </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Discounts</span>
-                  <span className="font-medium text-destructive">-{formatINR(order.discount || 0)}</span>
-                </div>
+                {(order.discount || 0) > 0 && (
+                  <div className="flex justify-between text-muted-foreground">
+                    <span>Discounts</span>
+                    <span className="font-medium text-destructive">-{formatINR(order.discount || 0)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-muted-foreground">
                   <span>Shipping Fee</span>
                   <span className="font-medium text-foreground">
                     {order.shipping_fee > 0 ? formatINR(order.shipping_fee) : 'FREE'}
                   </span>
                 </div>
+                {/* GST Breakdown — calculated from items + address state */}
+                {(() => {
+                  const customerState = order.address?.state || order.addresses?.state || ''
+                  const gst = computeGST(order.items, customerState)
+                  const hasGST = gst.totalCGST > 0 || gst.totalSGST > 0 || gst.totalIGST > 0
+                  if (!hasGST) return null
+                  return (
+                    <div className="pt-2 mt-1 border-t border-border/20 space-y-2">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        GST Breakdown ({gst.sameState ? 'Intra-state' : 'Inter-state'})
+                      </p>
+                      {gst.sameState ? (
+                        <>
+                          <div className="flex justify-between text-muted-foreground">
+                            <span>CGST (incl. in price)</span>
+                            <span className="font-medium">{formatINR(gst.totalCGST)}</span>
+                          </div>
+                          <div className="flex justify-between text-muted-foreground">
+                            <span>SGST (incl. in price)</span>
+                            <span className="font-medium">{formatINR(gst.totalSGST)}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex justify-between text-muted-foreground">
+                          <span>IGST (incl. in price)</span>
+                          <span className="font-medium">{formatINR(gst.totalIGST)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
                 <Separator className="my-1.5" />
                 <div className="flex justify-between text-sm font-bold">
                   <span className="text-foreground">Total Amount</span>
