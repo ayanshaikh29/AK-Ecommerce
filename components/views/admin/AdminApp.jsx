@@ -3228,7 +3228,7 @@ function AdminOrderDetail({ orderId }) {
                 {order.zoho_invoice_status === 'synced' ? (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-emerald-600 font-bold">
-                      <CheckCircle2 className="w-4 h-4" /> Zoho Synced ✓
+                      <CheckCircle2 className="w-4 h-4" /> Synced ✓
                     </div>
                     <div>
                       <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Invoice Number</span>
@@ -3246,7 +3246,7 @@ function AdminOrderDetail({ orderId }) {
                 ) : order.zoho_invoice_status === 'failed' ? (
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 text-rose-600 font-bold">
-                      <XCircle className="w-4 h-4" /> Sync Failed
+                      <XCircle className="w-4 h-4" /> Failed
                     </div>
                     <p className="text-xs text-muted-foreground leading-relaxed">
                       Unable to generate official Zoho Invoice automatically. You can manually retry generating it below.
@@ -3258,7 +3258,7 @@ function AdminOrderDetail({ orderId }) {
                 ) : (
                   <div className="py-4 text-center space-y-2">
                     <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" />
-                    <p className="text-xs text-muted-foreground font-semibold">Generating official Zoho Invoice...</p>
+                    <p className="text-xs text-muted-foreground font-semibold">Generating...</p>
                   </div>
                 )}
               </div>

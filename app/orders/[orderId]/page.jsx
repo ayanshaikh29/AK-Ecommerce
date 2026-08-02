@@ -218,7 +218,7 @@ export default function OrderDetailsPage() {
       } catch (err) {
         console.error('Error polling sync status:', err)
       }
-    }, 2000)
+    }, 3000)
 
     return () => clearInterval(interval)
   }, [order?.zoho_invoice_status, orderId])
@@ -255,7 +255,7 @@ export default function OrderDetailsPage() {
             </div>
           ) : (
             <Button disabled variant="outline" size="sm" className="rounded-full h-9 px-4 flex items-center gap-2 shadow-sm opacity-50 cursor-not-allowed">
-              <Loader2 className="w-4 h-4 animate-spin" /> Generating official Zoho Invoice...
+              <Loader2 className="w-4 h-4 animate-spin" /> Invoice Status: Generating...
             </Button>
           )}
           {/* Cancel Order Button - only for pending/confirmed */}
