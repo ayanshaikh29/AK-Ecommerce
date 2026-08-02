@@ -2898,15 +2898,75 @@ function AdminOrderDetail({ orderId }) {
       link.href = `/api/zoho/invoice/${order.zoho_invoice_id}`
       link.setAttribute('download', `invoice-${order.order_number}.pdf`)
       link.click()
-      return
+    } else {
+      toast.error('Zoho invoice is not ready yet')
     }
-    import('@/lib/invoice').then(({ downloadInvoice }) => {
-      downloadInvoice(order)
-    }).catch(err => {
-      console.error(err)
-      toast.error('Failed to generate invoice')
-    })
   }
+
+  const handleRetrySync = async () => {
+    setOrder(prev => ({ ...prev, zoho_invoice_status: 'syncing' }))
+    try {
+      const res = await fetch(`/api/orders/${order.id}/retry-sync`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      if (!res.ok) throw new Error('Retry sync request failed')
+      const data = await res.json()
+      if (data.success) {
+        setOrder(prev => ({
+          ...prev,
+          zoho_invoice_status: 'synced',
+          zoho_invoice_id: data.data.zoho_invoice_id,
+          zoho_invoice_number: data.data.zoho_invoice_number,
+          synced_at: data.data.synced_at
+        }))
+        toast.success('Zoho invoice generated successfully!')
+      } else {
+        setOrder(prev => ({ ...prev, zoho_invoice_status: 'failed' }))
+        toast.error(data.error || 'Failed to generate Zoho invoice')
+      }
+    } catch (err) {
+      toast.error(err.message)
+      setOrder(prev => ({ ...prev, zoho_invoice_status: 'failed' }))
+    }
+  }
+
+  useEffect(() => {
+    if (!order || !order.id || order.zoho_invoice_status === 'synced' || order.zoho_invoice_status === 'failed') return
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/orders/${order.id}/sync-status`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.zoho_invoice_status === 'synced') {
+            setOrder(prev => ({
+              ...prev,
+              zoho_invoice_status: 'synced',
+              zoho_invoice_id: data.zoho_invoice_id,
+              zoho_invoice_number: data.zoho_invoice_number,
+              synced_at: data.synced_at
+            }))
+            toast.success('Zoho invoice generated successfully!')
+            clearInterval(interval)
+          } else if (data.zoho_invoice_status === 'failed') {
+            setOrder(prev => ({
+              ...prev,
+              zoho_invoice_status: 'failed'
+            }))
+            toast.error('Zoho invoice generation failed.')
+            clearInterval(interval)
+          }
+        }
+      } catch (err) {
+        console.error('Error polling sync status:', err)
+      }
+    }, 2000)
+
+    return () => clearInterval(interval)
+  }, [order?.zoho_invoice_status, order?.id])
 
   const handlePrint = () => {
     window.print()
@@ -2988,22 +3048,24 @@ function AdminOrderDetail({ orderId }) {
           <p className="text-xs text-muted-foreground">Placed on {new Date(order.placed_at).toLocaleString('en-IN')}</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {order.zoho_invoice_id && (
-            <Button
-              onClick={() => {
-                const token = localStorage.getItem('token')
-                const link = document.createElement('a')
-                link.href = `/api/zoho/invoice/${order.zoho_invoice_id}`
-                link.setAttribute('download', `invoice-${order.order_number}.pdf`)
-                link.click()
-              }}
-              variant="outline"
-              className="rounded-full text-xs gap-1.5"
-            >
+          {order.zoho_invoice_status === 'synced' ? (
+            <Button onClick={handleDownloadInvoice} className="rounded-full gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm">
               <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              Zoho Invoice
+              Download Zoho Invoice (PDF)
+            </Button>
+          ) : order.zoho_invoice_status === 'failed' ? (
+            <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-full text-xs font-semibold text-rose-600 shadow-xs">
+              <span className="font-bold text-[11px]">Sync Failed</span>
+              <Button onClick={handleRetrySync} size="xs" variant="ghost" className="h-6 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 rounded-full px-2">
+                Retry Sync
+              </Button>
+            </div>
+          ) : (
+            <Button disabled variant="outline" className="rounded-full text-xs gap-1.5 opacity-50 cursor-not-allowed">
+              <Loader2 className="w-4 h-4 animate-spin" /> Generating official Zoho Invoice...
             </Button>
           )}
+
           {order.zoho_challan_id && (
             <Button
               onClick={() => {
@@ -3019,12 +3081,6 @@ function AdminOrderDetail({ orderId }) {
               Delivery Challan
             </Button>
           )}
-          <Button onClick={handlePrint} variant="outline" className="rounded-full">
-            Print Invoice
-          </Button>
-          <Button onClick={handleDownloadInvoice} className="rounded-full">
-            Download Invoice (PDF)
-          </Button>
         </div>
       </div>
 
@@ -3162,6 +3218,53 @@ function AdminOrderDetail({ orderId }) {
             </CardContent>
           </Card>
 
+          {/* Zoho Books Sync Metadata Card */}
+          <Card className="radius-xl shadow-soft border">
+            <CardContent className="p-6 space-y-4">
+              <h3 className="font-display font-extrabold text-lg flex items-center gap-2">
+                <FileText className="w-5 h-5 text-[#F4B942]" /> Zoho Books Integration
+              </h3>
+              <div className="p-4 rounded-xl bg-secondary/50 border space-y-2 text-xs">
+                {order.zoho_invoice_status === 'synced' ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-emerald-600 font-bold">
+                      <CheckCircle2 className="w-4 h-4" /> Zoho Synced ✓
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Invoice Number</span>
+                      <span className="font-semibold text-sm block font-mono">{order.zoho_invoice_number || '—'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Zoho Invoice ID</span>
+                      <span className="font-semibold text-xs block font-mono text-slate-500">{order.zoho_invoice_id || '—'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Generated Time</span>
+                      <span className="font-medium text-xs block">{order.synced_at ? new Date(order.synced_at).toLocaleString('en-IN') : '—'}</span>
+                    </div>
+                  </div>
+                ) : order.zoho_invoice_status === 'failed' ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-rose-600 font-bold">
+                      <XCircle className="w-4 h-4" /> Sync Failed
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Unable to generate official Zoho Invoice automatically. You can manually retry generating it below.
+                    </p>
+                    <Button onClick={handleRetrySync} className="w-full rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold py-2">
+                      Retry Zoho Sync
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="py-4 text-center space-y-2">
+                    <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" />
+                    <p className="text-xs text-muted-foreground font-semibold">Generating official Zoho Invoice...</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           {/* 2. Assigned Logistics Partner Card (Read-only display replacing manual assign and notes) */}
           <Card className="radius-xl shadow-soft border">
             <CardContent className="p-6 space-y-4">
@@ -3257,117 +3360,6 @@ function AdminOrderDetail({ orderId }) {
               </div>
             </CardContent>
           </Card>
-        </div>
-      </div>
-
-      <div id="printable-invoice" className="hidden print:block text-black bg-white text-xs leading-relaxed max-w-4xl mx-auto">
-        <div className="border-b-2 border-black pb-4 mb-6 flex justify-between items-start">
-          <div>
-            <h1 className="text-2xl font-black uppercase tracking-wider text-black">AK Enterprises</h1>
-            <p className="font-bold">B2B Corporate Supplier</p>
-            <p className="text-[10px] text-gray-600">Address: Pune - 411004 | Maharashtra, India</p>
-            <p className="text-[10px] text-gray-600">Phone: +91 83088 60894 | Email: akenterprises1411@gmail.com</p>
-            <p className="text-[10px] font-bold text-black mt-1">GSTIN: 27AAFFA1234F1Z5</p>
-          </div>
-          <div className="text-right">
-            <h2 className="text-xl font-bold uppercase tracking-widest text-gray-700">TAX INVOICE</h2>
-            <p className="mt-2 font-bold">Invoice No: <span className="font-mono">{order.order_number}</span></p>
-            <p>Invoice Date: {new Date(order.placed_at).toLocaleDateString('en-IN')}</p>
-            <p className="font-bold mt-1 text-gray-700">Payment Mode: Cash on Delivery (COD)</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-8 mb-6 border-b pb-4">
-          <div>
-            <h3 className="font-bold text-[10px] uppercase text-gray-500 mb-2">Billing / Shipping Details</h3>
-            <p className="font-bold text-sm text-black">{order.address?.full_name}</p>
-            <p className="font-semibold text-gray-700">Phone: {order.address?.phone}</p>
-            <p className="text-gray-600">
-              {order.address?.line1}<br />
-              {order.address?.line2 && <>{order.address.line2}<br /></>}
-              {order.address?.city}, {order.address?.state} - {order.address?.pincode}
-            </p>
-            {order.address?.gst && <p className="font-bold text-black mt-1">Buyer GSTIN: {order.address.gst}</p>}
-          </div>
-          <div className="text-right">
-            <h3 className="font-bold text-[10px] uppercase text-gray-500 mb-2">Order Information</h3>
-            <p>Order ID: <span className="font-mono">{order.id}</span></p>
-            <p>Order Status: <span className="font-bold uppercase">{order.status}</span></p>
-          </div>
-        </div>
-
-        <table className="w-full text-left border-collapse border border-gray-300 mb-6 text-[11px]">
-          <thead>
-            <tr className="bg-gray-100 border-b border-gray-300 text-gray-700">
-              <th className="p-2 border-r border-gray-300 font-bold w-12 text-center">S.No</th>
-              <th className="p-2 border-r border-gray-300 font-bold">Item Description</th>
-              <th className="p-2 border-r border-gray-300 font-bold text-center w-16">Qty</th>
-              <th className="p-2 border-r border-gray-300 font-bold text-right w-24">Unit Price</th>
-              <th className="p-2 font-bold text-right w-24">Total Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            {order.items?.map((it, idx) => (
-              <tr key={idx} className="border-b border-gray-200">
-                <td className="p-2 border-r border-gray-300 text-center">{idx + 1}</td>
-                <td className="p-2 border-r border-gray-300 font-bold text-black">{it.product_name_snapshot}</td>
-                <td className="p-2 border-r border-gray-300 text-center font-bold">{it.quantity}</td>
-                <td className="p-2 border-r border-gray-300 text-right font-mono">₹{it.price_snapshot.toFixed(2)}</td>
-                <td className="p-2 text-right font-mono font-bold">₹{(it.price_snapshot * it.quantity).toFixed(2)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="flex justify-end mb-8">
-          <table className="w-64 text-right text-[11px]">
-            <tbody>
-              <tr>
-                <td className="py-1 text-gray-600">Taxable Value:</td>
-                <td className="py-1 font-mono">₹{totalTaxable.toFixed(2)}</td>
-              </tr>
-              {sameState ? (
-                <>
-                  <tr>
-                    <td className="py-1 text-gray-600">CGST (incl.):</td>
-                    <td className="py-1 font-mono">₹{totalCGST.toFixed(2)}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1 text-gray-600">SGST (incl.):</td>
-                    <td className="py-1 font-mono">₹{totalSGST.toFixed(2)}</td>
-                  </tr>
-                </>
-              ) : (
-                <tr>
-                  <td className="py-1 text-gray-600">IGST (incl.):</td>
-                  <td className="py-1 font-mono">₹{totalIGST.toFixed(2)}</td>
-                </tr>
-              )}
-              <tr className="border-t border-dashed">
-                <td className="py-1 font-bold">Total Items Value:</td>
-                <td className="py-1 font-mono font-bold">₹{subtotalVal.toFixed(2)}</td>
-              </tr>
-              {discountVal > 0 && (
-                <tr className="text-emerald-700">
-                  <td className="py-1 font-bold">Discount Applied:</td>
-                  <td className="py-1 font-mono font-bold">- ₹{discountVal.toFixed(2)}</td>
-                </tr>
-              )}
-              <tr>
-                <td className="py-1 text-gray-600">Shipping Charges:</td>
-                <td className="py-1 font-mono">{shippingVal === 0 ? 'FREE' : `₹${shippingVal.toFixed(2)}`}</td>
-              </tr>
-              <tr className="border-t-2 border-black text-black font-bold text-sm">
-                <td className="py-2 text-left pr-4">Grand Total (COD):</td>
-                <td className="py-2 font-mono">₹{totalVal.toFixed(2)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div className="border-t pt-4 text-center text-gray-500 text-[10px] space-y-1">
-          <p className="font-bold text-black">Thank you for your business with AK Enterprises!</p>
-          <p>This is a computer-generated tax invoice. No signature required.</p>
         </div>
       </div>
     </div>

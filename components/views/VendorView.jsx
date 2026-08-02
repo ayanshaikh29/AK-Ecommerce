@@ -6,7 +6,7 @@ import {
   Truck, Package, Phone, RefreshCw, LogOut, Search, 
   CheckCircle2, AlertCircle, FileText, Download, Calendar, User, 
   MapPin, Eye, ChevronRight, MessageSquare, Award, Clock, ClipboardCheck,
-  ShieldCheck, HelpCircle, Layers, ArrowLeft
+  ShieldCheck, HelpCircle, Layers, ArrowLeft, Loader2
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -113,6 +113,35 @@ export function VendorView() {
     fetchVendorOrders()
     fetchInventory()
   }, [authReady, user, fetchVendorOrders, fetchInventory])
+
+  useEffect(() => {
+    if (!selectedOrderId || !selectedOrder || selectedOrder.zoho_invoice_status === 'synced' || selectedOrder.zoho_invoice_status === 'failed') return
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/orders/${selectedOrderId}/sync-status`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.zoho_invoice_status === 'synced' || data.zoho_invoice_status === 'failed') {
+            // Update orders list locally so selectedOrder updates automatically
+            setOrders(prev => prev.map(o => o.id === selectedOrderId ? {
+              ...o,
+              zoho_invoice_status: data.zoho_invoice_status,
+              zoho_invoice_id: data.zoho_invoice_id,
+              zoho_challan_id: data.zoho_challan_id
+            } : o))
+            clearInterval(interval)
+          }
+        }
+      } catch (err) {
+        console.error('Error polling sync status in vendor view:', err)
+      }
+    }, 2000)
+
+    return () => clearInterval(interval)
+  }, [selectedOrderId, selectedOrder?.zoho_invoice_status])
 
   const handleExportReport = async () => {
     setExportingReport(true)
@@ -298,21 +327,65 @@ export function VendorView() {
               <p className="text-xs text-slate-400 mt-1">Assigned on {new Date(selectedOrder.placed_at).toLocaleString('en-IN')}</p>
             </div>
             <div className="flex gap-3 flex-wrap">
-              <Button 
-                onClick={() => {
-                  if (selectedOrder.zoho_challan_id) {
-                    const link = document.createElement('a')
-                    link.href = `/api/zoho/challan/${selectedOrder.zoho_challan_id}`
-                    link.setAttribute('download', `delivery-challan-${selectedOrder.order_number}.pdf`)
-                    link.click()
-                    return
-                  }
-                  import('@/lib/invoice').then(({ downloadInvoice }) => downloadInvoice(selectedOrder, true))
-                }} 
-                className="rounded-full bg-slate-900 text-white font-bold text-xs h-10 px-6 hover:bg-slate-800 shadow-sm"
-              >
-                <Download className="w-4 h-4 mr-2" /> Download Invoice
-              </Button>
+              {selectedOrder.zoho_invoice_status === 'synced' ? (
+                <Button 
+                  onClick={() => {
+                    if (selectedOrder.zoho_challan_id) {
+                      const link = document.createElement('a')
+                      link.href = `/api/zoho/challan/${selectedOrder.zoho_challan_id}`
+                      link.setAttribute('download', `delivery-challan-${selectedOrder.order_number}.pdf`)
+                      link.click()
+                    } else {
+                      toast.error('Delivery challan not synced')
+                    }
+                  }} 
+                  className="rounded-full bg-slate-900 text-white font-bold text-xs h-10 px-6 hover:bg-slate-800 shadow-sm"
+                >
+                  <Download className="w-4 h-4 mr-2" /> Download Delivery Challan
+                </Button>
+              ) : selectedOrder.zoho_invoice_status === 'failed' ? (
+                <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 px-4 py-1.5 rounded-full text-xs font-bold text-rose-600 shadow-xs">
+                  <span>Unable to generate Delivery Challan.</span>
+                  <Button 
+                    onClick={async () => {
+                      setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'syncing' } : o))
+                      try {
+                        const res = await fetch(`/api/orders/${selectedOrderId}/retry-sync`, {
+                          method: 'POST',
+                          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        })
+                        if (res.ok) {
+                          const data = await res.json()
+                          if (data.success) {
+                            setOrders(prev => prev.map(o => o.id === selectedOrderId ? {
+                              ...o,
+                              zoho_invoice_status: 'synced',
+                              zoho_invoice_id: data.data.zoho_invoice_id,
+                              zoho_challan_id: data.data.zoho_challan_id
+                            } : o))
+                            toast.success('Zoho delivery challan synced successfully!')
+                          } else {
+                            setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'failed' } : o))
+                            toast.error(data.error || 'Sync failed')
+                          }
+                        }
+                      } catch (err) {
+                        toast.error(err.message)
+                        setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'failed' } : o))
+                      }
+                    }} 
+                    size="xs" 
+                    variant="ghost" 
+                    className="h-6 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 rounded-full px-2 py-0"
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : (
+                <Button disabled className="rounded-full bg-slate-400 text-white font-bold text-xs h-10 px-6 opacity-50 cursor-not-allowed">
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Generating Delivery Challan...
+                </Button>
+              )}
             </div>
           </div>
 
