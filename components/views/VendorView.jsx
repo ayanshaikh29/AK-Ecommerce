@@ -343,9 +343,15 @@ export function VendorView() {
                 >
                   <Download className="w-4 h-4 mr-2" /> Download Delivery Challan
                 </Button>
-              ) : selectedOrder.zoho_invoice_status === 'failed' ? (
-                <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 px-4 py-1.5 rounded-full text-xs font-bold text-rose-600 shadow-xs">
-                  <span>Unable to generate Delivery Challan.</span>
+              ) : (selectedOrder.zoho_invoice_status && selectedOrder.zoho_invoice_status.startsWith('failed')) ? (
+                <div className="flex flex-col gap-1 bg-rose-50 border border-rose-200 p-3 rounded-2xl text-xs text-rose-600 shadow-xs max-w-sm">
+                  <div className="flex items-center gap-2 font-bold text-rose-700">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                    <span>❌ Sync Failed</span>
+                  </div>
+                  <p className="text-[10px] text-rose-500 font-mono mt-0.5 leading-relaxed">
+                    Reason: {selectedOrder.zoho_invoice_status.split('failed:')[1]?.trim() || 'invoice_creation_failed'}
+                  </p>
                   <Button 
                     onClick={async () => {
                       setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'syncing' } : o))
@@ -365,18 +371,62 @@ export function VendorView() {
                             } : o))
                             toast.success('Zoho delivery challan synced successfully!')
                           } else {
-                            setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'failed' } : o))
+                            setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: `failed: ${data.error || 'invoice_creation_failed'}` } : o))
                             toast.error(data.error || 'Sync failed')
                           }
                         }
                       } catch (err) {
                         toast.error(err.message)
-                        setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'failed' } : o))
+                        setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'failed: invoice_creation_failed' } : o))
                       }
                     }} 
                     size="xs" 
-                    variant="ghost" 
-                    className="h-6 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 rounded-full px-2 py-0"
+                    variant="outline" 
+                    className="mt-2 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 border-rose-300 rounded-full px-3 py-1"
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : selectedOrder.zoho_invoice_status === 'failed' ? (
+                <div className="flex flex-col gap-1 bg-rose-50 border border-rose-200 p-3 rounded-2xl text-xs text-rose-600 shadow-xs max-w-sm">
+                  <div className="flex items-center gap-2 font-bold text-rose-700">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                    <span>❌ Sync Failed</span>
+                  </div>
+                  <p className="text-[10px] text-rose-500 font-mono mt-0.5 leading-relaxed">
+                    Reason: invoice_creation_failed
+                  </p>
+                  <Button 
+                    onClick={async () => {
+                      setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'syncing' } : o))
+                      try {
+                        const res = await fetch(`/api/orders/${selectedOrderId}/retry-sync`, {
+                          method: 'POST',
+                          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        })
+                        if (res.ok) {
+                          const data = await res.json()
+                          if (data.success) {
+                            setOrders(prev => prev.map(o => o.id === selectedOrderId ? {
+                              ...o,
+                              zoho_invoice_status: 'synced',
+                              zoho_invoice_id: data.data.zoho_invoice_id,
+                              zoho_challan_id: data.data.zoho_challan_id
+                            } : o))
+                            toast.success('Zoho delivery challan synced successfully!')
+                          } else {
+                            setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: `failed: ${data.error || 'invoice_creation_failed'}` } : o))
+                            toast.error(data.error || 'Sync failed')
+                          }
+                        }
+                      } catch (err) {
+                        toast.error(err.message)
+                        setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'failed: invoice_creation_failed' } : o))
+                      }
+                    }} 
+                    size="xs" 
+                    variant="outline" 
+                    className="mt-2 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 border-rose-300 rounded-full px-3 py-1"
                   >
                     Retry
                   </Button>

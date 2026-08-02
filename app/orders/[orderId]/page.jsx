@@ -245,11 +245,29 @@ export default function OrderDetailsPage() {
             <Button onClick={handleDownloadInvoice} variant="outline" size="sm" className="rounded-full h-9 px-4 flex items-center gap-2 shadow-sm border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/5">
               <FileText className="w-4 h-4" /> Download Official Zoho Invoice
             </Button>
+          ) : (order.zoho_invoice_status && order.zoho_invoice_status.startsWith('failed')) ? (
+            <div className="flex flex-col gap-1 items-start bg-rose-50 border border-rose-200 p-3 rounded-2xl text-xs text-rose-600 shadow-sm max-w-md">
+              <div className="flex items-center gap-2 font-bold text-rose-700">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>❌ Invoice Generation Failed</span>
+              </div>
+              <p className="text-[10px] text-rose-500 font-mono mt-0.5 leading-relaxed">
+                Reason: {order.zoho_invoice_status.split('failed:')[1]?.trim() || 'invoice_creation_failed'}
+              </p>
+              <Button onClick={handleRetrySync} size="xs" variant="outline" className="mt-2 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 border-rose-300 rounded-full px-3 py-1">
+                Retry
+              </Button>
+            </div>
           ) : order.zoho_invoice_status === 'failed' ? (
-            <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-full text-xs font-semibold text-rose-600">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>Unable to generate official Zoho Invoice.</span>
-              <Button onClick={handleRetrySync} size="sm" variant="ghost" className="h-6 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 rounded-full px-2 py-0">
+            <div className="flex flex-col gap-1 items-start bg-rose-50 border border-rose-200 p-3 rounded-2xl text-xs text-rose-600 shadow-sm max-w-md">
+              <div className="flex items-center gap-2 font-bold text-rose-700">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>❌ Invoice Generation Failed</span>
+              </div>
+              <p className="text-[10px] text-rose-500 font-mono mt-0.5 leading-relaxed">
+                Reason: invoice_creation_failed
+              </p>
+              <Button onClick={handleRetrySync} size="xs" variant="outline" className="mt-2 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 border-rose-300 rounded-full px-3 py-1">
                 Retry
               </Button>
             </div>
