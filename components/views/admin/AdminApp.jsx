@@ -2151,7 +2151,19 @@ function AdminSettings({ setSettings }) {
   const save = async e => { 
     e.preventDefault(); setLoading(true)
     try { 
-      const body = { ...f, marquee_messages: f.marquee_messages.split('\n').map(s => s.trim()).filter(Boolean) }; 
+      if (f.company_gstin) {
+        const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/
+        if (!gstRegex.test(f.company_gstin.trim())) {
+          throw new Error('Invalid Company GSTIN format! Must be 15 chars, e.g. 27AAAAA0000A1Z5')
+        }
+      }
+      if (f.company_pan) {
+        const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/
+        if (!panRegex.test(f.company_pan.trim())) {
+          throw new Error('Invalid Company PAN format! Must be 10 chars, e.g. AAAAA0000A')
+        }
+      }
+      const body = { ...f, marquee_messages: (f.marquee_messages || '').split('\n').map(s => s.trim()).filter(Boolean) }; 
       await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(body) }); 
       toast.success('Site settings saved'); 
       setSettings(body) 
@@ -2170,6 +2182,15 @@ function AdminSettings({ setSettings }) {
             <div><Label>Tagline</Label><Input value={f.brand_tagline || ''} onChange={e => setF({ ...f, brand_tagline: e.target.value })} className="h-11 rounded-xl"/></div>
             <div><Label>Hero Badge</Label><Input value={f.hero_badge || ''} onChange={e => setF({ ...f, hero_badge: e.target.value })} className="h-11 rounded-xl"/></div>
             <div><Label>Year Established</Label><Input value={f.year_established || ''} onChange={e => setF({ ...f, year_established: e.target.value })} className="h-11 rounded-xl"/></div>
+          </div>
+        </CardContent></Card>
+
+        <Card className="radius-lg shadow-soft"><CardContent className="pt-6 space-y-4">
+          <h3 className="font-display font-extrabold text-lg">Company Legal Details</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><Label>Company GSTIN</Label><Input value={f.company_gstin || ''} onChange={e => setF({ ...f, company_gstin: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. 27AAAAA0000A1Z5"/></div>
+            <div><Label>Company PAN</Label><Input value={f.company_pan || ''} onChange={e => setF({ ...f, company_pan: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. AAAAA0000A"/></div>
+            <div className="col-span-2"><Label>Registered Business Address (for Invoice header)</Label><Textarea value={f.company_registered_address || ''} onChange={e => setF({ ...f, company_registered_address: e.target.value })} rows={3} className="rounded-xl" placeholder="Full Registered Address..."/></div>
           </div>
         </CardContent></Card>
 
@@ -2892,42 +2913,39 @@ function AdminOrderDetail({ orderId }) {
     }
   }
 
-  const handleDownloadInvoice = () => {
-    if (order.zoho_invoice_id) {
+  const handleDownloadInvoice = async () => {
+    try {
+      const res = await fetch(`/api/orders/${order.id}/invoice-pdf`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      if (!res.ok) throw new Error('Failed to download invoice')
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
-      link.href = `/api/zoho/invoice/${order.zoho_invoice_id}`
-      link.setAttribute('download', `invoice-${order.order_number}.pdf`)
+      link.href = url
+      link.download = `invoice-${order.order_number}.pdf`
       link.click()
-    } else {
-      toast.error('Zoho invoice is not ready yet')
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error(err.message)
     }
   }
 
-  const handleRetrySync = async () => {
-    setOrder(prev => ({ ...prev, zoho_invoice_status: 'syncing' }))
+  const handleDownloadChallan = async () => {
     try {
-      const res = await fetch(`/api/orders/${order.id}/retry-sync`, {
-        method: 'POST',
+      const res = await fetch(`/api/orders/${order.id}/challan-pdf`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       })
-      if (!res.ok) throw new Error('Retry sync request failed')
-      const data = await res.json()
-      if (data.success) {
-        setOrder(prev => ({
-          ...prev,
-          zoho_invoice_status: 'synced',
-          zoho_invoice_id: data.data.zoho_invoice_id,
-          zoho_invoice_number: data.data.zoho_invoice_number,
-          synced_at: data.data.synced_at
-        }))
-        toast.success('Zoho invoice generated successfully!')
-      } else {
-        setOrder(prev => ({ ...prev, zoho_invoice_status: 'failed' }))
-        toast.error(data.error || 'Failed to generate Zoho invoice')
-      }
+      if (!res.ok) throw new Error('Failed to download challan')
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `delivery-challan-${order.order_number}.pdf`
+      link.click()
+      window.URL.revokeObjectURL(url)
     } catch (err) {
       toast.error(err.message)
-      setOrder(prev => ({ ...prev, zoho_invoice_status: 'failed' }))
     }
   }
 
@@ -2955,42 +2973,7 @@ function AdminOrderDetail({ orderId }) {
     }
   }
 
-  useEffect(() => {
-    if (!order || !order.id || order.zoho_invoice_status === 'synced' || order.zoho_invoice_status === 'failed') return
 
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/orders/${order.id}/sync-status`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-        })
-        if (res.ok) {
-          const data = await res.json()
-          if (data.zoho_invoice_status === 'synced') {
-            setOrder(prev => ({
-              ...prev,
-              zoho_invoice_status: 'synced',
-              zoho_invoice_id: data.zoho_invoice_id,
-              zoho_invoice_number: data.zoho_invoice_number,
-              synced_at: data.synced_at
-            }))
-            toast.success('Zoho invoice generated successfully!')
-            clearInterval(interval)
-          } else if (data.zoho_invoice_status === 'failed') {
-            setOrder(prev => ({
-              ...prev,
-              zoho_invoice_status: 'failed'
-            }))
-            toast.error('Zoho invoice generation failed.')
-            clearInterval(interval)
-          }
-        }
-      } catch (err) {
-        console.error('Error polling sync status:', err)
-      }
-    }, 2000)
-
-    return () => clearInterval(interval)
-  }, [order?.zoho_invoice_status, order?.id])
 
   const handlePrint = () => {
     window.print()
@@ -3072,39 +3055,15 @@ function AdminOrderDetail({ orderId }) {
           <p className="text-xs text-muted-foreground">Placed on {new Date(order.placed_at).toLocaleString('en-IN')}</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {order.zoho_invoice_status === 'synced' ? (
-            <Button onClick={handleDownloadInvoice} className="rounded-full gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm">
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              Download Zoho Invoice (PDF)
-            </Button>
-          ) : order.zoho_invoice_status === 'failed' ? (
-            <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-full text-xs font-semibold text-rose-600 shadow-xs">
-              <span className="font-bold text-[11px]">Sync Failed</span>
-              <Button onClick={handleRetrySync} size="xs" variant="ghost" className="h-6 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 rounded-full px-2">
-                Retry Sync
-              </Button>
-            </div>
-          ) : (
-            <Button disabled variant="outline" className="rounded-full text-xs gap-1.5 opacity-50 cursor-not-allowed">
-              <Loader2 className="w-4 h-4 animate-spin" /> Generating official Zoho Invoice...
-            </Button>
-          )}
+          <Button onClick={handleDownloadInvoice} className="rounded-full gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            Download GST Invoice (PDF)
+          </Button>
 
-          {order.zoho_challan_id && (
-            <Button
-              onClick={() => {
-                const link = document.createElement('a')
-                link.href = `/api/zoho/challan/${order.zoho_challan_id}`
-                link.setAttribute('download', `challan-${order.order_number}.pdf`)
-                link.click()
-              }}
-              variant="outline"
-              className="rounded-full text-xs gap-1.5"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              Delivery Challan
-            </Button>
-          )}
+          <Button onClick={handleDownloadChallan} variant="outline" className="rounded-full text-xs gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            Delivery Challan
+          </Button>
         </div>
       </div>
 
@@ -3242,49 +3201,26 @@ function AdminOrderDetail({ orderId }) {
             </CardContent>
           </Card>
 
-          {/* Zoho Books Sync Metadata Card */}
+          {/* In-house Documents Card */}
           <Card className="radius-xl shadow-soft border">
             <CardContent className="p-6 space-y-4">
               <h3 className="font-display font-extrabold text-lg flex items-center gap-2">
-                <FileText className="w-5 h-5 text-[#F4B942]" /> Zoho Books Integration
+                <FileText className="w-5 h-5 text-accent" /> Documents
               </h3>
-              <div className="p-4 rounded-xl bg-secondary/50 border space-y-2 text-xs">
-                {order.zoho_invoice_status === 'synced' ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-emerald-600 font-bold">
-                      <CheckCircle2 className="w-4 h-4" /> Synced ✓
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Invoice Number</span>
-                      <span className="font-semibold text-sm block font-mono">{order.zoho_invoice_number || '—'}</span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Zoho Invoice ID</span>
-                      <span className="font-semibold text-xs block font-mono text-slate-500">{order.zoho_invoice_id || '—'}</span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Generated Time</span>
-                      <span className="font-medium text-xs block">{order.synced_at ? new Date(order.synced_at).toLocaleString('en-IN') : '—'}</span>
-                    </div>
-                  </div>
-                ) : order.zoho_invoice_status === 'failed' ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-rose-600 font-bold">
-                      <XCircle className="w-4 h-4" /> Failed
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      Unable to generate official Zoho Invoice automatically. You can manually retry generating it below.
-                    </p>
-                    <Button onClick={handleRetrySync} className="w-full rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold py-2">
-                      Retry Zoho Sync
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="py-4 text-center space-y-2">
-                    <Loader2 className="w-6 h-6 animate-spin text-primary mx-auto" />
-                    <p className="text-xs text-muted-foreground font-semibold">Generating...</p>
-                  </div>
-                )}
+              <div className="space-y-3">
+                <Button 
+                  onClick={handleDownloadInvoice} 
+                  className="w-full rounded-xl bg-accent text-primary text-xs font-bold py-2.5 flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <FileText className="w-4 h-4" /> Download GST Invoice
+                </Button>
+                <Button 
+                  onClick={handleDownloadChallan} 
+                  variant="outline"
+                  className="w-full rounded-xl border border-accent/25 bg-accent/5 hover:bg-accent/15 text-accent text-xs font-bold py-2.5 flex items-center justify-center gap-2"
+                >
+                  <Truck className="w-4 h-4" /> Download Delivery Challan
+                </Button>
               </div>
             </CardContent>
           </Card>

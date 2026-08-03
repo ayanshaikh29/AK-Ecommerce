@@ -85,6 +85,42 @@ export default function OrderDetailsPage() {
     }
   }
 
+  const handleDownloadInvoice = async () => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}/invoice-pdf`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      if (!res.ok) throw new Error('Failed to download invoice')
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `invoice-${order?.order_number}.pdf`
+      link.click()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  const handleDownloadChallan = async () => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}/challan-pdf`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      if (!res.ok) throw new Error('Failed to download challan')
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `delivery-challan-${order?.order_number}.pdf`
+      link.click()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
   const handleCancelOrder = async () => {
     if (!confirm('Are you sure you want to cancel this order?')) return
     setCancelLoading(true)
@@ -145,86 +181,10 @@ export default function OrderDetailsPage() {
 
   if (!order) return null
 
-  // PDF tax invoice print handler
-  const handleDownloadInvoice = () => {
-    if (order.zoho_invoice_id) {
-      const link = document.createElement('a')
-      link.href = `/api/zoho/invoice/${order.zoho_invoice_id}`
-      link.setAttribute('download', `invoice-${order.order_number}.pdf`)
-      link.click()
-    } else {
-      toast.error('Zoho invoice is not ready yet')
-    }
-  }
 
-  const handleRetrySync = async () => {
-    setOrder(prev => ({ ...prev, zoho_invoice_status: 'syncing' }))
-    try {
-      const res = await fetch(`/api/orders/${orderId}/retry-sync`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      })
-      if (!res.ok) throw new Error('Retry sync request failed')
-      const data = await res.json()
-      if (data.success) {
-        setOrder(prev => ({
-          ...prev,
-          zoho_invoice_status: 'synced',
-          zoho_invoice_id: data.data.zoho_invoice_id,
-          zoho_invoice_number: data.data.zoho_invoice_number,
-          synced_at: data.data.synced_at
-        }))
-        toast.success('Zoho invoice generated successfully!')
-      } else {
-        setOrder(prev => ({ ...prev, zoho_invoice_status: 'failed' }))
-        toast.error(data.error || 'Failed to generate Zoho invoice')
-      }
-    } catch (err) {
-      toast.error(err.message)
-      setOrder(prev => ({ ...prev, zoho_invoice_status: 'failed' }))
-    }
-  }
-
-  // Polling loop for status updates
-  useEffect(() => {
-    if (!order || order.zoho_invoice_status === 'synced' || order.zoho_invoice_status === 'failed') return
-
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/orders/${orderId}/sync-status`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-        })
-        if (res.ok) {
-          const data = await res.json()
-          if (data.zoho_invoice_status === 'synced') {
-            setOrder(prev => ({
-              ...prev,
-              zoho_invoice_status: 'synced',
-              zoho_invoice_id: data.zoho_invoice_id,
-              zoho_invoice_number: data.zoho_invoice_number,
-              synced_at: data.synced_at
-            }))
-            toast.success('Zoho invoice generated successfully!')
-            clearInterval(interval)
-          } else if (data.zoho_invoice_status === 'failed') {
-            setOrder(prev => ({
-              ...prev,
-              zoho_invoice_status: 'failed'
-            }))
-            toast.error('Zoho invoice generation failed.')
-            clearInterval(interval)
-          }
-        }
-      } catch (err) {
-        console.error('Error polling sync status:', err)
-      }
-    }, 3000)
-
-    return () => clearInterval(interval)
-  }, [order?.zoho_invoice_status, orderId])
 
   // Calculate timeline progress
-  const activeStepIdx = TIMELINE_STEPS.findIndex(step => step.key === order.status.toLowerCase())
+  const activeStepIdx = TIMELINE_STEPS.findIndex(step => step.key === (order?.status || '').toLowerCase())
   const currentStep = activeStepIdx !== -1 ? activeStepIdx : 0
 
   return (
@@ -241,41 +201,22 @@ export default function OrderDetailsPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {order.zoho_invoice_status === 'synced' ? (
-            <Button onClick={handleDownloadInvoice} variant="outline" size="sm" className="rounded-full h-9 px-4 flex items-center gap-2 shadow-sm border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/5">
-              <FileText className="w-4 h-4" /> Download Official Zoho Invoice
-            </Button>
-          ) : (order.zoho_invoice_status && order.zoho_invoice_status.startsWith('failed')) ? (
-            <div className="flex flex-col gap-1 items-start bg-rose-50 border border-rose-200 p-3 rounded-2xl text-xs text-rose-600 shadow-sm max-w-md">
-              <div className="flex items-center gap-2 font-bold text-rose-700">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-                <span>❌ Invoice Generation Failed</span>
-              </div>
-              <p className="text-[10px] text-rose-500 font-mono mt-0.5 leading-relaxed">
-                Reason: {order.zoho_invoice_status.split('failed:')[1]?.trim() || 'invoice_creation_failed'}
-              </p>
-              <Button onClick={handleRetrySync} size="xs" variant="outline" className="mt-2 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 border-rose-300 rounded-full px-3 py-1">
-                Retry
-              </Button>
-            </div>
-          ) : order.zoho_invoice_status === 'failed' ? (
-            <div className="flex flex-col gap-1 items-start bg-rose-50 border border-rose-200 p-3 rounded-2xl text-xs text-rose-600 shadow-sm max-w-md">
-              <div className="flex items-center gap-2 font-bold text-rose-700">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-                <span>❌ Invoice Generation Failed</span>
-              </div>
-              <p className="text-[10px] text-rose-500 font-mono mt-0.5 leading-relaxed">
-                Reason: invoice_creation_failed
-              </p>
-              <Button onClick={handleRetrySync} size="xs" variant="outline" className="mt-2 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 border-rose-300 rounded-full px-3 py-1">
-                Retry
-              </Button>
-            </div>
-          ) : (
-            <Button disabled variant="outline" size="sm" className="rounded-full h-9 px-4 flex items-center gap-2 shadow-sm opacity-50 cursor-not-allowed">
-              <Loader2 className="w-4 h-4 animate-spin" /> Invoice Status: Generating...
-            </Button>
-          )}
+          <Button 
+            onClick={handleDownloadInvoice} 
+            variant="outline" 
+            size="sm" 
+            className="rounded-full h-9 px-4 flex items-center gap-2 shadow-sm border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/5 font-semibold"
+          >
+            <FileText className="w-4 h-4" /> Download Tax Invoice
+          </Button>
+          <Button 
+            onClick={handleDownloadChallan} 
+            variant="outline" 
+            size="sm" 
+            className="rounded-full h-9 px-4 flex items-center gap-2 shadow-sm border-slate-500/30 text-slate-600 hover:bg-slate-500/5 font-semibold"
+          >
+            <Truck className="w-4 h-4" /> Download Delivery Challan
+          </Button>
           {/* Cancel Order Button - only for pending/confirmed */}
           {['pending', 'confirmed'].includes(order.status?.toLowerCase()) && (
             <Button
@@ -522,9 +463,9 @@ export default function OrderDetailsPage() {
             <CardContent className="p-6">
               <div className="relative border-l border-border/70 pl-6 space-y-8">
                 {TIMELINE_STEPS.map((step, idx) => {
-                  const historyItem = order.status_history?.find(h => h.status.toLowerCase() === step.key.toLowerCase())
+                  const historyItem = order.status_history?.find(h => h.status?.toLowerCase() === step.key.toLowerCase())
                   const isDone = !!historyItem
-                  const isLastActive = step.key === order.status.toLowerCase()
+                  const isLastActive = step.key === (order.status || '').toLowerCase()
                   
                   const formattedTime = historyItem
                     ? new Date(historyItem.timestamp).toLocaleString('en-IN', { 

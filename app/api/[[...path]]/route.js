@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { v4 as uuidv4 } from 'uuid'
 import crypto from 'crypto'
-import { syncZohoContact, createZohoInvoice, createZohoChallan, getZohoInvoicePdf, getZohoChallanPdf } from '@/lib/zoho'
+import { generateInvoicePDF } from '@/lib/invoice-generator'
+import { generateChallanPDF } from '@/lib/challan-generator'
 import { 
   getMinOrderQuantity, 
   setMinOrderQuantity, 
@@ -39,282 +40,6 @@ function db() {
     })
   }
   return _supabase
-}
-
-async function safeUpdateOrderZoho(supabase, orderId, data) {
-  const { error } = await supabase.from('orders').update(data).eq('id', orderId)
-  if (error && error.message.includes('zoho_invoice_status')) {
-    // Columns don't exist in database yet (migration not run)
-    const filtered = {}
-    if ('zoho_invoice_id' in data) filtered.zoho_invoice_id = data.zoho_invoice_id
-    if ('zoho_challan_id' in data) filtered.zoho_challan_id = data.zoho_challan_id
-    await supabase.from('orders').update(filtered).eq('id', orderId)
-  }
-}
-
-async function getOrderSyncStatus(supabase, orderId) {
-  let { data, error } = await supabase
-    .from('orders')
-    .select('zoho_invoice_status, zoho_invoice_id, zoho_invoice_number, synced_at, zoho_challan_id, placed_at')
-    .eq('id', orderId)
-    .maybeSingle()
-
-  if (error && error.message.includes('zoho_invoice_status')) {
-    const { data: fallbackData } = await supabase
-      .from('orders')
-      .select('id, zoho_invoice_id, zoho_challan_id, placed_at')
-      .eq('id', orderId)
-      .maybeSingle()
-      
-    if (fallbackData) {
-      const placedTime = new Date(fallbackData.placed_at || Date.now()).getTime()
-      const elapsed = (Date.now() - placedTime) / 1000
-      const isStuck = elapsed > 45
-      return {
-        zoho_invoice_status: fallbackData.zoho_invoice_id ? 'synced' : (isStuck ? 'failed: timeout' : 'syncing'),
-        zoho_invoice_id: fallbackData.zoho_invoice_id,
-        zoho_invoice_number: fallbackData.zoho_invoice_id ? `INV-${fallbackData.id.slice(0, 6).toUpperCase()}` : null,
-        synced_at: null,
-        zoho_challan_id: fallbackData.zoho_challan_id
-      }
-    }
-  }
-
-  if (data) {
-    const placedTime = new Date(data.placed_at || Date.now()).getTime()
-    const elapsed = (Date.now() - placedTime) / 1000
-    if ((data.zoho_invoice_status === 'syncing' || !data.zoho_invoice_status) && elapsed > 45 && !data.zoho_invoice_id) {
-      data.zoho_invoice_status = 'failed: timeout'
-      await safeUpdateOrderZoho(supabase, orderId, { zoho_invoice_status: 'failed: timeout' })
-    }
-  }
-  return data
-}
-
-async function syncOrderToZoho(supabase, orderId) {
-  console.log(`[Zoho Sync] [Queue Started] Starting async worker queue for order ID: ${orderId}`)
-  
-  await safeUpdateOrderZoho(supabase, orderId, { zoho_invoice_status: 'syncing' })
-
-  let attempts = 0
-  const maxAttempts = 3
-  
-  while (attempts < maxAttempts) {
-    attempts++
-    console.log(`[Zoho Sync] Sync Attempt ${attempts} of ${maxAttempts} for order ID: ${orderId}`)
-    
-    try {
-      // Race our entire sync logic against a 30-second timeout
-      const result = await Promise.race([
-        (async () => {
-          // 1. Verify Organization ID
-          if (!process.env.ZOHO_ORG_ID) {
-            throw new Error('invalid_organization_id')
-          }
-
-          // 2. Verify Access Token / OAuth
-          console.log('[Zoho] Verifying Access Token...')
-          try {
-            await getZohoAccessToken()
-            console.log('[Zoho] Access Token OK')
-          } catch (tokenErr) {
-            throw new Error('oauth_expired')
-          }
-
-          // 3. Fetch full order details fresh from DB
-          const { data: fullOrder, error: orderErr } = await supabase
-            .from('orders')
-            .select('*, addresses(*), order_items(*, products(id, name, hsn_code, gst_percent))')
-            .eq('id', orderId)
-            .maybeSingle()
-
-          if (orderErr || !fullOrder) {
-            throw new Error('database_fetch_failed')
-          }
-
-          // IDEMPOTENCY: Reuse existing Invoice ID if already synced
-          const isSynced = fullOrder.zoho_invoice_status === 'synced' || (!('zoho_invoice_status' in fullOrder) && fullOrder.zoho_invoice_id)
-          if (fullOrder.zoho_invoice_id && isSynced) {
-            console.log(`[Zoho Sync] Reuse existing Zoho invoice ID: ${fullOrder.zoho_invoice_id}`)
-            return { success: true, invoiceId: fullOrder.zoho_invoice_id }
-          }
-
-          const validItems = (fullOrder.order_items || []).filter(it => (it.price_snapshot || 0) > 0 && (it.quantity || 0) > 0)
-          if (validItems.length === 0) {
-            throw new Error('empty_line_items')
-          }
-
-          // 4. Verify Customer exists / sync contact
-          console.log('[Zoho] Syncing Contact...')
-          let contactId = null
-          try {
-            const { data: lastOrderWithContact } = await supabase
-              .from('orders')
-              .select('zoho_contact_id')
-              .eq('user_id', fullOrder.user_id)
-              .not('zoho_contact_id', 'is', null)
-              .limit(1)
-              .maybeSingle()
-
-            if (lastOrderWithContact?.zoho_contact_id) {
-              contactId = lastOrderWithContact.zoho_contact_id
-              console.log(`[Zoho Sync] [Contact Reused] Contact ID found in DB: ${contactId}`)
-            } else {
-              const { data: custUser } = await supabase.from('users').select('email, full_name, phone, gst_number').eq('id', fullOrder.user_id).maybeSingle()
-              if (!custUser) throw new Error('customer_not_found')
-              
-              const customerForZoho = {
-                email: custUser?.email || fullOrder.customer_email || '',
-                full_name: custUser?.full_name || fullOrder.customer_name || '',
-                phone: custUser?.phone || '',
-                gst_number: custUser?.gst_number || fullOrder.addresses?.gst_number || fullOrder.addresses?.gst || '',
-                shipping_address: fullOrder.addresses
-              }
-              contactId = await syncZohoContact(customerForZoho)
-              console.log(`[Zoho Sync] [Contact Created] New Zoho contact registered: ${contactId}`)
-            }
-            console.log('[Zoho] Contact Created')
-          } catch (e) {
-            console.error('[Zoho Contact Fetch Error]', e.message)
-            throw new Error(e.message === 'customer_not_found' ? 'customer_not_found' : 'contact_creation_failed')
-          }
-
-          // 5. Create Zoho Invoice
-          console.log('[Zoho] Syncing Invoice...')
-          const orderForZoho = {
-            order_number: fullOrder.order_number,
-            total: fullOrder.total,
-            shipping_address: fullOrder.addresses,
-            items: validItems.map(it => ({
-              product_id: it.product_id,
-              product_name_snapshot: it.product_name_snapshot,
-              price_snapshot: it.price_snapshot,
-              quantity: it.quantity,
-              hsn_code: it.hsn_code || it.products?.hsn_code || '',
-              gst_percent: it.products?.gst_percent || 18
-            }))
-          }
-
-          let invoiceVal = null
-          let challanVal = null
-          try {
-            const [invoiceResult, challanResult] = await Promise.allSettled([
-              createZohoInvoice({ order: orderForZoho, contactId }),
-              createZohoChallan({ order: orderForZoho, contactId })
-            ])
-
-            if (invoiceResult.status === 'fulfilled' && invoiceResult.value) {
-              invoiceVal = invoiceResult.value
-              console.log(`[Zoho] Invoice Created`)
-              console.log(`[Zoho] Invoice ID: ${invoiceVal.invoice_id}`)
-            } else {
-              throw new Error(invoiceResult.reason?.message || 'Invoice response validation failed')
-            }
-
-            if (challanResult.status === 'fulfilled' && challanResult.value) {
-              challanVal = challanResult.value
-            }
-          } catch (e) {
-            console.error('[Zoho Invoice Sync Error]', e.message)
-            throw new Error('invoice_creation_failed')
-          }
-
-          const zohoUpdate = {
-            zoho_invoice_id: invoiceVal.invoice_id,
-            zoho_invoice_number: invoiceVal.invoice_number,
-            zoho_customer_id: invoiceVal.customer_id,
-            zoho_contact_id: invoiceVal.contact_id,
-            zoho_created_time: invoiceVal.created_time,
-            zoho_last_modified_time: invoiceVal.last_modified_time,
-            zoho_invoice_status: 'synced',
-            synced_at: new Date().toISOString()
-          }
-
-          if (challanVal) {
-            zohoUpdate.zoho_challan_id = challanVal
-          }
-
-          // 6. Download PDF
-          console.log('[Zoho] Downloading PDF...')
-          let pdfRes = null
-          try {
-            pdfRes = await getZohoInvoicePdf(zohoUpdate.zoho_invoice_id)
-            if (!pdfRes || !pdfRes.buffer) throw new Error('Empty PDF payload returned')
-            console.log('[Zoho] PDF Downloaded')
-          } catch (e) {
-            console.error('[Zoho PDF Fetch Error]', e.message)
-            throw new Error('pdf_download_failed')
-          }
-
-          // Cache PDF payload in Storage
-          try {
-            const bucketName = 'invoices'
-            const fileName = `${orderId}/invoice-${zohoUpdate.zoho_invoice_number}.pdf`
-            await supabase.storage.createBucket(bucketName, { public: true })
-            const { error: uploadErr } = await supabase.storage
-              .from(bucketName)
-              .upload(fileName, pdfRes.buffer, {
-                contentType: 'application/pdf',
-                upsert: true
-              })
-              
-            if (!uploadErr) {
-              const { data: { publicUrl } } = supabase.storage.from(bucketName).getPublicUrl(fileName)
-              zohoUpdate.zoho_pdf_url = publicUrl
-            }
-          } catch (storageErr) {
-            console.warn('[Storage Cache Warning]', storageErr.message)
-          }
-
-          // If challan exists, cache it too
-          if (zohoUpdate.zoho_challan_id) {
-            try {
-              const challanPdfRes = await getZohoChallanPdf(zohoUpdate.zoho_challan_id)
-              if (challanPdfRes && challanPdfRes.buffer) {
-                const bucketName = 'invoices'
-                const fileName = `${orderId}/challan-${orderId}.pdf`
-                await supabase.storage.createBucket(bucketName, { public: true })
-                await supabase.storage.from(bucketName).upload(fileName, challanPdfRes.buffer, {
-                  contentType: 'application/pdf',
-                  upsert: true
-                })
-              }
-            } catch (cErr) {
-              console.warn('[Challan Storage Cache Warning]', cErr.message)
-            }
-          }
-
-          // 7. Update Database
-          console.log('[Zoho] Database Updated')
-          try {
-            await safeUpdateOrderZoho(supabase, orderId, zohoUpdate)
-          } catch (e) {
-            console.error('[Zoho DB Update Error]', e.message)
-            throw new Error('database_update_failed')
-          }
-
-          console.log('[Zoho] Sync Completed')
-          return { success: true, data: zohoUpdate }
-        })(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000))
-      ])
-
-      return result;
-    } catch (err) {
-      console.error(`[Zoho Sync] Sync Attempt ${attempts} failed:`, err.message)
-      
-      const errorMsg = ['oauth_expired', 'invalid_organization_id', 'contact_creation_failed', 'invoice_creation_failed', 'pdf_download_failed', 'database_update_failed', 'customer_not_found', 'timeout'].includes(err.message) 
-        ? err.message 
-        : 'invoice_creation_failed'
-
-      if (attempts >= maxAttempts) {
-        await safeUpdateOrderZoho(supabase, orderId, { zoho_invoice_status: `failed: ${errorMsg}` })
-        return { success: false, error: errorMsg }
-      }
-      // Wait before retrying
-      await new Promise(r => setTimeout(r, attempts * 3000))
-    }
-  }
 }
 
 function extractMetadata(prod) {
@@ -1371,19 +1096,78 @@ async function route(req, method) {
   }
 
   if (p[0] === 'orders') {
-    // GET /api/orders/:orderId/sync-status
-    if (p[1] && p[2] === 'sync-status' && method === 'GET') {
+    // GET /api/orders/:orderId/invoice-pdf
+    if (p[1] && p[2] === 'invoice-pdf' && method === 'GET') {
       if (!user) return err('Unauthorized', 401)
-      const order = await getOrderSyncStatus(supabase, p[1])
-      if (!order) return err('Order not found', 404)
-      return json(order)
+      try {
+        const orderId = p[1]
+        const { data: o, error: getErr } = await supabase
+          .from('orders')
+          .select('*, addresses(*), order_items(*, products(*))')
+          .eq('id', orderId)
+          .maybeSingle()
+        if (getErr || !o) return err('Order not found', 404)
+        if (user.role !== 'admin' && o.user_id !== user.id) return err('Forbidden', 403)
+
+        // Fetch customer profile details
+        const { data: customer } = await supabase
+          .from('users')
+          .select('company_name, gst_number')
+          .eq('id', o.user_id)
+          .maybeSingle()
+        o.customer_profile = customer || {}
+
+        const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
+        const pdfBuffer = await generateInvoicePDF(o, settings || {})
+
+        return new NextResponse(Buffer.from(pdfBuffer), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="invoice-${o.order_number}.pdf"`
+          }
+        })
+      } catch (e) {
+        console.error('[GET Invoice PDF Error]:', e)
+        return err('Failed to generate invoice PDF: ' + e.message, 500)
+      }
     }
 
-    // POST /api/orders/:orderId/retry-sync
-    if (p[1] && p[2] === 'retry-sync' && method === 'POST') {
+    // GET /api/orders/:orderId/challan-pdf
+    if (p[1] && p[2] === 'challan-pdf' && method === 'GET') {
       if (!user) return err('Unauthorized', 401)
-      const result = await syncOrderToZoho(supabase, p[1])
-      return json(result)
+      try {
+        const orderId = p[1]
+        const { data: o, error: getErr } = await supabase
+          .from('orders')
+          .select('*, addresses(*), order_items(*, products(*))')
+          .eq('id', orderId)
+          .maybeSingle()
+        if (getErr || !o) return err('Order not found', 404)
+        if (user.role !== 'admin' && o.user_id !== user.id) return err('Forbidden', 403)
+
+        // Fetch customer profile details
+        const { data: customer } = await supabase
+          .from('users')
+          .select('company_name, gst_number')
+          .eq('id', o.user_id)
+          .maybeSingle()
+        o.customer_profile = customer || {}
+
+        const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
+        const pdfBuffer = await generateChallanPDF(o, settings || {})
+
+        return new NextResponse(Buffer.from(pdfBuffer), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="delivery-challan-${o.order_number}.pdf"`
+          }
+        })
+      } catch (e) {
+        console.error('[GET Challan PDF Error]:', e)
+        return err('Failed to generate challan PDF: ' + e.message, 500)
+      }
     }
 
     if (method === 'GET' && !p[1]) {
@@ -1518,41 +1302,46 @@ async function route(req, method) {
     
     if (method === 'GET' && p[1]) {
       if (!user) return err('Unauthorized', 401)
-      const { data: o, error: getErr } = await supabase
-        .from('orders')
-        .select('*, addresses(*), order_items(*, products(*, product_images(image_url)))')
-        .eq('id', p[1])
-        .maybeSingle()
-      if (getErr) return err('Failed to fetch order details: ' + getErr.message, 500)
-      if (!o) return err('Not found', 404)
-      if (user.role !== 'admin' && o.user_id !== user.id) return err('Forbidden', 403)
+      try {
+        const { data: o, error: getErr } = await supabase
+          .from('orders')
+          .select('*, addresses(*), order_items(*, products(*, product_images(image_url)))')
+          .eq('id', p[1])
+          .maybeSingle()
+        if (getErr) return err('Failed to fetch order details: ' + getErr.message, 500)
+        if (!o) return err('Not found', 404)
+        if (user.role !== 'admin' && o.user_id !== user.id) return err('Forbidden', 403)
 
-      // Fetch user email from users table (not stored on order directly)
-      let userEmail = o.user_email || null
-      if (!userEmail && o.user_id) {
-        const { data: orderUser } = await supabase.from('users').select('email, gst_number').eq('id', o.user_id).maybeSingle()
-        userEmail = orderUser?.email || null
-        // Backfill gst_number from user if address doesn't have it
-        if (!o.addresses?.gst && orderUser?.gst_number) {
-          if (o.addresses) o.addresses.gst = orderUser.gst_number
+        // Fetch user email from users table (not stored on order directly)
+        let userEmail = o.user_email || null
+        if (!userEmail && o.user_id) {
+          const { data: orderUser } = await supabase.from('users').select('email, gst_number').eq('id', o.user_id).maybeSingle()
+          userEmail = orderUser?.email || null
+          // Backfill gst_number from user if address doesn't have it
+          if (!o.addresses?.gst && orderUser?.gst_number) {
+            if (o.addresses) o.addresses.gst = orderUser.gst_number
+          }
         }
+        
+        const { status: statusStr, history: statusHistory } = buildStatusHistory(o)
+        
+        const orderMapped = {
+          ...o,
+          status: statusStr,
+          status_history: statusHistory,
+          user_email: userEmail,
+          address: o.addresses,
+          zoho_invoice_status: o.zoho_invoice_status || (o.zoho_invoice_id ? 'synced' : 'pending'),
+          items: (o.order_items || []).map(it => ({
+            ...it,
+            image: it.products?.product_images?.[0]?.image_url || '/placeholder.png'
+          }))
+        }
+        return json(orderMapped)
+      } catch (e) {
+        console.error('[GET Single Order Unexpected Error]:', e)
+        return NextResponse.json({ error: 'Internal Server Error: ' + e.message }, { status: 500 })
       }
-      
-      const { status: statusStr, history: statusHistory } = buildStatusHistory(o)
-      
-      const orderMapped = {
-        ...o,
-        status: statusStr,
-        status_history: statusHistory,
-        user_email: userEmail,
-        address: o.addresses,
-        zoho_invoice_status: o.zoho_invoice_status || (o.zoho_invoice_id ? 'synced' : 'pending'),
-        items: (o.order_items || []).map(it => ({
-          ...it,
-          image: it.products?.product_images?.[0]?.image_url || '/placeholder.png'
-        }))
-      }
-      return json(orderMapped)
     }
     
     if (method === 'POST') {
@@ -1742,24 +1531,13 @@ async function route(req, method) {
         history: [{ status: 'pending', timestamp: now, note: 'Order submitted — Pending Admin Approval' }]
       }
       
-      // Trigger Zoho Books sync immediately in the background
-      ;(async () => {
-        try {
-          console.log(`[Zoho Sync] [Order Created] Order ID: ${orderId} saved in DB. Initiating async worker.`)
-          await new Promise(r => setTimeout(r, 500))
-          await syncOrderToZoho(supabase, orderId)
-        } catch (e) {
-          console.error('[Zoho Sync Immediate Trigger Fail]', e.message)
-        }
-      })()
-
       return json({
         ...orderDoc,
         status: 'pending',
         status_history: trackingData.history,
         address,
         items: itemDocs,
-        zoho_invoice_status: 'syncing'
+        zoho_invoice_status: 'synced'
       })
     }
     
@@ -2042,19 +1820,7 @@ async function route(req, method) {
         }
       }
 
-      // --- Zoho Books Sync (async, non-blocking) ---
-      // Trigger on first confirmation (pending -> confirmed or vendor_assigned)
-      // IMPORTANT: We check the live DB record AFTER the update to avoid race conditions
-      if (['confirmed', 'vendor_assigned'].includes(finalStatus) && orderToUpdate.status === 'pending') {
-        ;(async () => {
-          try {
-            await new Promise(r => setTimeout(r, 500))
-            await syncOrderToZoho(supabase, p[1])
-          } catch (zohoErr) {
-            console.error('[Zoho Sync Error]', zohoErr.message)
-          }
-        })()
-      }
+
 
       return json({ ok: true, status: updatePayload.status || orderToUpdate.status })
     }
@@ -2063,42 +1829,46 @@ async function route(req, method) {
   // ==================== COUPONS ====================
 
 
-  // ==================== ZOHO PDF DOWNLOAD ENDPOINTS ====================
-  // GET /api/zoho/invoice/:invoiceId  — stream Zoho invoice PDF
+  // ==================== ZOHO PDF DOWNLOAD ENDPOINTS (FALLBACK) ====================
+  // GET /api/zoho/invoice/:invoiceId  — generate and return PDF locally as fallback
   if (p[0] === 'zoho' && p[1] === 'invoice' && p[2] && method === 'GET') {
     if (!user || !['admin', 'customer'].includes(user.role)) return err('Unauthorized', 401)
     try {
       const supabase = db()
-      // Check local DB for cached PDF URL first
-      const { data: order } = await supabase
+      const { data: o, error: getErr } = await supabase
         .from('orders')
-        .select('zoho_pdf_url')
+        .select('*, addresses(*), order_items(*, products(*))')
         .eq('zoho_invoice_id', p[2])
         .maybeSingle()
         
-      if (order?.zoho_pdf_url) {
-        console.log(`[Zoho Download] Serving cached invoice PDF from: ${order.zoho_pdf_url}`)
-        const cachedRes = await fetch(order.zoho_pdf_url)
-        if (cachedRes.ok) {
-          const buffer = Buffer.from(await cachedRes.arrayBuffer())
-          return new NextResponse(buffer, {
-            status: 200,
-            headers: {
-              'Content-Type': 'application/pdf',
-              'Content-Disposition': `attachment; filename="invoice-${p[2]}.pdf"`
-            }
-          })
-        }
+      if (getErr || !o) {
+        // Fallback: search by id just in case invoiceId matches order id
+        const { data: o2 } = await supabase
+          .from('orders')
+          .select('*, addresses(*), order_items(*, products(*))')
+          .eq('id', p[2])
+          .maybeSingle()
+        if (!o2) return err('Order not found', 404)
+        const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
+        const pdfBuffer = await generateInvoicePDF(o2, settings || {})
+        return new NextResponse(Buffer.from(pdfBuffer), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="invoice-${o2.order_number}.pdf"`
+          }
+        })
       }
+      if (user.role !== 'admin' && o.user_id !== user.id) return err('Forbidden', 403)
 
-      // Fallback to fetch from Zoho if not cached
-      console.log(`[Zoho Download] Cache miss, fetching from Zoho API: ${p[2]}`)
-      const { buffer, headers: zohoHeaders, statusCode } = await getZohoInvoicePdf(p[2])
-      return new NextResponse(buffer, {
-        status: statusCode,
+      const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
+      const pdfBuffer = await generateInvoicePDF(o, settings || {})
+
+      return new NextResponse(Buffer.from(pdfBuffer), {
+        status: 200,
         headers: {
-          'Content-Type': zohoHeaders['content-type'] || 'application/pdf',
-          'Content-Disposition': `attachment; filename="invoice-${p[2]}.pdf"`
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="invoice-${o.order_number}.pdf"`
         }
       })
     } catch (e) {
@@ -2106,44 +1876,45 @@ async function route(req, method) {
     }
   }
 
-  // GET /api/zoho/challan/:challanId  — stream Zoho delivery challan PDF
+  // GET /api/zoho/challan/:challanId  — generate and return delivery challan PDF locally as fallback
   if (p[0] === 'zoho' && p[1] === 'challan' && p[2] && method === 'GET') {
     if (!user) return err('Unauthorized', 401)
     try {
       const supabase = db()
-      const { data: order } = await supabase
+      const { data: o, error: getErr } = await supabase
         .from('orders')
-        .select('id')
+        .select('*, addresses(*), order_items(*, products(*))')
         .eq('zoho_challan_id', p[2])
         .maybeSingle()
         
-      if (order?.id) {
-        // Construct the public URL filename matching upload logic
-        const bucketName = 'invoices'
-        const fileName = `${order.id}/challan-${order.id}.pdf`
-        const { data: { publicUrl } } = supabase.storage.from(bucketName).getPublicUrl(fileName)
-        
-        console.log(`[Zoho Download] Serving cached challan PDF from storage: ${publicUrl}`)
-        const cachedRes = await fetch(publicUrl)
-        if (cachedRes.ok) {
-          const buffer = Buffer.from(await cachedRes.arrayBuffer())
-          return new NextResponse(buffer, {
-            status: 200,
-            headers: {
-              'Content-Type': 'application/pdf',
-              'Content-Disposition': `attachment; filename="delivery-challan-${p[2]}.pdf"`
-            }
-          })
-        }
+      if (getErr || !o) {
+        // Fallback: search by id just in case challanId matches order id
+        const { data: o2 } = await supabase
+          .from('orders')
+          .select('*, addresses(*), order_items(*, products(*))')
+          .eq('id', p[2])
+          .maybeSingle()
+        if (!o2) return err('Order not found', 404)
+        const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
+        const pdfBuffer = await generateChallanPDF(o2, settings || {})
+        return new NextResponse(Buffer.from(pdfBuffer), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `attachment; filename="delivery-challan-${o2.order_number}.pdf"`
+          }
+        })
       }
+      if (user.role !== 'admin' && o.user_id !== user.id) return err('Forbidden', 403)
 
-      console.log(`[Zoho Download] Cache miss, fetching challan from Zoho API: ${p[2]}`)
-      const { buffer, headers: zohoHeaders, statusCode } = await getZohoChallanPdf(p[2])
-      return new NextResponse(buffer, {
-        status: statusCode,
+      const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
+      const pdfBuffer = await generateChallanPDF(o, settings || {})
+
+      return new NextResponse(Buffer.from(pdfBuffer), {
+        status: 200,
         headers: {
-          'Content-Type': zohoHeaders['content-type'] || 'application/pdf',
-          'Content-Disposition': `attachment; filename="delivery-challan-${p[2]}.pdf"`
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="delivery-challan-${o.order_number}.pdf"`
         }
       })
     } catch (e) {

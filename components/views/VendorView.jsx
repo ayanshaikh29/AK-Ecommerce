@@ -114,34 +114,7 @@ export function VendorView() {
     fetchInventory()
   }, [authReady, user, fetchVendorOrders, fetchInventory])
 
-  useEffect(() => {
-    if (!selectedOrderId || !selectedOrder || selectedOrder.zoho_invoice_status === 'synced' || selectedOrder.zoho_invoice_status === 'failed') return
 
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/orders/${selectedOrderId}/sync-status`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-        })
-        if (res.ok) {
-          const data = await res.json()
-          if (data.zoho_invoice_status === 'synced' || data.zoho_invoice_status === 'failed') {
-            // Update orders list locally so selectedOrder updates automatically
-            setOrders(prev => prev.map(o => o.id === selectedOrderId ? {
-              ...o,
-              zoho_invoice_status: data.zoho_invoice_status,
-              zoho_invoice_id: data.zoho_invoice_id,
-              zoho_challan_id: data.zoho_challan_id
-            } : o))
-            clearInterval(interval)
-          }
-        }
-      } catch (err) {
-        console.error('Error polling sync status in vendor view:', err)
-      }
-    }, 2000)
-
-    return () => clearInterval(interval)
-  }, [selectedOrderId, selectedOrder?.zoho_invoice_status])
 
   const handleExportReport = async () => {
     setExportingReport(true)
@@ -172,6 +145,24 @@ export function VendorView() {
       toast.error(err.message || 'Report export failed.')
     } finally {
       setExportingReport(false)
+    }
+  }
+
+  const handleDownloadChallan = async (orderId, orderNum) => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}/challan-pdf`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      if (!res.ok) throw new Error('Failed to download challan')
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `delivery-challan-${orderNum}.pdf`
+      link.click()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error(err.message)
     }
   }
 
@@ -327,115 +318,12 @@ export function VendorView() {
               <p className="text-xs text-slate-400 mt-1">Assigned on {new Date(selectedOrder.placed_at).toLocaleString('en-IN')}</p>
             </div>
             <div className="flex gap-3 flex-wrap">
-              {selectedOrder.zoho_invoice_status === 'synced' ? (
-                <Button 
-                  onClick={() => {
-                    if (selectedOrder.zoho_challan_id) {
-                      const link = document.createElement('a')
-                      link.href = `/api/zoho/challan/${selectedOrder.zoho_challan_id}`
-                      link.setAttribute('download', `delivery-challan-${selectedOrder.order_number}.pdf`)
-                      link.click()
-                    } else {
-                      toast.error('Delivery challan not synced')
-                    }
-                  }} 
-                  className="rounded-full bg-slate-900 text-white font-bold text-xs h-10 px-6 hover:bg-slate-800 shadow-sm"
-                >
-                  <Download className="w-4 h-4 mr-2" /> Download Delivery Challan
-                </Button>
-              ) : (selectedOrder.zoho_invoice_status && selectedOrder.zoho_invoice_status.startsWith('failed')) ? (
-                <div className="flex flex-col gap-1 bg-rose-50 border border-rose-200 p-3 rounded-2xl text-xs text-rose-600 shadow-xs max-w-sm">
-                  <div className="flex items-center gap-2 font-bold text-rose-700">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-                    <span>❌ Sync Failed</span>
-                  </div>
-                  <p className="text-[10px] text-rose-500 font-mono mt-0.5 leading-relaxed">
-                    Reason: {selectedOrder.zoho_invoice_status.split('failed:')[1]?.trim() || 'invoice_creation_failed'}
-                  </p>
-                  <Button 
-                    onClick={async () => {
-                      setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'syncing' } : o))
-                      try {
-                        const res = await fetch(`/api/orders/${selectedOrderId}/retry-sync`, {
-                          method: 'POST',
-                          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-                        })
-                        if (res.ok) {
-                          const data = await res.json()
-                          if (data.success) {
-                            setOrders(prev => prev.map(o => o.id === selectedOrderId ? {
-                              ...o,
-                              zoho_invoice_status: 'synced',
-                              zoho_invoice_id: data.data.zoho_invoice_id,
-                              zoho_challan_id: data.data.zoho_challan_id
-                            } : o))
-                            toast.success('Zoho delivery challan synced successfully!')
-                          } else {
-                            setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: `failed: ${data.error || 'invoice_creation_failed'}` } : o))
-                            toast.error(data.error || 'Sync failed')
-                          }
-                        }
-                      } catch (err) {
-                        toast.error(err.message)
-                        setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'failed: invoice_creation_failed' } : o))
-                      }
-                    }} 
-                    size="xs" 
-                    variant="outline" 
-                    className="mt-2 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 border-rose-300 rounded-full px-3 py-1"
-                  >
-                    Retry
-                  </Button>
-                </div>
-              ) : selectedOrder.zoho_invoice_status === 'failed' ? (
-                <div className="flex flex-col gap-1 bg-rose-50 border border-rose-200 p-3 rounded-2xl text-xs text-rose-600 shadow-xs max-w-sm">
-                  <div className="flex items-center gap-2 font-bold text-rose-700">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-                    <span>❌ Sync Failed</span>
-                  </div>
-                  <p className="text-[10px] text-rose-500 font-mono mt-0.5 leading-relaxed">
-                    Reason: invoice_creation_failed
-                  </p>
-                  <Button 
-                    onClick={async () => {
-                      setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'syncing' } : o))
-                      try {
-                        const res = await fetch(`/api/orders/${selectedOrderId}/retry-sync`, {
-                          method: 'POST',
-                          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-                        })
-                        if (res.ok) {
-                          const data = await res.json()
-                          if (data.success) {
-                            setOrders(prev => prev.map(o => o.id === selectedOrderId ? {
-                              ...o,
-                              zoho_invoice_status: 'synced',
-                              zoho_invoice_id: data.data.zoho_invoice_id,
-                              zoho_challan_id: data.data.zoho_challan_id
-                            } : o))
-                            toast.success('Zoho delivery challan synced successfully!')
-                          } else {
-                            setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: `failed: ${data.error || 'invoice_creation_failed'}` } : o))
-                            toast.error(data.error || 'Sync failed')
-                          }
-                        }
-                      } catch (err) {
-                        toast.error(err.message)
-                        setOrders(prev => prev.map(o => o.id === selectedOrderId ? { ...o, zoho_invoice_status: 'failed: invoice_creation_failed' } : o))
-                      }
-                    }} 
-                    size="xs" 
-                    variant="outline" 
-                    className="mt-2 text-[10px] font-bold text-rose-700 bg-rose-100 hover:bg-rose-200 border-rose-300 rounded-full px-3 py-1"
-                  >
-                    Retry
-                  </Button>
-                </div>
-              ) : (
-                <Button disabled className="rounded-full bg-slate-400 text-white font-bold text-xs h-10 px-6 opacity-50 cursor-not-allowed">
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Generating Delivery Challan...
-                </Button>
-              )}
+              <Button 
+                onClick={() => handleDownloadChallan(selectedOrder.id, selectedOrder.order_number)}
+                className="rounded-full bg-slate-900 text-white font-bold text-xs h-10 px-6 hover:bg-slate-800 shadow-sm"
+              >
+                <Download className="w-4 h-4 mr-2" /> Download Delivery Challan
+              </Button>
             </div>
           </div>
 
