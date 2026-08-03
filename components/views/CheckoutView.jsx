@@ -117,9 +117,58 @@ export function CheckoutView() {
     }
   }, [user])
 
+  // ── ALL HOOKS AND DERIVED VALUES MUST BE ABOVE ANY EARLY RETURNS ────────────
+  // React Rules of Hooks: hooks (useMemo) must always be called in the same
+  // order every render — never conditionally. We compute everything here with
+  // safe fallbacks and only return early AFTER this block.
+
+  const shipping = (cartTotal || 0) > 1999 ? 0 : 99
+
+  // Per-category MOV validation (safe: validateCategoryMinOrderValues handles empty arrays)
+  const movViolations = validateCategoryMinOrderValues(cart || [], categories)
+  const hasMOVViolation = movViolations.length > 0
+
+  // GST breakdown — safe fallback so it always runs even with empty cart
+  const gstBreakdown = calculateCartGST(
+    (cart || []).map(i => ({
+      ...i,
+      price_snapshot: i.price_snapshot || 0,
+      quantity: i.quantity || 1,
+      gst_percent: (i.gst_percent !== undefined && i.gst_percent !== null) ? i.gst_percent : 18,
+      hsn_code: i.hsn_code || '',
+      product_name_snapshot: i.product_name_snapshot || '',
+    })),
+    address.state || '',
+    supplierState || 'Maharashtra'
+  )
+
+  // Destructure for direct JSX use — defaults prevent undefined reference errors
+  const {
+    sameState = false,
+    totalTaxable = 0,
+    totalCGST = 0,
+    totalSGST = 0,
+    totalIGST = 0,
+  } = gstBreakdown || {}
+
+  // useMemo MUST be here — before any conditional returns — to satisfy Rules of Hooks
+  const pincodeStateWarning = useMemo(() => {
+    if (!address.pincode || address.pincode.length < 6 || !address.state) return null
+    const detected = getStateFromPincode(address.pincode)
+    if (detected && detected.toLowerCase() !== address.state.toLowerCase()) {
+      if (detected === 'Andhra Pradesh' && address.state === 'Telangana') return null
+      if (detected === 'Uttar Pradesh' && address.state === 'Uttarakhand') return null
+      return `Pincode ${address.pincode} typically belongs to ${detected} — please confirm your state selection.`
+    }
+    return null
+  }, [address.pincode, address.state])
+
+  const total = (cartTotal || 0) + shipping
+
+  // ── EARLY RETURNS — only after all hooks are called ───────────────────────
   if (!mounted) return null
 
-  if (cart.length === 0 && !isOrdered) {
+  if ((cart || []).length === 0 && !isOrdered) {
     router.push('/')
     return null
   }
@@ -134,38 +183,7 @@ export function CheckoutView() {
     )
   }
 
-  const shipping = cartTotal > 1999 ? 0 : 99
 
-  // Per-category MOV validation
-  const movViolations = validateCategoryMinOrderValues(cart, categories)
-  const hasMOVViolation = movViolations.length > 0
-
-  // GST breakdown (recalculated whenever address.state changes)
-  const gstBreakdown = calculateCartGST(
-    cart.map(i => ({
-      ...i,
-      price_snapshot: i.price_snapshot,
-      quantity: i.quantity,
-      gst_percent: (i.gst_percent !== undefined && i.gst_percent !== null) ? i.gst_percent : 18,
-      hsn_code: i.hsn_code || '',
-      product_name_snapshot: i.product_name_snapshot,
-    })),
-    address.state,
-    supplierState
-  )
-
-  const pincodeStateWarning = useMemo(() => {
-    if (!address.pincode || address.pincode.length < 6 || !address.state) return null
-    const detected = getStateFromPincode(address.pincode)
-    if (detected && detected.toLowerCase() !== address.state.toLowerCase()) {
-      if (detected === 'Andhra Pradesh' && address.state === 'Telangana') return null
-      if (detected === 'Uttar Pradesh' && address.state === 'Uttarakhand') return null
-      return `Pincode ${address.pincode} typically belongs to ${detected} — please confirm your state selection.`
-    }
-    return null
-  }, [address.pincode, address.state])
-
-  const total = cartTotal + shipping
 
   const selectSavedAddress = (addr) => {
     setAddress({
