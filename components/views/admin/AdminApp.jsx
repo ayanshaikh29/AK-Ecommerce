@@ -2264,6 +2264,16 @@ function AdminSettings({ setSettings }) {
         </CardContent></Card>
 
         <Card className="radius-lg shadow-soft"><CardContent className="pt-6 space-y-4">
+          <h3 className="font-display font-extrabold text-lg">Company Bank Details</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><Label>Bank Name</Label><Input value={f.bank_name || ''} onChange={e => setF({ ...f, bank_name: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. ICICI BANK"/></div>
+            <div><Label>Account Number</Label><Input value={f.bank_account_no || ''} onChange={e => setF({ ...f, bank_account_no: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. 646105500575"/></div>
+            <div><Label>Branch Name</Label><Input value={f.bank_branch || ''} onChange={e => setF({ ...f, bank_branch: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. PUNE ERANDWANE"/></div>
+            <div><Label>IFSC Code</Label><Input value={f.bank_ifsc || ''} onChange={e => setF({ ...f, bank_ifsc: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. ICIC0006461"/></div>
+          </div>
+        </CardContent></Card>
+
+        <Card className="radius-lg shadow-soft"><CardContent className="pt-6 space-y-4">
           <h3 className="font-display font-extrabold text-lg">Promo & CTA</h3>
           <div><Label>Promo Headline</Label><Input value={f.promo_headline || ''} onChange={e => setF({ ...f, promo_headline: e.target.value })} className="h-11 rounded-xl"/></div>
           <div><Label>Promo Sub-line</Label><Textarea value={f.promo_subline || ''} onChange={e => setF({ ...f, promo_subline: e.target.value })} rows={2} className="rounded-xl"/></div>
