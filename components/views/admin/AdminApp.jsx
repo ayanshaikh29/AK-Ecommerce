@@ -2190,7 +2190,7 @@ function AdminSettings({ setSettings }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div><Label>Company GSTIN</Label><Input value={f.company_gstin || ''} onChange={e => setF({ ...f, company_gstin: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. 27AAAAA0000A1Z5"/></div>
             <div><Label>Company PAN</Label><Input value={f.company_pan || ''} onChange={e => setF({ ...f, company_pan: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. AAAAA0000A"/></div>
-            <div className="col-span-2"><Label>Registered Business Address (for Invoice header)</Label><Textarea value={f.company_registered_address || ''} onChange={e => setF({ ...f, company_registered_address: e.target.value })} rows={3} className="rounded-xl" placeholder="Full Registered Address..."/></div>
+            <div className="col-span-2"><Label>Registered Business Address (for Invoice header)</Label><Textarea value={f.company_address || ''} onChange={e => setF({ ...f, company_address: e.target.value })} rows={3} className="rounded-xl" placeholder="Full Registered Address..."/></div>
           </div>
         </CardContent></Card>
 
