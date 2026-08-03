@@ -156,6 +156,7 @@ export function CheckoutView() {
       if (!address[k]) { toast.error('Please complete your address'); return }
     }
     setLoading(true)
+    console.log('[Checkout Submit] Sending Address:', address)
     try {
       const res = await fetch('/api/orders', {
         method: 'POST',
@@ -274,7 +275,7 @@ export function CheckoutView() {
                     <Label className="mb-1.5 text-xs font-semibold">{l}</Label>
                     <Input
                       value={address[k]}
-                      onChange={e => setAddress({ ...address, [k]: e.target.value })}
+                      onChange={e => setAddress({ ...address, [k]: e.target.value, id: undefined })}
                       className="h-11 rounded-xl"
                     />
                   </div>
@@ -283,7 +284,7 @@ export function CheckoutView() {
                 {/* State Dropdown — Indian States */}
                 <div>
                   <Label className="mb-1.5 text-xs font-semibold">State *</Label>
-                  <Select value={address.state} onValueChange={v => setAddress({ ...address, state: v })}>
+                  <Select value={address.state} onValueChange={v => setAddress({ ...address, state: v, id: undefined })}>
                     <SelectTrigger className="h-11 rounded-xl">
                       <SelectValue placeholder="Select State" />
                     </SelectTrigger>

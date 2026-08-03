@@ -1525,13 +1525,39 @@ async function route(req, method) {
       let addrId = address.id
       const now = new Date().toISOString()
       
-      if (!addrId || typeof addrId !== 'string' || addrId.length < 10) {
+      let needsNewAddress = !addrId || typeof addrId !== 'string' || addrId.length < 10
+
+      if (addrId && !needsNewAddress) {
+        // Fetch the existing address from DB to verify it matches perfectly
+        const { data: dbAddr } = await supabase
+          .from('addresses')
+          .select('*')
+          .eq('id', addrId)
+          .maybeSingle()
+          
+        if (!dbAddr || 
+            dbAddr.full_name !== address.full_name ||
+            dbAddr.phone !== address.phone ||
+            dbAddr.line1 !== address.line1 ||
+            (dbAddr.line2 || '') !== (address.line2 || '') ||
+            dbAddr.city !== address.city ||
+            dbAddr.state !== address.state ||
+            dbAddr.pincode !== address.pincode) {
+          needsNewAddress = true
+          addrId = null
+        }
+      }
+
+      if (needsNewAddress) {
         const { data: existing } = await supabase
           .from('addresses')
           .select('id')
           .eq('user_id', user.id)
           .eq('line1', address.line1)
           .eq('pincode', address.pincode)
+          .eq('state', address.state)
+          .eq('city', address.city)
+          .eq('full_name', address.full_name)
           .maybeSingle()
           
         if (existing) {
