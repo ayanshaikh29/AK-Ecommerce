@@ -779,6 +779,7 @@ async function route(req, method) {
         stock_quantity: body.stock_quantity, 
         sku: body.sku || 'AK-' + Math.floor(Math.random()*90000+10000), 
         is_active: body.is_active!==false, 
+        hsn_code: body.hsn_code || null,
         created_at: now, 
         updated_at: now, 
         rating_avg: 0, 
@@ -813,6 +814,7 @@ async function route(req, method) {
         stock_quantity: merged.stock_quantity, 
         sku: merged.sku, 
         is_active: merged.is_active, 
+        hsn_code: merged.hsn_code,
         updated_at: now 
       }
       // Remove undefined keys so we don't overwrite with undefined

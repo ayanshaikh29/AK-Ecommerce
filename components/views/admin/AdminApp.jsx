@@ -973,6 +973,10 @@ function AdminProducts({ router }) {
 
   const filtered = (Array.isArray(list) ? list : []).filter(p => !q || (p?.name || '').toLowerCase().includes(q.toLowerCase()))
 
+  const missingHsnCount = useMemo(() => {
+    return (Array.isArray(list) ? list : []).filter(p => !p.hsn_code || !p.hsn_code.trim()).length
+  }, [list])
+
   return (
     <div className="slide-up text-left">
       <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
@@ -997,6 +1001,18 @@ function AdminProducts({ router }) {
         </div>
       </div>
 
+      {missingHsnCount > 0 && (
+        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-700 dark:text-red-300 text-xs font-semibold flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 shrink-0 text-red-500 animate-pulse" />
+          <div>
+            <p className="font-bold text-sm">⚠️ HSN Code Configuration Warnings</p>
+            <p className="mt-0.5">
+              <strong>{missingHsnCount} product{missingHsnCount > 1 ? 's' : ''}</strong> are missing HSN codes. B2B GST tax invoices will fail to generate for orders containing these products until they are configured with valid HSN codes.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 mb-6">
         <Input placeholder="Search products by name..." value={q} onChange={e => setQ(e.target.value)} className="max-w-sm h-10 rounded-xl text-xs bg-card"/>
       </div>
@@ -1007,6 +1023,7 @@ function AdminProducts({ router }) {
             <thead className="bg-secondary/60 text-muted-foreground uppercase font-bold text-[10px] tracking-wider border-b">
               <tr>
                 <th className="p-3.5">Product</th>
+                <th className="p-3.5">HSN</th>
                 <th className="p-3.5">Price</th>
                 <th className="p-3.5">Stock</th>
                 <th className="p-3.5">Media</th>
@@ -1016,9 +1033,9 @@ function AdminProducts({ router }) {
             </thead>
             <tbody className="divide-y divide-border">
               {!list ? (
-                <tr><td colSpan="6" className="p-12 text-center text-muted-foreground">Loading products...</td></tr>
+                <tr><td colSpan="7" className="p-12 text-center text-muted-foreground">Loading products...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan="6" className="p-12 text-center text-muted-foreground">No products found.</td></tr>
+                <tr><td colSpan="7" className="p-12 text-center text-muted-foreground">No products found.</td></tr>
               ) : (
                 filtered.map(p => (
                   <tr key={p.id} className="hover:bg-secondary/30 transition">
@@ -1035,6 +1052,15 @@ function AdminProducts({ router }) {
                           <p className="text-[10px] text-muted-foreground uppercase font-mono">{p.sku || 'NO-SKU'}</p>
                         </div>
                       </div>
+                    </td>
+                    <td className="p-3.5">
+                      {p.hsn_code ? (
+                        <span className="font-mono font-semibold text-foreground bg-secondary/80 px-2.5 py-1 rounded-lg border">{p.hsn_code}</span>
+                      ) : (
+                        <Badge variant="destructive" className="font-bold text-[9px] rounded-full uppercase tracking-wider animate-pulse bg-red-500 text-white">
+                          HSN Missing
+                        </Badge>
+                      )}
                     </td>
                     <td className="p-3.5 font-mono font-extrabold text-sm">{formatINR(p.price)}</td>
                     <td className="p-3.5">
@@ -1173,6 +1199,10 @@ function AdminProductForm({ router, editId }) {
 
   const save = async e => {
     e.preventDefault()
+    if (!f.hsn_code || !f.hsn_code.trim()) {
+      toast.error('HSN Code is required for tax invoice compilation')
+      return
+    }
     const body = { 
       ...f, 
       price: +f.price, 
