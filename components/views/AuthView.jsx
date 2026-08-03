@@ -57,6 +57,7 @@ export function AuthView({ mode = 'login' }) {
       
       localStorage.setItem('token', data.token)
       localStorage.setItem('user', JSON.stringify(data.user))
+      document.cookie = `auth_token=${data.token}; path=/; max-age=31536000`
       document.cookie = `user_role=${data.user.role}; path=/; max-age=31536000`
       setUser(data.user)
       

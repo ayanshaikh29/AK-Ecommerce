@@ -1615,7 +1615,11 @@ export function CustomerPricingManager() {
                                     assigned_vendor_id: newVId
                                   })
                                 })
-                                if (!res.ok) throw new Error('Failed to update vendor assignment')
+                                 if (!res.ok) {
+                                  const errData = await res.json().catch(() => ({}))
+                                  console.error('[Vendor Assignment Error Details]:', errData)
+                                  throw new Error(errData.error || errData.message || 'Failed to update vendor assignment')
+                                }
                                 setProfileData(prev => ({
                                   ...prev,
                                   user: {
@@ -1626,6 +1630,7 @@ export function CustomerPricingManager() {
                                 toast.success('Vendor assignment updated successfully!')
                                 fetchCustomerList()
                               } catch (err) {
+                                console.error('[Vendor Assignment Error]:', err)
                                 toast.error(err.message)
                               } finally {
                                 setUpdatingVendorId(false)

@@ -17,9 +17,14 @@ import {
   getVendorByUserId 
 } from '@/lib/b2b-store'
 
+export const maxDuration = 60 // seconds — Hobby plan max limit
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 const SECRET = process.env.AUTH_SECRET || 'dev-secret'
+if (!process.env.AUTH_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('[FATAL] AUTH_SECRET is not set in production environment!')
+}
 const SEED_VERSION = 'ak-v3-premium'
 
 let _supabase = null
@@ -50,25 +55,37 @@ async function safeUpdateOrderZoho(supabase, orderId, data) {
 async function getOrderSyncStatus(supabase, orderId) {
   let { data, error } = await supabase
     .from('orders')
-    .select('zoho_invoice_status, zoho_invoice_id, zoho_invoice_number, synced_at, zoho_challan_id')
+    .select('zoho_invoice_status, zoho_invoice_id, zoho_invoice_number, synced_at, zoho_challan_id, placed_at')
     .eq('id', orderId)
     .maybeSingle()
 
   if (error && error.message.includes('zoho_invoice_status')) {
     const { data: fallbackData } = await supabase
       .from('orders')
-      .select('id, zoho_invoice_id, zoho_challan_id')
+      .select('id, zoho_invoice_id, zoho_challan_id, placed_at')
       .eq('id', orderId)
       .maybeSingle()
       
     if (fallbackData) {
+      const placedTime = new Date(fallbackData.placed_at || Date.now()).getTime()
+      const elapsed = (Date.now() - placedTime) / 1000
+      const isStuck = elapsed > 45
       return {
-        zoho_invoice_status: fallbackData.zoho_invoice_id ? 'synced' : 'pending',
+        zoho_invoice_status: fallbackData.zoho_invoice_id ? 'synced' : (isStuck ? 'failed: timeout' : 'syncing'),
         zoho_invoice_id: fallbackData.zoho_invoice_id,
         zoho_invoice_number: fallbackData.zoho_invoice_id ? `INV-${fallbackData.id.slice(0, 6).toUpperCase()}` : null,
         synced_at: null,
         zoho_challan_id: fallbackData.zoho_challan_id
       }
+    }
+  }
+
+  if (data) {
+    const placedTime = new Date(data.placed_at || Date.now()).getTime()
+    const elapsed = (Date.now() - placedTime) / 1000
+    if ((data.zoho_invoice_status === 'syncing' || !data.zoho_invoice_status) && elapsed > 45 && !data.zoho_invoice_id) {
+      data.zoho_invoice_status = 'failed: timeout'
+      await safeUpdateOrderZoho(supabase, orderId, { zoho_invoice_status: 'failed: timeout' })
     }
   }
   return data
@@ -4352,6 +4369,7 @@ Current Conversation History:\n` +
 
   // ==================== ADMIN UPDATE USER PROFILE (VENDOR ASSIGNMENT) ====================
   if (p[0] === 'admin' && p[1] === 'user-profile' && method === 'PUT') {
+    console.log('[DEBUG Admin User-Profile PUT] Incoming body:', body, 'targetUserId:', body?.user_id)
     if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
 
     const targetUserId = body.user_id
@@ -4373,13 +4391,24 @@ Current Conversation History:\n` +
 
       if (updateErr) {
         console.error('[User Profile Update Error]:', updateErr)
-        return err('Failed to update customer: ' + updateErr.message, 500)
+        return NextResponse.json({
+          error: 'Failed to update customer: ' + updateErr.message,
+          message: updateErr.message,
+          code: updateErr.code,
+          details: updateErr.details,
+          hint: updateErr.hint,
+          ok: false
+        }, { status: 500 })
       }
 
       return json({ ok: true, message: 'Customer vendor assignment updated successfully' })
     } catch (e) {
       console.error('[User Profile Update Unexpected]:', e)
-      return err('Internal error: ' + e.message, 500)
+      return NextResponse.json({
+        error: 'Internal error: ' + e.message,
+        message: e.message,
+        ok: false
+      }, { status: 500 })
     }
   }
 
