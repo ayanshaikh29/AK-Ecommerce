@@ -18,6 +18,32 @@ import { calculateCartGST, validateCategoryMinOrderValues } from '@/lib/gst-util
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
+const getStateFromPincode = (pincode) => {
+  if (!pincode || pincode.length < 2) return null
+  const prefix = pincode.slice(0, 2)
+  if (prefix === '11') return 'Delhi'
+  if (['12', '13'].includes(prefix)) return 'Haryana'
+  if (['14', '15'].includes(prefix)) return 'Punjab'
+  if (prefix === '16') return 'Chandigarh'
+  if (prefix === '17') return 'Himachal Pradesh'
+  if (['18', '19'].includes(prefix)) return 'Jammu & Kashmir'
+  if (['20', '21', '22', '23', '24', '25', '26', '27', '28'].includes(prefix)) return 'Uttar Pradesh'
+  if (['30', '31', '32', '33', '34'].includes(prefix)) return 'Rajasthan'
+  if (['36', '37', '38', '39'].includes(prefix)) return 'Gujarat'
+  if (['40', '41', '42', '43', '44'].includes(prefix)) return 'Maharashtra'
+  if (['45', '46', '47', '48'].includes(prefix)) return 'Madhya Pradesh'
+  if (prefix === '49') return 'Chhattisgarh'
+  if (['50', '51', '52', '53'].includes(prefix)) return 'Andhra Pradesh'
+  if (['56', '57', '58', '59'].includes(prefix)) return 'Karnataka'
+  if (['60', '61', '62', '63', '64'].includes(prefix)) return 'Tamil Nadu'
+  if (['67', '68', '69'].includes(prefix)) return 'Kerala'
+  if (['70', '71', '72', '73', '74'].includes(prefix)) return 'West Bengal'
+  if (['75', '76', '77'].includes(prefix)) return 'Odisha'
+  if (prefix === '78') return 'Assam'
+  if (['80', '81', '82', '83', '84', '85'].includes(prefix)) return 'Bihar'
+  return null
+}
+
 function addRipple(e) {
   const btn = e.currentTarget; if (!btn) return
   const rect = btn.getBoundingClientRect()
@@ -128,7 +154,17 @@ export function CheckoutView() {
     supplierState
   )
 
-  const { sameState, totalTaxable, totalCGST, totalSGST, totalIGST, totalTax } = gstBreakdown
+  const pincodeStateWarning = useMemo(() => {
+    if (!address.pincode || address.pincode.length < 6 || !address.state) return null
+    const detected = getStateFromPincode(address.pincode)
+    if (detected && detected.toLowerCase() !== address.state.toLowerCase()) {
+      if (detected === 'Andhra Pradesh' && address.state === 'Telangana') return null
+      if (detected === 'Uttar Pradesh' && address.state === 'Uttarakhand') return null
+      return `Pincode ${address.pincode} typically belongs to ${detected} — please confirm your state selection.`
+    }
+    return null
+  }, [address.pincode, address.state])
+
   const total = cartTotal + shipping
 
   const selectSavedAddress = (addr) => {
@@ -275,7 +311,17 @@ export function CheckoutView() {
                     <Label className="mb-1.5 text-xs font-semibold">{l}</Label>
                     <Input
                       value={address[k]}
-                      onChange={e => setAddress({ ...address, [k]: e.target.value, id: undefined })}
+                      onChange={e => {
+                        const val = e.target.value
+                        const updates = { [k]: val, id: undefined }
+                        if (k === 'pincode') {
+                          if (val.length === 6) {
+                            const detected = getStateFromPincode(val)
+                            if (detected) updates.state = detected
+                          }
+                        }
+                        setAddress(prev => ({ ...prev, ...updates }))
+                      }}
                       className="h-11 rounded-xl"
                     />
                   </div>
@@ -284,7 +330,7 @@ export function CheckoutView() {
                 {/* State Dropdown — Indian States */}
                 <div>
                   <Label className="mb-1.5 text-xs font-semibold">State *</Label>
-                  <Select value={address.state} onValueChange={v => setAddress({ ...address, state: v, id: undefined })}>
+                  <Select value={address.state} onValueChange={v => setAddress(prev => ({ ...prev, state: v, id: undefined }))}>
                     <SelectTrigger className="h-11 rounded-xl">
                       <SelectValue placeholder="Select State" />
                     </SelectTrigger>
@@ -296,6 +342,13 @@ export function CheckoutView() {
                   </Select>
                 </div>
               </div>
+
+              {pincodeStateWarning && (
+                <div className="mt-4 text-xs font-semibold px-3 py-2.5 rounded-xl flex items-center gap-2 bg-red-500/10 text-red-700 dark:text-red-300 border border-red-500/20 animate-pulse">
+                  <AlertTriangle className="w-4.5 h-4.5 text-red-500 shrink-0" />
+                  <span>{pincodeStateWarning}</span>
+                </div>
+              )}
 
               {/* GST Type Badge */}
               {address.state && (
