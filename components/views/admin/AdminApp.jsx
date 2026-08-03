@@ -2931,6 +2931,30 @@ function AdminOrderDetail({ orderId }) {
     }
   }
 
+  const handleResyncVendor = async () => {
+    try {
+      const res = await fetch(`/api/admin/orders/resync-vendor/${order.id}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Resync request failed')
+      
+      setOrder(prev => ({
+        ...prev,
+        assigned_vendor_id: data.order.assigned_vendor_id,
+        vendor_name: data.order.vendor_name,
+        vendor_email: data.order.vendor_email,
+        assigned_at: data.order.assigned_at,
+        assigned_by: data.order.assigned_by,
+        status: data.order.status || prev.status
+      }))
+      toast.success('Vendor assignment re-synced successfully!')
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
   useEffect(() => {
     if (!order || !order.id || order.zoho_invoice_status === 'synced' || order.zoho_invoice_status === 'failed') return
 
@@ -3271,7 +3295,7 @@ function AdminOrderDetail({ orderId }) {
               <h3 className="font-display font-extrabold text-lg flex items-center gap-2">
                 <Truck className="w-5 h-5 text-accent" /> Logistics Partner
               </h3>
-              <div className="p-4 rounded-xl bg-secondary/50 border space-y-2">
+              <div className="p-4 rounded-xl bg-secondary/50 border space-y-3">
                 {order.vendor_name ? (
                   <div>
                     <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Assigned Partner Unit</span>
@@ -3297,6 +3321,13 @@ function AdminOrderDetail({ orderId }) {
                     </span>
                   </div>
                 )}
+                <Button 
+                  onClick={handleResyncVendor} 
+                  variant="outline"
+                  className="w-full rounded-xl bg-accent/5 hover:bg-accent/15 text-accent border border-accent/25 text-xs font-bold py-2 mt-1"
+                >
+                  🔄 Re-sync Zonal Admin
+                </Button>
               </div>
             </CardContent>
           </Card>

@@ -4384,6 +4384,17 @@ Current Conversation History:\n` +
         updatePayload.assigned_vendor_id = assignedVendorId
       }
 
+      // Fetch vendor details beforehand if we are assigning a new vendor
+      let vendorRecord = null
+      if (assignedVendorId) {
+        const { data } = await supabase
+          .from('vendors')
+          .select('*')
+          .eq('id', assignedVendorId)
+          .maybeSingle()
+        vendorRecord = data
+      }
+
       const { error: updateErr } = await supabase
         .from('users')
         .update(updatePayload)
@@ -4401,6 +4412,59 @@ Current Conversation History:\n` +
         }, { status: 500 })
       }
 
+      // AUTOMATIC FIX (root cause): Update un-delivered orders for this customer
+      if (assignedVendorId !== undefined) {
+        // Find existing non-fulfilled orders
+        const { data: existingOrders } = await supabase
+          .from('orders')
+          .select('id, status, status_history')
+          .eq('user_id', targetUserId)
+          .not('status', 'in', '("delivered","cancelled","rejected")')
+
+        if (existingOrders && existingOrders.length > 0) {
+          for (const ord of existingOrders) {
+            const orderUpdate = {}
+            let finalStatus = ord.status
+
+            if (assignedVendorId && vendorRecord) {
+              orderUpdate.assigned_vendor_id = vendorRecord.id
+              orderUpdate.vendor_name = vendorRecord.name || ''
+              orderUpdate.vendor_email = vendorRecord.email || ''
+              orderUpdate.assigned_at = new Date().toISOString()
+              orderUpdate.assigned_by = 'Auto-Assign on Zonal Admin Update'
+
+              if (ord.status === 'confirmed' || ord.status === 'pending') {
+                finalStatus = 'vendor_assigned'
+                orderUpdate.status = finalStatus
+              }
+            } else {
+              orderUpdate.assigned_vendor_id = null
+              orderUpdate.vendor_name = null
+              orderUpdate.vendor_email = null
+              orderUpdate.assigned_at = null
+              orderUpdate.assigned_by = null
+
+              if (ord.status === 'vendor_assigned') {
+                finalStatus = 'confirmed'
+                orderUpdate.status = finalStatus
+              }
+            }
+
+            const history = Array.isArray(ord.status_history) ? [...ord.status_history] : []
+            history.push({
+              status: finalStatus,
+              note: assignedVendorId && vendorRecord
+                ? `Zonal Admin Auto-Assigned: ${vendorRecord.name} (Customer pricing profile updated)`
+                : `Zonal Admin Unassigned (Customer pricing profile updated)`,
+              timestamp: new Date().toISOString()
+            })
+            orderUpdate.status_history = history
+
+            await supabase.from('orders').update(orderUpdate).eq('id', ord.id)
+          }
+        }
+      }
+
       return json({ ok: true, message: 'Customer vendor assignment updated successfully' })
     } catch (e) {
       console.error('[User Profile Update Unexpected]:', e)
@@ -4409,6 +4473,140 @@ Current Conversation History:\n` +
         message: e.message,
         ok: false
       }, { status: 500 })
+    }
+  }
+
+  // ==================== ADMIN ORDER RESYNC VENDOR (MANUAL & BULK) ====================
+  if (p[0] === 'admin' && p[1] === 'orders' && p[2] === 'resync-vendor' && p[3] && method === 'POST') {
+    if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
+    const orderId = p[3]
+    try {
+      const supabase = db()
+      const { data: order, error: orderErr } = await supabase
+        .from('orders')
+        .select('id, user_id, order_number, status_history, status')
+        .eq('id', orderId)
+        .maybeSingle()
+
+      if (orderErr || !order) return err('Order not found', 404)
+
+      const { data: orderUser, error: userErr } = await supabase
+        .from('users')
+        .select('assigned_vendor_id')
+        .eq('id', order.user_id)
+        .maybeSingle()
+
+      if (userErr || !orderUser || !orderUser.assigned_vendor_id) {
+        return err('No vendor assigned to this customer', 400)
+      }
+
+      const { data: vendorRecord, error: vendorErr } = await supabase
+        .from('vendors')
+        .select('*')
+        .eq('id', orderUser.assigned_vendor_id)
+        .maybeSingle()
+
+      if (vendorErr || !vendorRecord) return err('Assigned vendor record not found', 404)
+
+      const updatePayload = {
+        assigned_vendor_id: vendorRecord.id,
+        vendor_name: vendorRecord.name || '',
+        vendor_email: vendorRecord.email || '',
+        assigned_at: new Date().toISOString(),
+        assigned_by: 'Admin Manual Resync'
+      }
+
+      let finalStatus = order.status
+      if (order.status === 'confirmed' || order.status === 'pending') {
+        finalStatus = 'vendor_assigned'
+        updatePayload.status = finalStatus
+      }
+
+      const history = Array.isArray(order.status_history) ? [...order.status_history] : []
+      history.push({
+        status: finalStatus,
+        note: `Vendor Manually Re-synced: ${vendorRecord.name} (Assigned by Admin)`,
+        timestamp: new Date().toISOString()
+      })
+      updatePayload.status_history = history
+
+      const { error: updateErr } = await supabase
+        .from('orders')
+        .update(updatePayload)
+        .eq('id', orderId)
+
+      if (updateErr) return err('Failed to update order: ' + updateErr.message, 500)
+
+      return json({ ok: true, message: 'Vendor successfully re-synced to order', order: updatePayload })
+    } catch (e) {
+      console.error('[Admin Order Resync Unexpected]:', e)
+      return err('Internal error: ' + e.message, 500)
+    }
+  }
+
+  if (p[0] === 'admin' && p[1] === 'orders' && p[2] === 'resync-all-unassigned' && method === 'POST') {
+    if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
+    try {
+      const supabase = db()
+      const { data: unassignedOrders, error: fetchErr } = await supabase
+        .from('orders')
+        .select('id, user_id, order_number, status_history, status')
+        .or('vendor_name.is.null,vendor_name.eq.""')
+        .not('status', 'in', '("delivered","cancelled","rejected")')
+
+      if (fetchErr) return err('Failed to fetch orders: ' + fetchErr.message, 500)
+      if (!unassignedOrders || unassignedOrders.length === 0) {
+        return json({ ok: true, message: 'No unassigned orders found', updatedCount: 0 })
+      }
+
+      let updatedCount = 0
+      for (const order of unassignedOrders) {
+        const { data: orderUser } = await supabase
+          .from('users')
+          .select('assigned_vendor_id')
+          .eq('id', order.user_id)
+          .maybeSingle()
+
+        if (orderUser?.assigned_vendor_id) {
+          const { data: vendorRecord } = await supabase
+            .from('vendors')
+            .select('*')
+            .eq('id', orderUser.assigned_vendor_id)
+            .maybeSingle()
+
+          if (vendorRecord) {
+            const updatePayload = {
+              assigned_vendor_id: vendorRecord.id,
+              vendor_name: vendorRecord.name || '',
+              vendor_email: vendorRecord.email || '',
+              assigned_at: new Date().toISOString(),
+              assigned_by: 'Admin Bulk Resync'
+            }
+
+            let finalStatus = order.status
+            if (order.status === 'confirmed' || order.status === 'pending') {
+              finalStatus = 'vendor_assigned'
+              updatePayload.status = finalStatus
+            }
+
+            const history = Array.isArray(order.status_history) ? [...order.status_history] : []
+            history.push({
+              status: finalStatus,
+              note: `Vendor Bulk Re-synced: ${vendorRecord.name} (Assigned by Admin)`,
+              timestamp: new Date().toISOString()
+            })
+            updatePayload.status_history = history
+
+            await supabase.from('orders').update(updatePayload).eq('id', order.id)
+            updatedCount++
+          }
+        }
+      }
+
+      return json({ ok: true, message: `Successfully updated ${updatedCount} orders`, updatedCount })
+    } catch (e) {
+      console.error('[Admin Bulk Resync Unexpected]:', e)
+      return err('Internal error: ' + e.message, 500)
     }
   }
 
