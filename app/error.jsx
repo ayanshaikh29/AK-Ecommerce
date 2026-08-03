@@ -4,9 +4,29 @@ import React, { useEffect } from 'react'
 import { AlertTriangle, RefreshCw, Home, LayoutDashboard, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
+// Silently logs client-side errors to the /api/log-client-error endpoint.
+// This is fire-and-forget — it never blocks the UI or throws its own errors.
+function logClientError(error, source = 'GlobalRouteError') {
+  try {
+    const payload = {
+      message: error?.message || String(error) || 'Unknown error',
+      stack: error?.stack || '',
+      url: typeof window !== 'undefined' ? window.location.href : '',
+      context: source,
+      timestamp: new Date().toISOString()
+    }
+    fetch('/api/log-client-error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).catch(() => {})
+  } catch (_) {}
+}
+
 export default function GlobalRouteError({ error, reset }) {
   useEffect(() => {
     console.error('[Global App Route Error Caught]:', error)
+    logClientError(error, 'GlobalRouteError — app/error.jsx')
   }, [error])
 
   return (

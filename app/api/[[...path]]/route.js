@@ -370,6 +370,45 @@ async function route(req, method) {
     })
   }
 
+  // ── Client Error Logger ─────────────────────────────────────────────────────
+  // POST /api/log-client-error  — logs browser/React crashes from any client
+  // GET  /api/log-client-error  — admin-only: returns recent 50 errors
+  if (p[0] === 'log-client-error') {
+    if (method === 'POST') {
+      try {
+        const { message, stack, url: errorUrl, context, timestamp } = body
+        const userRole = user?.role || 'unknown'
+        await supabase.from('client_errors').insert({
+          message: (message || 'Unknown error').slice(0, 2000),
+          stack: (stack || '').slice(0, 5000),
+          url: (errorUrl || '').slice(0, 500),
+          context: (context || '').slice(0, 500),
+          user_role: userRole,
+          timestamp: timestamp || new Date().toISOString(),
+          created_at: new Date().toISOString()
+        })
+      } catch (e) {
+        // Intentionally silent — logging must NEVER cause another error
+        console.warn('[log-client-error] Insert failed silently:', e?.message)
+      }
+      return json({ ok: true })
+    }
+    if (method === 'GET') {
+      if (!user || user.role !== 'admin') return err('Forbidden', 403)
+      try {
+        const { data: errors, error: fetchErr } = await supabase
+          .from('client_errors')
+          .select('id, message, url, context, user_role, timestamp, created_at')
+          .order('created_at', { ascending: false })
+          .limit(50)
+        if (fetchErr) return err('Failed to fetch error logs: ' + fetchErr.message, 500)
+        return json({ errors: errors || [] })
+      } catch (e) {
+        return err('Internal error: ' + e.message, 500)
+      }
+    }
+  }
+
   if (p[0] === 'upload' && method === 'POST') {
     if (!user || user.role !== 'admin') return err('Forbidden', 403)
     try {
@@ -1395,19 +1434,28 @@ async function route(req, method) {
           const { data: orderUser } = await supabase.from('users').select('email, gst_number').eq('id', o.user_id).maybeSingle()
           userEmail = orderUser?.email || null
           // Backfill gst_number from user if address doesn't have it
-          if (!o.addresses?.gst && orderUser?.gst_number) {
-            if (o.addresses) o.addresses.gst = orderUser.gst_number
+          // addresses join returns array — resolve to first element safely
+          const addrObj = Array.isArray(o.addresses) ? o.addresses[0] : o.addresses
+          if (!addrObj?.gst && orderUser?.gst_number) {
+            if (addrObj) addrObj.gst = orderUser.gst_number
           }
         }
         
         const { status: statusStr, history: statusHistory } = buildStatusHistory(o)
         
+        // Safely resolve addresses array → single object
+        // Supabase join returns addresses(*) as an array even for single rows
+        const resolvedAddress = Array.isArray(o.addresses)
+          ? (o.addresses[0] || null)
+          : (o.addresses || null)
+
+
         const orderMapped = {
           ...o,
           status: statusStr,
           status_history: statusHistory,
           user_email: userEmail,
-          address: o.addresses,
+          address: resolvedAddress,   // Always a plain object or null — never an array
           zoho_invoice_status: o.zoho_invoice_status || (o.zoho_invoice_id ? 'synced' : 'pending'),
           items: (o.order_items || []).map(it => ({
             ...it,

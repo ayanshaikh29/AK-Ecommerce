@@ -7,7 +7,8 @@ import {
   LayoutDashboard, Grid3x3, Plus, Upload, ClipboardList, ImageIcon, 
   Users, Settings, LogOut, Package, TrendingUp, AlertTriangle, 
   Trash2, Video, FileText, Building2, Bell, BellRing, Menu, X, MessageSquare,
-  Loader2, ShieldCheck, Truck, CheckCircle2, XCircle, Activity, Search
+  Loader2, ShieldCheck, Truck, CheckCircle2, XCircle, Activity, Search,
+  ShieldAlert, RefreshCw
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
@@ -720,6 +721,7 @@ function AdminSettingsSection({ setSettings, defaultTab = 'site' }) {
     { id: 'customers', label: 'VIP / Customers', icon: Users },
     { id: 'product-qa', label: 'Product Q&A', icon: MessageSquare },
     { id: 'clients', label: 'Client Logos', icon: Building2 },
+    { id: 'error-logs', label: 'System Health', icon: ShieldAlert },
   ]
 
   return (
@@ -761,10 +763,142 @@ function AdminSettingsSection({ setSettings, defaultTab = 'site' }) {
         {activeTab === 'customers' && <AdminCustomers />}
         {activeTab === 'product-qa' && <AdminQA />}
         {activeTab === 'clients' && <AdminClients />}
+        {activeTab === 'error-logs' && <AdminErrorLogs />}
       </div>
     </div>
   )
 }
+
+// ── Admin Error Logs — System Health Monitor ──────────────────────────────────
+// Shows recent client-side crashes caught by error boundaries & global error.jsx.
+// Visible only in the admin "Settings → System Health" tab.
+function AdminErrorLogs() {
+  const [errors, setErrors] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [lastFetched, setLastFetched] = useState(null)
+
+  const fetchErrors = async () => {
+    setLoading(true)
+    try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : ''
+      const res = await fetch('/api/log-client-error', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) throw new Error('Failed to load error logs')
+      const data = await res.json()
+      setErrors(data.errors || [])
+      setLastFetched(new Date())
+    } catch (e) {
+      toast.error(e.message || 'Could not load error logs')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { fetchErrors() }, [])
+
+  const formatTime = (ts) => {
+    try { return new Date(ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) }
+    catch (_) { return ts || '—' }
+  }
+
+  const severityColor = (msg = '') => {
+    const m = msg.toLowerCase()
+    if (m.includes('cannot read') || m.includes('undefined') || m.includes('null')) return 'text-red-600 bg-red-500/10 border-red-500/20'
+    if (m.includes('network') || m.includes('fetch') || m.includes('failed')) return 'text-amber-600 bg-amber-500/10 border-amber-500/20'
+    return 'text-blue-600 bg-blue-500/10 border-blue-500/20'
+  }
+
+  return (
+    <div className="p-6 space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-destructive/10 border border-destructive/20 flex items-center justify-center">
+            <ShieldAlert className="w-5 h-5 text-destructive" />
+          </div>
+          <div>
+            <h2 className="font-display font-extrabold text-lg text-foreground">System Health — Client Error Logs</h2>
+            <p className="text-xs text-muted-foreground">
+              Browser-side crashes caught by error boundaries. Auto-logged silently without affecting customers.
+              {lastFetched && <span className="ml-2 opacity-70">Last refreshed: {formatTime(lastFetched)}</span>}
+            </p>
+          </div>
+        </div>
+        <Button onClick={fetchErrors} variant="outline" size="sm" className="rounded-xl gap-2 text-xs" disabled={loading}>
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Stats bar */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-card border border-border/40 rounded-xl p-4 text-center">
+          <p className="text-2xl font-extrabold font-display text-foreground">{errors.length}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Total Logged</p>
+        </div>
+        <div className="bg-card border border-red-500/20 rounded-xl p-4 text-center">
+          <p className="text-2xl font-extrabold font-display text-red-600">
+            {errors.filter(e => (e.message || '').toLowerCase().includes('cannot read') || (e.message || '').toLowerCase().includes('undefined')).length}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">TypeError Crashes</p>
+        </div>
+        <div className="bg-card border border-amber-500/20 rounded-xl p-4 text-center">
+          <p className="text-2xl font-extrabold font-display text-amber-600">
+            {errors.filter(e => (e.message || '').toLowerCase().includes('fetch') || (e.message || '').toLowerCase().includes('network')).length}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">Network Errors</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-7 h-7 animate-spin text-primary" />
+        </div>
+      ) : errors.length === 0 ? (
+        <div className="text-center py-16">
+          <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+          </div>
+          <p className="font-display font-extrabold text-lg text-foreground">All Clear!</p>
+          <p className="text-sm text-muted-foreground mt-1">No client errors have been logged. The app is healthy.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {errors.map((e, i) => (
+            <div key={e.id || i} className={`border rounded-xl p-4 text-xs ${severityColor(e.message)}`}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-sm truncate">{e.message || 'Unknown error'}</p>
+                  {e.context && (
+                    <p className="mt-1 opacity-80 font-medium">📍 {e.context}</p>
+                  )}
+                  {e.url && (
+                    <p className="mt-0.5 opacity-70 truncate">🔗 {e.url}</p>
+                  )}
+                </div>
+                <div className="shrink-0 text-right space-y-1">
+                  <p className="font-semibold opacity-80">{formatTime(e.timestamp || e.created_at)}</p>
+                  {e.user_role && (
+                    <span className="inline-block px-2 py-0.5 rounded-full bg-black/10 text-[10px] font-bold uppercase tracking-wide">
+                      {e.user_role}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Footer note */}
+      <p className="text-[10px] text-muted-foreground border-t border-border/40 pt-4">
+        ℹ️ Showing the most recent 50 errors. Run the <code className="font-mono bg-secondary px-1 rounded">schema-client-errors.sql</code> migration in Supabase to enable logging. Errors older than 90 days can be purged manually.
+      </p>
+    </div>
+  )
+}
+
 
 function AdminDashboard({ refreshTrigger }) {
   const [s, setS] = useState(null)
