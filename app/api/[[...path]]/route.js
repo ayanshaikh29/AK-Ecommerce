@@ -3255,16 +3255,14 @@ Current Conversation History:\n` +
     const vendor = await getVendorByUserId(user.id, user.email)
     
     if (!vendor && user.role !== 'admin') {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn(`[Vendor Audit] User ${user.email} (ID: ${user.id}) has role=vendor but no record in vendors table yet. Returning empty orders list.`)
-      }
-      return json([])
+      console.error(`[Vendor Audit] User ${user.email} (ID: ${user.id}) has role=vendor but no record in vendors table yet.`)
+      return err('Vendor profile not linked, contact admin', 403)
     }
 
     if (method === 'GET') {
       // NOTE: vendor_accepted & vendor_accepted_at columns do NOT exist in DB.
       // Derive vendor_accepted from status field instead.
-      let ordersSelect = 'id, order_number, status, total, payment_method, placed_at, updated_at, zoho_invoice_status, zoho_invoice_id, zoho_challan_id, addresses(*), order_items(id, product_name_snapshot, quantity, price_snapshot, hsn_code)'
+      let ordersSelect = 'id, order_number, status, total, payment_method, placed_at, updated_at, zoho_invoice_status, zoho_invoice_id, zoho_challan_id, addresses(*), order_items(id, product_name_snapshot, quantity, price_snapshot, products(hsn_code))'
       let query = supabase.from('orders').select(ordersSelect)
       if (user.role !== 'admin' && vendor) {
         query = query.eq('assigned_vendor_id', vendor.id)
@@ -3272,7 +3270,7 @@ Current Conversation History:\n` +
 
       let { data: orders, error } = await query.order('placed_at', { ascending: false })
       if (error && error.message.includes('zoho_invoice_status')) {
-        ordersSelect = 'id, order_number, status, total, payment_method, placed_at, updated_at, zoho_invoice_id, zoho_challan_id, addresses(*), order_items(id, product_name_snapshot, quantity, price_snapshot, hsn_code)'
+        ordersSelect = 'id, order_number, status, total, payment_method, placed_at, updated_at, zoho_invoice_id, zoho_challan_id, addresses(*), order_items(id, product_name_snapshot, quantity, price_snapshot, products(hsn_code))'
         let fallbackQuery = supabase.from('orders').select(ordersSelect)
         if (user.role !== 'admin' && vendor) {
           fallbackQuery = fallbackQuery.eq('assigned_vendor_id', vendor.id)
