@@ -1144,7 +1144,7 @@ async function route(req, method) {
           .eq('id', orderId)
           .maybeSingle()
         if (getErr || !o) return err('Order not found', 404)
-        if (user.role !== 'admin' && o.user_id !== user.id) return err('Forbidden', 403)
+        if (!['admin', 'vendor'].includes(user.role)) return err('Forbidden', 403)
 
         // Fetch customer profile details
         const { data: customer } = await supabase
@@ -1879,6 +1879,7 @@ async function route(req, method) {
   // GET /api/zoho/challan/:challanId  — generate and return delivery challan PDF locally as fallback
   if (p[0] === 'zoho' && p[1] === 'challan' && p[2] && method === 'GET') {
     if (!user) return err('Unauthorized', 401)
+    if (!['admin', 'vendor'].includes(user.role)) return err('Forbidden', 403)
     try {
       const supabase = db()
       const { data: o, error: getErr } = await supabase

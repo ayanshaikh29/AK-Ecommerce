@@ -103,23 +103,7 @@ export default function OrderDetailsPage() {
     }
   }
 
-  const handleDownloadChallan = async () => {
-    try {
-      const res = await fetch(`/api/orders/${orderId}/challan-pdf`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      })
-      if (!res.ok) throw new Error('Failed to download challan')
-      const blob = await res.blob()
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `delivery-challan-${order?.order_number}.pdf`
-      link.click()
-      window.URL.revokeObjectURL(url)
-    } catch (err) {
-      toast.error(err.message)
-    }
-  }
+
 
   const handleCancelOrder = async () => {
     if (!confirm('Are you sure you want to cancel this order?')) return
@@ -209,14 +193,7 @@ export default function OrderDetailsPage() {
           >
             <FileText className="w-4 h-4" /> Download Tax Invoice
           </Button>
-          <Button 
-            onClick={handleDownloadChallan} 
-            variant="outline" 
-            size="sm" 
-            className="rounded-full h-9 px-4 flex items-center gap-2 shadow-sm border-slate-500/30 text-slate-600 hover:bg-slate-500/5 font-semibold"
-          >
-            <Truck className="w-4 h-4" /> Download Delivery Challan
-          </Button>
+
           {/* Cancel Order Button - only for pending/confirmed */}
           {['pending', 'confirmed'].includes(order.status?.toLowerCase()) && (
             <Button
