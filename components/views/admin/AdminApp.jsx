@@ -790,11 +790,20 @@ function AdminDashboard({ refreshTrigger }) {
       .catch(() => setS(null))
   }, [])
 
+  const [logs, setLogs] = useState([])
+  const fetchLogs = useCallback(() => {
+    fetch('/api/admin/generation-logs', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setLogs(data))
+      .catch(() => {})
+  }, [])
+
   useRealtimeDashboard(fetchStats)
 
   useEffect(() => { 
     fetchStats()
-  }, [refreshTrigger])
+    fetchLogs()
+  }, [refreshTrigger, fetchLogs])
 
   if (!s || typeof s !== 'object') return <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">{Array(5).fill(0).map((_,i) => <div key={i} className="h-24 skeleton"/>)}</div>
 
@@ -892,6 +901,36 @@ function AdminDashboard({ refreshTrigger }) {
           </Card>
         </GlobalErrorBoundary>
       </div>
+
+      {/* Recent Invoice & Challan Generation Logs */}
+      <GlobalErrorBoundary compact fallbackTitle="Recent Document Logs">
+        <Card className="radius-lg shadow-soft border border-border/80">
+          <CardContent className="pt-6">
+            <h3 className="font-display font-extrabold text-base mb-4 flex items-center gap-2 text-foreground">
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
+              Recent Document Generation Errors
+            </h3>
+            {logs.filter(l => l.status === 'failure').length === 0 ? (
+              <p className="text-xs text-muted-foreground">No recent document generation errors recorded.</p>
+            ) : (
+              <div className="space-y-3">
+                {logs.filter(l => l.status === 'failure').map((log, idx) => (
+                  <div key={log.id || idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3.5 rounded-xl bg-red-500/5 border border-red-500/10 text-xs">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-slate-800 capitalize">{log.document_type}</span>
+                        <span className="text-[10px] text-muted-foreground">Order #{log.orders?.order_number || 'N/A'}</span>
+                      </div>
+                      <p className="text-destructive font-medium">{log.error_message}</p>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground shrink-0 font-medium">{new Date(log.created_at).toLocaleString('en-IN')}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </GlobalErrorBoundary>
 
       {/* Real-time Activity Feed Stream (Component Error Isolated) */}
       <GlobalErrorBoundary compact fallbackTitle="Live Activity Feed">

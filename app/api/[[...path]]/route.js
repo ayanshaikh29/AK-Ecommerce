@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid'
 import crypto from 'crypto'
 import { generateInvoicePDF } from '@/lib/invoice-generator'
 import { generateChallanPDF } from '@/lib/challan-generator'
+import { validateInvoiceData } from '@/lib/invoice-validator'
 import { 
   getMinOrderQuantity, 
   setMinOrderQuantity, 
@@ -1118,15 +1119,52 @@ async function route(req, method) {
         o.customer_profile = customer || {}
 
         const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
-        const pdfBuffer = await generateInvoicePDF(o, settings || {})
+        
+        // Validate Data before generation
+        const validation = validateInvoiceData(o, settings || {}, false)
+        if (!validation.valid) {
+          // Log failure silently if table doesn't exist
+          try {
+            await supabase.from('invoice_generation_logs').insert({
+              order_id: orderId,
+              document_type: 'invoice',
+              status: 'failure',
+              error_message: validation.error
+            })
+          } catch (logErr) {}
+          return err(validation.error, 400)
+        }
 
-        return new NextResponse(Buffer.from(pdfBuffer), {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="invoice-${o.order_number}.pdf"`
-          }
-        })
+        try {
+          const pdfBuffer = await generateInvoicePDF(o, settings || {})
+          
+          // Log success
+          try {
+            await supabase.from('invoice_generation_logs').insert({
+              order_id: orderId,
+              document_type: 'invoice',
+              status: 'success'
+            })
+          } catch (logErr) {}
+          
+          return new NextResponse(Buffer.from(pdfBuffer), {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/pdf',
+              'Content-Disposition': `attachment; filename="invoice-${o.order_number}.pdf"`
+            }
+          })
+        } catch (genErr) {
+          try {
+            await supabase.from('invoice_generation_logs').insert({
+              order_id: orderId,
+              document_type: 'invoice',
+              status: 'failure',
+              error_message: 'Generation failed: ' + genErr.message
+            })
+          } catch (logErr) {}
+          throw genErr
+        }
       } catch (e) {
         console.error('[GET Invoice PDF Error]:', e)
         return err('Failed to generate invoice PDF: ' + e.message, 500)
@@ -1155,15 +1193,50 @@ async function route(req, method) {
         o.customer_profile = customer || {}
 
         const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
-        const pdfBuffer = await generateChallanPDF(o, settings || {})
+        
+        // Validate Data before generation
+        const validation = validateInvoiceData(o, settings || {}, true)
+        if (!validation.valid) {
+          try {
+            await supabase.from('invoice_generation_logs').insert({
+              order_id: orderId,
+              document_type: 'challan',
+              status: 'failure',
+              error_message: validation.error
+            })
+          } catch (logErr) {}
+          return err(validation.error, 400)
+        }
 
-        return new NextResponse(Buffer.from(pdfBuffer), {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="delivery-challan-${o.order_number}.pdf"`
-          }
-        })
+        try {
+          const pdfBuffer = await generateChallanPDF(o, settings || {})
+          
+          try {
+            await supabase.from('invoice_generation_logs').insert({
+              order_id: orderId,
+              document_type: 'challan',
+              status: 'success'
+            })
+          } catch (logErr) {}
+          
+          return new NextResponse(Buffer.from(pdfBuffer), {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/pdf',
+              'Content-Disposition': `attachment; filename="delivery-challan-${o.order_number}.pdf"`
+            }
+          })
+        } catch (genErr) {
+          try {
+            await supabase.from('invoice_generation_logs').insert({
+              order_id: orderId,
+              document_type: 'challan',
+              status: 'failure',
+              error_message: 'Generation failed: ' + genErr.message
+            })
+          } catch (logErr) {}
+          throw genErr
+        }
       } catch (e) {
         console.error('[GET Challan PDF Error]:', e)
         return err('Failed to generate challan PDF: ' + e.message, 500)
@@ -2178,6 +2251,21 @@ async function route(req, method) {
     } catch (actErr) {}
 
     return json({ ok: true, request: requestRecord })
+  }
+
+  // GET /api/admin/generation-logs
+  if (p[0] === 'admin' && p[1] === 'generation-logs' && method === 'GET') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    const { data: logs, error } = await supabase
+      .from('invoice_generation_logs')
+      .select('*, orders(order_number)')
+      .order('created_at', { ascending: false })
+      .limit(10)
+    
+    if (error) {
+      return json([])
+    }
+    return json(logs || [])
   }
 
   if (p[0] === 'admin' && p[1] === 'catalog-requests') {
