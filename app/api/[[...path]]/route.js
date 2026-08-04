@@ -4125,53 +4125,128 @@ Current Conversation History:\n` +
 
     if (method === 'GET') {
       const customerId = url.searchParams.get('customer_id')
+      const statusFilter = url.searchParams.get('status')
       const start = url.searchParams.get('start_date')
       const end = url.searchParams.get('end_date')
+      const search = url.searchParams.get('search') || ''
 
-      let query = supabase.from('orders').select('id, order_number, user_id, total, status, payment_method, payment_status, placed_at, addresses(full_name, city), order_items(*)')
-      if (customerId) query = query.eq('user_id', customerId)
+      // Fetch orders with user details including GSTIN
+      let query = supabase
+        .from('orders')
+        .select(`
+          id,
+          order_number,
+          user_id,
+          total,
+          status,
+          payment_method,
+          payment_status,
+          placed_at,
+          created_at,
+          addresses(full_name, city),
+          order_items(*)
+        `)
+        .in('status', ['pending_vendor_acceptance', 'accepted', 'processing', 'shipped', 'delivered', 'completed'])
+
+      if (customerId && customerId !== 'all') query = query.eq('user_id', customerId)
       if (start) query = query.gte('placed_at', start)
-      if (end) query = query.lte('placed_at', end)
+      if (end) query = query.lte('placed_at', end + 'T23:59:59')
 
       const { data: orders } = await query.order('placed_at', { ascending: false })
-      const { data: usersList } = await supabase.from('users').select('id, email, full_name')
+
+      // Fetch all users for customer info
+      const { data: usersList } = await supabase.from('users').select('id, email, full_name, gst_number')
       const userMap = new Map((usersList || []).map(u => [u.id, u]))
 
+      // Calculate summary
       let totalBilled = 0
       let totalReceived = 0
       let totalPending = 0
 
       const rows = (orders || []).map(o => {
-        if (o.status !== 'cancelled' && o.status !== 'rejected') {
-          totalBilled += o.total || 0
-          if (o.payment_status === 'Received') {
-            totalReceived += o.total || 0
-          } else {
-            totalPending += o.total || 0
+        const customer = userMap.get(o.user_id) || {}
+
+        // Determine payment status - check both 'paid', 'Received', and delivered COD
+        let isPaid = false
+        const payStatus = o.payment_status?.toLowerCase() || ''
+        if (payStatus === 'paid' || payStatus === 'received' || payStatus === 'paid cod') {
+          isPaid = true
+        } else if (payStatus === 'pending' || payStatus === 'cod' || !payStatus) {
+          // COD orders: if delivered, consider received
+          if (o.status === 'delivered' || o.status === 'completed') {
+            isPaid = true
           }
         }
 
-        const customer = userMap.get(o.user_id)
+        if (!isPaid) {
+          totalPending += o.total || 0
+        } else {
+          totalReceived += o.total || 0
+        }
+        totalBilled += o.total || 0
+
+        // Build row with correct field names for frontend
         return {
           id: o.id,
-          order_number: o.order_number,
+          order_id: o.id,
+          invoice_number: 'INV-' + o.order_number,
+          created_at: o.placed_at || o.created_at,
+          placed_at: o.placed_at || o.created_at,
           customer_id: o.user_id,
           customer_name: customer?.full_name || o.addresses?.full_name || 'Customer',
           customer_email: customer?.email || '',
-          placed_at: o.placed_at,
-          total: o.total,
+          gstin: customer?.gst_number || '',
+          total_amount: o.total || 0,
+          total: o.total || 0,
           status: o.status,
           payment_method: o.payment_method || 'COD',
-          payment_status: o.payment_status || 'Pending',
+          payment_status: isPaid ? 'paid' : 'pending',
           items: o.order_items || []
         }
       })
 
+      // Apply status filter
+      let filteredRows = rows
+      if (statusFilter && statusFilter !== 'all') {
+        filteredRows = rows.filter(r => r.payment_status === statusFilter)
+      }
+
+      // Apply search filter
+      if (search) {
+        const searchLower = search.toLowerCase()
+        filteredRows = filteredRows.filter(r =>
+          r.invoice_number?.toLowerCase().includes(searchLower) ||
+          r.customer_name?.toLowerCase().includes(searchLower) ||
+          r.customer_email?.toLowerCase().includes(searchLower) ||
+          r.order_number?.toLowerCase().includes(searchLower)
+        )
+      }
+
+      // Recalculate summary based on filtered data
+      totalBilled = 0
+      totalReceived = 0
+      totalPending = 0
+      filteredRows.forEach(r => {
+        totalBilled += r.total_amount || 0
+        if (r.payment_status === 'paid') {
+          totalReceived += r.total_amount || 0
+        } else {
+          totalPending += r.total_amount || 0
+        }
+      })
+
       return json({
-        totalBilled,
-        totalReceived,
-        totalPending,
-        invoices: rows
+        invoices: filteredRows,
+        summary: {
+          total_billed: totalBilled,
+          total_received: totalReceived,
+          total_pending: totalPending
+        },
+        all_customers: (usersList || []).map(u => ({
+          id: u.id,
+          email: u.email,
+          full_name: u.full_name
+        }))
       })
     }
   }

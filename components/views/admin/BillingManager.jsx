@@ -1,37 +1,87 @@
 'use client'
 import React, { useState, useEffect } from 'react'
 import { toast } from 'sonner'
-import { FileText, Download, CheckCircle2, Clock, Filter, RefreshCw, DollarSign, Search } from 'lucide-react'
+import { FileText, Download, CheckCircle2, Clock, RefreshCw, Search } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return '—'
+  try {
+    const d = new Date(dateStr)
+    if (isNaN(d.getTime())) return '—'
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })
+  } catch {
+    return '—'
+  }
+}
+
+const getDateRangeForPeriod = (period) => {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+  switch (period) {
+    case 'today':
+      return { from: today, to: today }
+    case 'week': {
+      const weekAgo = new Date(today)
+      weekAgo.setDate(weekAgo.getDate() - 7)
+      return { from: weekAgo, to: today }
+    }
+    case 'month': {
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+      return { from: monthStart, to: today }
+    }
+    case 'last3months': {
+      const threeMonthsAgo = new Date(today)
+      threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
+      return { from: threeMonthsAgo, to: today }
+    }
+    case 'all':
+    default:
+      return { from: null, to: null }
+  }
+}
 
 export function BillingManager() {
   const [invoices, setInvoices] = useState([])
   const [summary, setSummary] = useState({ total_billed: 0, total_received: 0, total_pending: 0 })
+  const [customers, setCustomers] = useState([])
   const [loading, setLoading] = useState(false)
   const [customerFilter, setCustomerFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [timePeriod, setTimePeriod] = useState('all')
 
   const fetchBilling = async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/admin/billing', {
+      const params = new URLSearchParams()
+      if (customerFilter && customerFilter !== 'all') params.set('customer_id', customerFilter)
+      if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter)
+      if (search) params.set('search', search)
+
+      const range = getDateRangeForPeriod(timePeriod)
+      if (range.from) params.set('start_date', range.from.toISOString().split('T')[0])
+      if (range.to) params.set('end_date', range.to.toISOString().split('T')[0])
+
+      const res = await fetch(`/api/admin/billing?${params.toString()}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       })
       if (res.ok) {
         const data = await res.json()
         setInvoices(data.invoices || [])
         setSummary(data.summary || { total_billed: 0, total_received: 0, total_pending: 0 })
+        if (data.all_customers) setCustomers(data.all_customers)
       } else {
         toast.error('Failed to load billing records')
       }
-    } catch {
+    } catch (err) {
+      console.error('Billing fetch error:', err)
       toast.error('Error loading billing overview')
     } finally {
       setLoading(false)
@@ -40,7 +90,15 @@ export function BillingManager() {
 
   useEffect(() => {
     fetchBilling()
-  }, [])
+  }, [customerFilter, statusFilter, timePeriod])
+
+  // Debounced search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchBilling()
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [search])
 
   const handlePaymentToggle = async (orderId, currentStatus) => {
     const newStatus = currentStatus === 'paid' ? 'pending' : 'paid'
@@ -51,7 +109,7 @@ export function BillingManager() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({ payment_status: newStatus })
+        body: JSON.stringify({ payment_status: newStatus === 'paid' ? 'Paid' : 'Pending' })
       })
       if (res.ok) {
         toast.success(`Payment status marked as ${newStatus.toUpperCase()}`)
@@ -66,14 +124,13 @@ export function BillingManager() {
 
   const exportCSV = () => {
     if (invoices.length === 0) return
-    const headers = ['Order ID', 'Invoice #', 'Date', 'Customer Name', 'Customer Email', 'GSTIN', 'Total Amount', 'Payment Status']
+    const headers = ['Invoice #', 'Date', 'Customer Name', 'Customer Email', 'GSTIN', 'Total Amount', 'Payment Status']
     const rows = invoices.map(i => [
-      i.order_id,
       i.invoice_number,
-      new Date(i.created_at).toLocaleDateString(),
+      formatDate(i.created_at),
       `"${i.customer_name || ''}"`,
       `"${i.customer_email || ''}"`,
-      `"${i.gstin || ''}"`,
+      `"${i.gstin || '—'}"`,
       i.total_amount,
       i.payment_status
     ])
@@ -90,16 +147,25 @@ export function BillingManager() {
     toast.success('Billing ledger exported to CSV')
   }
 
-  const customersList = Array.from(new Set(invoices.map(i => i.customer_email))).filter(Boolean)
-
-  const filteredInvoices = invoices.filter(i => {
-    const matchesCustomer = customerFilter === 'all' || i.customer_email === customerFilter
-    const matchesStatus = statusFilter === 'all' || i.payment_status === statusFilter
-    const matchesSearch = (i.invoice_number || '').toLowerCase().includes(search.toLowerCase()) ||
-                          (i.customer_name || '').toLowerCase().includes(search.toLowerCase()) ||
-                          (i.order_id || '').toLowerCase().includes(search.toLowerCase())
-    return matchesCustomer && matchesStatus && matchesSearch
-  })
+  const handleDownloadInvoice = async (orderId, invoiceNumber) => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}/invoice-pdf`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      if (!res.ok) throw new Error('Failed to download invoice')
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `invoice-${invoiceNumber}.pdf`
+      link.click()
+      window.URL.revokeObjectURL(url)
+      toast.success('Invoice downloaded successfully')
+    } catch (err) {
+      console.error('Invoice download error:', err)
+      toast.error(err.message || 'Failed to download invoice')
+    }
+  }
 
   return (
     <div className="space-y-6 text-left">
@@ -167,21 +233,37 @@ export function BillingManager() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Time Period Filter */}
+          <Select value={timePeriod} onValueChange={setTimePeriod}>
+            <SelectTrigger className="rounded-xl h-10 w-40 bg-card text-xs">
+              <SelectValue placeholder="Time Period" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Time</SelectItem>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="week">This Week</SelectItem>
+              <SelectItem value="month">This Month</SelectItem>
+              <SelectItem value="last3months">Last 3 Months</SelectItem>
+            </SelectContent>
+          </Select>
+
           <Select value={customerFilter} onValueChange={setCustomerFilter}>
-            <SelectTrigger className="rounded-xl h-10 w-44 bg-card text-xs">
-              <SelectValue placeholder="Customer Filter" />
+            <SelectTrigger className="rounded-xl h-10 w-52 bg-card text-xs">
+              <SelectValue placeholder="All Customers" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Customers</SelectItem>
-              {customersList.map(email => (
-                <SelectItem key={email} value={email}>{email}</SelectItem>
+              {customers.map(cust => (
+                <SelectItem key={cust.id} value={cust.id}>
+                  {cust.full_name || cust.email}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="rounded-xl h-10 w-36 bg-card text-xs">
-              <SelectValue placeholder="Payment Status" />
+              <SelectValue placeholder="All Statuses" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
@@ -197,7 +279,7 @@ export function BillingManager() {
         <CardContent className="p-0">
           {loading ? (
             <div className="py-16 text-center text-xs text-muted-foreground">Loading billing records...</div>
-          ) : filteredInvoices.length === 0 ? (
+          ) : invoices.length === 0 ? (
             <div className="py-16 text-center text-xs text-muted-foreground">No invoices found matching criteria.</div>
           ) : (
             <div className="overflow-x-auto">
@@ -214,15 +296,17 @@ export function BillingManager() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filteredInvoices.map(inv => (
+                  {invoices.map(inv => (
                     <tr key={inv.id} className="hover:bg-secondary/30 transition">
-                      <td className="py-3 px-4 font-mono font-bold text-foreground">{inv.invoice_number}</td>
+                      <td className="py-3 px-4 font-mono font-bold text-foreground">
+                        {inv.invoice_number || '—'}
+                      </td>
                       <td className="py-3 px-4 text-muted-foreground font-mono">
-                        {new Date(inv.created_at).toLocaleDateString('en-IN')}
+                        {formatDate(inv.created_at)}
                       </td>
                       <td className="py-3 px-4">
-                        <div className="font-semibold text-foreground">{inv.customer_name}</div>
-                        <div className="text-[10px] text-muted-foreground font-mono">{inv.customer_email}</div>
+                        <div className="font-semibold text-foreground">{inv.customer_name || '—'}</div>
+                        <div className="text-[10px] text-muted-foreground font-mono">{inv.customer_email || '—'}</div>
                       </td>
                       <td className="py-3 px-4 font-mono text-muted-foreground">{inv.gstin || '—'}</td>
                       <td className="py-3 px-4 font-mono font-extrabold text-sm">{formatINR(inv.total_amount)}</td>
@@ -243,14 +327,12 @@ export function BillingManager() {
                         </button>
                       </td>
                       <td className="py-3 px-4 text-right">
-                        <a
-                          href={`/api/invoices/download?order_id=${inv.order_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          onClick={() => handleDownloadInvoice(inv.order_id, inv.invoice_number)}
                           className="inline-flex items-center gap-1.5 text-xs text-primary font-bold hover:underline"
                         >
                           <Download className="w-3.5 h-3.5" /> PDF Invoice
-                        </a>
+                        </button>
                       </td>
                     </tr>
                   ))}
