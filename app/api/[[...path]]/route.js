@@ -2139,6 +2139,15 @@ async function route(req, method) {
           .eq('id', p[2])
           .maybeSingle()
         if (!o2) return err('Order not found', 404)
+
+        // Fetch customer profile details
+        const { data: customer } = await supabase
+          .from('users')
+          .select('company_name, gst_number, business_name, full_name')
+          .eq('id', o2.user_id)
+          .maybeSingle()
+        o2.customer_profile = customer || {}
+
         const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
         const pdfBuffer = await generateChallanPDF(o2, settings || {})
         return new NextResponse(Buffer.from(pdfBuffer), {
@@ -2150,6 +2159,14 @@ async function route(req, method) {
         })
       }
       if (user.role !== 'admin' && user.role !== 'vendor' && o.user_id !== user.id) return err('Forbidden', 403)
+
+      // Fetch customer profile details
+      const { data: customer } = await supabase
+        .from('users')
+        .select('company_name, gst_number, business_name, full_name')
+        .eq('id', o.user_id)
+        .maybeSingle()
+      o.customer_profile = customer || {}
 
       const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
       const pdfBuffer = await generateChallanPDF(o, settings || {})
