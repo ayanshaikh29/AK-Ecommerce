@@ -8,7 +8,7 @@ import {
   Users, Settings, LogOut, Package, TrendingUp, AlertTriangle, 
   Trash2, Video, FileText, Building2, Bell, BellRing, Menu, X, MessageSquare,
   Loader2, ShieldCheck, Truck, CheckCircle2, XCircle, Activity, Search,
-  ShieldAlert, RefreshCw
+  ShieldAlert, RefreshCw, Clock
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
@@ -93,7 +93,7 @@ function AdminMarquee() {
       <div className="flex whitespace-nowrap marquee">
         {[1,2,3,4].map(i => (
           <span key={i} className="mx-4 font-semibold uppercase tracking-widest text-primary-foreground/70">
-            Admin Panel — Authorized Access Only
+            Owner Panel — Authorized Access Only
           </span>
         ))}
       </div>
@@ -331,7 +331,7 @@ export function AdminApp() {
 
         const { user: u } = await res.json()
         if (u?.role !== 'admin') { 
-          toast.error('Access denied: Admin role required')
+          toast.error('Access denied: Owner role required')
           setUser(null) 
           localStorage.removeItem('token')
           localStorage.removeItem('user')
@@ -345,11 +345,11 @@ export function AdminApp() {
         setAuthChecked(true) 
         setAuthError(null)
       } catch (err) { 
-        console.error('Admin role check error:', err)
+        console.error('Owner role check error:', err)
         if (err.name === 'AbortError') {
           setAuthError('Access check timed out. The server took too long to respond.')
         } else {
-          setAuthError(err.message || 'Unable to verify admin access.')
+          setAuthError(err.message || 'Unable to verify owner access.')
         }
       } 
     } 
@@ -424,8 +424,8 @@ export function AdminApp() {
                 <button onClick={() => { router.push('/'); setMobileMenuOpen(false) }} className="flex items-center gap-3">
                   <div className="w-11 h-11 rounded-2xl gold-gradient flex items-center justify-center font-display font-extrabold text-primary">AK</div>
                   <div className="text-left">
-                    <div className="font-display font-extrabold text-white">AK Admin</div>
-                    <div className="text-xs text-white/60">Control Panel</div>
+                    <div className="font-display font-extrabold text-white">AK Enterprises</div>
+                    <div className="text-xs text-white/60">Owner Panel</div>
                   </div>
                 </button>
                 <button onClick={() => setMobileMenuOpen(false)} className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center">
@@ -486,8 +486,8 @@ export function AdminApp() {
               <button onClick={() => router.push('/')} className="flex items-center gap-3">
                 <div className="w-11 h-11 rounded-2xl gold-gradient flex items-center justify-center font-display font-extrabold text-primary">AK</div>
                 <div className="text-left">
-                  <div className="font-display font-extrabold">AK Admin</div>
-                  <div className="text-xs text-white/60">Control Panel</div>
+                  <div className="font-display font-extrabold">AK Enterprises</div>
+                  <div className="text-xs text-white/60">Owner Panel</div>
                 </div>
               </button>
             </div>
@@ -548,7 +548,7 @@ export function AdminApp() {
                     ? 'Settings'
                     : section.replace('-', ' ')}
                 </h2>
-                <p className="text-[10px] md:text-xs text-muted-foreground">Welcome back, Admin</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground">Welcome back, Owner</p>
               </div>
             </div>
             <div className="flex items-center gap-4">
@@ -902,7 +902,13 @@ function AdminErrorLogs() {
 
 function AdminDashboard({ refreshTrigger }) {
   const [s, setS] = useState(null)
-  
+
+  // Date range filter driving all dashboard KPIs + the order volume chart (default Today)
+  const [range, setRange] = useState('today')
+  const [customStartDate, setCustomStartDate] = useState('')
+  const [customEndDate, setCustomEndDate] = useState('')
+  const [showCustomDates, setShowCustomDates] = useState(false)
+
   let liveCustomersState = { onlineCount: 1, onlineUsers: [] }
   try {
     const res = useLiveCustomers()
@@ -912,7 +918,13 @@ function AdminDashboard({ refreshTrigger }) {
   const onlineCount = liveCustomersState?.onlineCount || 1
 
   const fetchStats = useCallback(() => {
-    fetch('/api/stats', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+    const q = new URLSearchParams()
+    q.set('range', range)
+    if (range === 'custom') {
+      if (customStartDate) q.set('startDate', customStartDate)
+      if (customEndDate) q.set('endDate', customEndDate)
+    }
+    fetch('/api/stats?' + q.toString(), { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data && typeof data === 'object' && !data.error) {
@@ -922,7 +934,7 @@ function AdminDashboard({ refreshTrigger }) {
         }
       })
       .catch(() => setS(null))
-  }, [])
+  }, [range, customStartDate, customEndDate])
 
   const [logs, setLogs] = useState([])
   const fetchLogs = useCallback(() => {
@@ -937,33 +949,109 @@ function AdminDashboard({ refreshTrigger }) {
   useEffect(() => { 
     fetchStats()
     fetchLogs()
-  }, [refreshTrigger, fetchLogs])
+  }, [refreshTrigger, fetchLogs, fetchStats])
 
   if (!s || typeof s !== 'object') return <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">{Array(5).fill(0).map((_,i) => <div key={i} className="h-24 skeleton"/>)}</div>
 
   const safeOnlineCount = Number(onlineCount || 1)
-  const safeOrders = Number(s.orders || 0)
-  const safeRevenue = Number(s.revenue || 0)
   const safePending = Number(s.pending || 0)
   const byDayData = (s.byDay && typeof s.byDay === 'object') ? s.byDay : {}
   const lowStockData = Array.isArray(s.lowStock) ? s.lowStock : []
+  const dailyBreakdown = Array.isArray(s.dailyBreakdown) ? s.dailyBreakdown : []
+
+  const RANGES = [
+    { value: 'today', label: 'Today' },
+    { value: 'yesterday', label: 'Yesterday' },
+    { value: 'last-7-days', label: 'Last 7 Days' },
+    { value: 'last-30-days', label: 'Last 30 Days' },
+    { value: 'custom', label: 'Custom Range' }
+  ]
+  const rangeLabel = RANGES.find(r => r.value === range)?.label || 'Today'
+
+  // "Orders Today"/"Revenue Today" show the real current IST day total; any
+  // other range shows the aggregate for the selected range.
+  const effectiveOrders = range === 'today'
+    ? Number(s.ordersToday ?? s.orders ?? 0)
+    : Number(s.orders ?? 0)
+  const effectiveRevenue = range === 'today'
+    ? Number(s.revenueToday ?? s.revenue ?? 0)
+    : Number(s.revenue ?? 0)
+  const orderLabel = range === 'today' ? 'Orders Today' : `Orders (${rangeLabel})`
+  const revenueLabel = range === 'today' ? 'Revenue Today' : `Revenue (${rangeLabel})`
 
   const cards = [
     ['Online Customers', safeOnlineCount, Users, 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20'],
     ['Active Sessions', Math.max(1, safeOnlineCount), Activity, 'text-blue-600 bg-blue-500/10 border-blue-500/20'],
-    ['Orders Today', safeOrders, Package, 'text-purple-600 bg-purple-500/10 border-purple-500/20'],
-    ['Revenue Today', formatINR(safeRevenue), TrendingUp, 'text-amber-600 bg-amber-500/10 border-amber-500/20'],
+    [orderLabel, effectiveOrders, Package, 'text-purple-600 bg-purple-500/10 border-purple-500/20'],
+    [revenueLabel, formatINR(effectiveRevenue), TrendingUp, 'text-amber-600 bg-amber-500/10 border-amber-500/20'],
     ['Pending Orders', safePending, ClipboardList, 'text-red-600 bg-red-500/10 border-red-500/20']
   ]
 
   const dayValues = Object.values(byDayData).map(v => Number(v || 0))
   const max = Math.max(1, ...dayValues)
 
+  const formatDay = d => {
+    const m = String(d || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (!m) return String(d || '')
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+  }
+
+  const exportDayBreakdown = () => {
+    if (dailyBreakdown.length === 0) { toast.error('No daily data available to export'); return }
+    const headers = ['Date', 'Orders Count', 'Revenue', 'Avg Order Value']
+    const data = dailyBreakdown.map(r => [formatDay(r.date), r.orders, r.revenue, r.avgOrderValue])
+    const csv = "data:text/csv;charset=utf-8," + [headers, ...data].map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(",")).join("\n")
+    const link = document.createElement('a')
+    link.setAttribute('href', encodeURI(csv))
+    link.setAttribute('download', `day_wise_breakdown_${range}_${Date.now()}.csv`)
+    document.body.appendChild(link); link.click(); document.body.removeChild(link)
+    toast.success('Day-wise breakdown exported successfully!')
+  }
+
   return (
     <div className="slide-up text-left space-y-8">
-      <div>
-        <h1 className="font-display text-3xl font-extrabold text-foreground">Live Operations Dashboard</h1>
-        <p className="text-xs text-muted-foreground mt-1">Real-time status of online customers, active sessions, sales revenue, and incoming orders.</p>
+      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl font-extrabold text-foreground">Live Operations Dashboard</h1>
+          <p className="text-xs text-muted-foreground mt-1">Real-time status of online customers, active sessions, sales revenue, and incoming orders.</p>
+        </div>
+
+        {/* Date Range Selector — drives all KPI cards + order volume chart */}
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-end shrink-0 w-full sm:w-auto">
+          <div className="w-full sm:w-44">
+            <label className="text-[10px] uppercase font-bold text-muted-foreground mb-1 block">Date Range</label>
+            <Select
+              value={range}
+              onValueChange={(val) => {
+                setRange(val)
+                setShowCustomDates(val === 'custom')
+              }}
+            >
+              <SelectTrigger className="h-10 rounded-xl bg-card">
+                <SelectValue placeholder="Select Range" />
+              </SelectTrigger>
+              <SelectContent>
+                {RANGES.map(r => (
+                  <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {showCustomDates && (
+            <div className="flex flex-wrap gap-2 items-end">
+              <div>
+                <label className="text-[10px] uppercase font-bold text-muted-foreground mb-1 block">Start Date</label>
+                <Input type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} className="h-10 rounded-xl bg-card" />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase font-bold text-muted-foreground mb-1 block">End Date</label>
+                <Input type="date" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} className="h-10 rounded-xl bg-card" />
+              </div>
+              <Button onClick={() => fetchStats()} className="h-10 rounded-xl font-bold">Apply</Button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 5 Real-Time Metric Cards */}
@@ -993,7 +1081,7 @@ function AdminDashboard({ refreshTrigger }) {
         <GlobalErrorBoundary compact fallbackTitle="Order Volume Chart">
           <Card className="radius-lg shadow-soft border border-border/80">
             <CardContent className="pt-6">
-              <h3 className="font-display font-extrabold text-base mb-4 text-foreground">Order Volume — Last 7 Days</h3>
+              <h3 className="font-display font-extrabold text-base mb-4 text-foreground">Order Volume — {rangeLabel}</h3>
               <div className="flex items-end gap-2 h-40">
                 {Object.entries(byDayData).map(([k, v]) => (
                   <div key={k} className="flex-1 flex flex-col items-center gap-1">
@@ -1036,7 +1124,50 @@ function AdminDashboard({ refreshTrigger }) {
         </GlobalErrorBoundary>
       </div>
 
-      {/* Recent Invoice & Challan Generation Logs */}
+      {/* Day-wise Breakdown Table */}
+      <GlobalErrorBoundary compact fallbackTitle="Day-wise Breakdown">
+        <Card className="radius-lg shadow-soft border border-border/80">
+          <CardContent className="pt-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="font-display font-extrabold text-base text-foreground">Day-wise Breakdown</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Order count, revenue and average order value per day for {rangeLabel}.</p>
+              </div>
+              <Button onClick={exportDayBreakdown} size="sm" className="rounded-xl flex items-center gap-1.5 font-bold">
+                Export CSV
+              </Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                <thead className="bg-secondary/40 text-muted-foreground text-xs uppercase border-b">
+                  <tr>
+                    <th className="p-3">Date</th>
+                    <th className="p-3 text-right">Orders Count</th>
+                    <th className="p-3 text-right">Revenue</th>
+                    <th className="p-3 text-right">Avg Order Value</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {dailyBreakdown.length === 0 ? (
+                    <tr>
+                      <td colSpan="4" className="p-6 text-center text-muted-foreground text-xs">
+                        No order data available for this range.
+                      </td>
+                    </tr>
+                  ) : dailyBreakdown.map(r => (
+                    <tr key={r.date} className="hover:bg-secondary/20">
+                      <td className="p-3 font-semibold text-foreground">{formatDay(r.date)}</td>
+                      <td className="p-3 text-right font-bold">{r.orders}</td>
+                      <td className="p-3 text-right font-mono font-bold text-primary">{formatINR(r.revenue)}</td>
+                      <td className="p-3 text-right font-mono text-muted-foreground">{formatINR(r.avgOrderValue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </GlobalErrorBoundary>
       <GlobalErrorBoundary compact fallbackTitle="Recent Document Logs">
         <Card className="radius-lg shadow-soft border border-border/80">
           <CardContent className="pt-6">
@@ -1508,6 +1639,8 @@ function AdminOrders({ refreshTrigger, router }) {
   const [orders, setOrders] = useState([])
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
+  // KPI summary returned by the backend (full filtered set for range + status)
+  const [summary, setSummary] = useState(null)
   
   // Filtering & Pagination State
   const [range, setRange] = useState('last-12-months')
@@ -1549,6 +1682,7 @@ function AdminOrders({ refreshTrigger, router }) {
         setOrders(data.orders || [])
         setTotalCount(data.totalCount || 0)
         setTotalPages(data.totalPages || 1)
+        setSummary(data.summary || null)
       } else {
         toast.error('Failed to load orders')
       }
@@ -1586,6 +1720,7 @@ function AdminOrders({ refreshTrigger, router }) {
           setOrders(data.orders)
           setTotalCount(data.totalCount || 0)
           setTotalPages(data.totalPages || 1)
+          setSummary(data.summary || null)
 
           if (newlyAdded) {
             setHighlightOrderId(newlyAdded.id)
@@ -1681,6 +1816,10 @@ function AdminOrders({ refreshTrigger, router }) {
     }
   }, [orders])
 
+  // KPI values come from the backend summary (full filtered range + status set),
+  // not just the current paginated page.
+  const kpi = summary || { revenue: 0, avgOrderValue: 0, delivered: 0, cancelled: 0 }
+
   const exportData = (format) => {
     if (orders.length === 0) {
       toast.error('No orders available to export')
@@ -1688,7 +1827,7 @@ function AdminOrders({ refreshTrigger, router }) {
     }
 
     if (format === 'csv') {
-      const headers = ['Order ID', 'Invoice Number', 'Date', 'Customer Name', 'Customer Email', 'Phone', 'Shipping City', 'State', 'Vendor Assigned', 'Payment Method', 'Payment Status', 'Grand Total', 'Status']
+      const headers = ['Order ID', 'Invoice Number', 'Date', 'Customer Name', 'Customer Email', 'Phone', 'Shipping City', 'State', 'Zonal Admin Assigned', 'Payment Method', 'Payment Status', 'Grand Total', 'Status']
       const rows = orders.map(o => [
         o.order_number,
         `INV-${o.order_number}`,
@@ -1730,7 +1869,7 @@ function AdminOrders({ refreshTrigger, router }) {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="font-display text-4xl font-extrabold tracking-tight">Order Records System</h1>
-          <p className="text-sm text-muted-foreground">Manage and filter historical sales, delivery timelines, and logistics partner dispatches.</p>
+          <p className="text-sm text-muted-foreground">Manage and filter historical sales, delivery timelines, and zonal admin dispatches.</p>
         </div>
         <div className="flex flex-wrap gap-2 shrink-0">
           <Button onClick={() => exportData('csv')} size="sm" className="rounded-xl flex items-center gap-1.5 font-bold">
@@ -1746,19 +1885,19 @@ function AdminOrders({ refreshTrigger, router }) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="radius-xl shadow-soft p-4 border relative overflow-hidden bg-primary text-primary-foreground">
           <span className="text-[10px] uppercase font-bold text-primary-foreground/60 tracking-wider">Revenue (Filtered)</span>
-          <p className="text-xl font-black mt-1">{formatINR(analytics.revenue)}</p>
+          <p className="text-xl font-black mt-1">{formatINR(kpi.revenue)}</p>
         </Card>
         <Card className="radius-xl shadow-soft p-4 border relative overflow-hidden">
           <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Avg Order Value</span>
-          <p className="text-xl font-black mt-1 text-foreground">{formatINR(analytics.avgOrderVal)}</p>
+          <p className="text-xl font-black mt-1 text-foreground">{formatINR(kpi.avgOrderValue)}</p>
         </Card>
         <Card className="radius-xl shadow-soft p-4 border relative overflow-hidden">
           <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Delivered</span>
-          <p className="text-xl font-black mt-1 text-emerald-600">{analytics.delivered} orders</p>
+          <p className="text-xl font-black mt-1 text-emerald-600">{kpi.delivered} orders</p>
         </Card>
         <Card className="radius-xl shadow-soft p-4 border relative overflow-hidden">
           <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Cancelled / Rejected</span>
-          <p className="text-xl font-black mt-1 text-destructive">{analytics.cancelled} orders</p>
+          <p className="text-xl font-black mt-1 text-destructive">{kpi.cancelled} orders</p>
         </Card>
       </div>
 
@@ -1769,7 +1908,7 @@ function AdminOrders({ refreshTrigger, router }) {
             <div className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-muted-foreground" />
               <Input
-                placeholder="Search by Order ID, Customer, Vendor, Product, Phone, Email, Invoice..."
+                placeholder="Search by Order ID, Customer, Zonal Admin, Product, Phone, Email, Invoice..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className="pl-10 h-11 rounded-xl text-sm"
@@ -1797,6 +1936,7 @@ function AdminOrders({ refreshTrigger, router }) {
                 <SelectContent>
                   <SelectItem value="today">Today</SelectItem>
                   <SelectItem value="yesterday">Yesterday</SelectItem>
+                  <SelectItem value="this-week">This Week</SelectItem>
                   <SelectItem value="last-7-days">Last 7 Days</SelectItem>
                   <SelectItem value="last-30-days">Last 30 Days</SelectItem>
                   <SelectItem value="last-90-days">Last 90 Days</SelectItem>
@@ -1868,7 +2008,7 @@ function AdminOrders({ refreshTrigger, router }) {
                 <th className="p-4">Order / Invoice #</th>
                 <th className="p-4">Date</th>
                 <th className="p-4">Customer Details</th>
-                <th className="p-4">Logistics Partner</th>
+                <th className="p-4">Zonal Admin</th>
                 <th className="p-4">Payment</th>
                 <th className="p-4 text-right">Grand Total</th>
                 <th className="p-4">Fulfillment Status</th>
@@ -1915,12 +2055,12 @@ function AdminOrders({ refreshTrigger, router }) {
                     </td>
                     <td className="p-4 text-xs">
                       {o.vendor_name ? (
-                        <span className={`font-semibold block ${o.vendor_name.includes('No vendor assigned') ? 'text-destructive font-bold' : 'text-foreground'}`}>
+                        <span className={`font-semibold block ${o.vendor_name.includes('No zonal admin assigned') ? 'text-destructive font-bold' : 'text-foreground'}`}>
                           {o.vendor_name}
                         </span>
                       ) : (
                         <span className="font-semibold text-destructive font-bold block">
-                          No vendor assigned to this customer — please assign one in Customer Pricing
+                          No zonal admin assigned — please assign one in Customer Pricing
                         </span>
                       )}
                       {o.assigned_at && (
@@ -3180,7 +3320,7 @@ function AdminOrderDetail({ orderId }) {
         assigned_by: data.order.assigned_by,
         status: data.order.status || prev.status
       }))
-      toast.success('Vendor assignment re-synced successfully!')
+      toast.success('Zonal Admin assignment re-synced successfully!')
     } catch (err) {
       toast.error(err.message)
     }
@@ -3210,7 +3350,7 @@ function AdminOrderDetail({ orderId }) {
     )
   }
 
-  const statuses = ['pending', 'confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'rejected', 'cancelled', 'vendor_rejected']
+  const statuses = ['pending_vendor_acceptance', 'confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'rejected', 'cancelled', 'vendor_rejected']
   
   const totalVal = order.total || 0
   const subtotalVal = order.subtotal || totalVal
@@ -3348,56 +3488,126 @@ function AdminOrderDetail({ orderId }) {
         </div>
 
         <div className="space-y-5 lg:sticky lg:top-24 lg:self-start">
-          {/* 1. Admin Review: Approve / Reject Controls */}
+          {/* 1. Admin Status Controls — adapts to new order flow */}
           <Card className="radius-xl shadow-soft border">
             <CardContent className="p-6 space-y-4">
               <h3 className="font-display font-extrabold text-lg flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-accent" /> Admin Decision & Approval
+                <CheckCircle2 className="w-5 h-5 text-accent" /> Order Status
               </h3>
               <div className="bg-secondary/30 p-3 rounded-xl border flex items-center justify-between">
                 <span className="text-xs text-muted-foreground uppercase font-bold">Current Status</span>
                 <Badge className="capitalize rounded-full font-bold">{(order.status || '').replace(/_/g, ' ')}</Badge>
               </div>
 
-              {order.status === 'pending' ? (
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <Button
-                    onClick={() => updateStatus('confirmed')}
-                    className="rounded-xl h-10 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5"
-                  >
-                    <CheckCircle2 className="w-4 h-4" /> Approve Order
-                  </Button>
-                  <Button
-                    onClick={() => updateStatus('rejected')}
-                    variant="outline"
-                    className="rounded-xl h-10 font-extrabold text-xs border-destructive/40 text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1.5"
-                  >
-                    <XCircle className="w-4 h-4" /> Reject Order
-                  </Button>
-                </div>
-              ) : (
-                <div className="pt-2">
-                  {order.status === 'rejected' ? (
-                    <div className="flex items-center gap-2 bg-destructive/10 border border-destructive/20 text-destructive text-xs font-extrabold p-3.5 rounded-xl">
-                      <XCircle className="w-4 h-4" /> ❌ Rejected: {order.rejection_reason || 'Order rejected by Admin.'}
-                    </div>
-                  ) : order.status === 'delivered' ? (
-                    <div className="flex items-center gap-2 bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-extrabold p-3.5 rounded-xl">
-                      <CheckCircle2 className="w-4 h-4" /> ✅ Completed (Delivered)
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-extrabold p-3.5 rounded-xl">
-                      <CheckCircle2 className="w-4 h-4" /> ✅ Approved (Fulfillment In Progress)
-                    </div>
-                  )}
+              {order.status === 'pending_vendor_acceptance' && (
+                <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 text-xs font-extrabold p-3.5 rounded-xl">
+                    <Clock className="w-4 h-4" /> Awaiting zonal admin acceptance — zonal admin must accept or reject.
                 </div>
               )}
 
-              {order.status === 'pending' && (
-                <div>
+              {order.status === 'vendor_rejected' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 bg-destructive/10 border border-destructive/20 text-destructive text-xs font-extrabold p-3.5 rounded-xl">
+                    <XCircle className="w-4 h-4" /> Zonal Admin rejected: {order.rejection_reason || 'Order declined by zonal admin.'}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <Button
+                      onClick={() => updateStatus('confirmed')}
+                      className="rounded-xl h-10 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Re-approve & Assign New Zonal Admin
+                    </Button>
+                    <Button
+                      onClick={() => updateStatus('rejected')}
+                      variant="outline"
+                      className="rounded-xl h-10 font-extrabold text-xs border-destructive/40 text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1.5"
+                    >
+                      <XCircle className="w-4 h-4" /> Reject Order
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {order.status === 'confirmed' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-extrabold p-3.5 rounded-xl">
+                    <CheckCircle2 className="w-4 h-4" /> Zonal Admin accepted — ready for fulfillment.
+                  </div>
+                  <Button
+                    onClick={() => updateStatus('packed')}
+                    className="w-full rounded-xl h-10 font-extrabold text-xs bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center gap-1.5"
+                  >
+                    <Package className="w-4 h-4" /> Mark as Packed
+                  </Button>
+                </div>
+              )}
+
+              {order.status === 'packed' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 text-purple-700 text-xs font-extrabold p-3.5 rounded-xl">
+                    <Package className="w-4 h-4" /> Packed at warehouse — ready for dispatch.
+                  </div>
+                  <Button
+                    onClick={() => updateStatus('shipped')}
+                    className="w-full rounded-xl h-10 font-extrabold text-xs bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center gap-1.5"
+                  >
+                    <Truck className="w-4 h-4" /> Mark as Shipped
+                  </Button>
+                </div>
+              )}
+
+              {order.status === 'shipped' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-extrabold p-3.5 rounded-xl">
+                    <Truck className="w-4 h-4" /> Shipped — in transit with courier partner.
+                  </div>
+                  <Button
+                    onClick={() => updateStatus('out_for_delivery')}
+                    className="w-full rounded-xl h-10 font-extrabold text-xs bg-yellow-600 hover:bg-yellow-700 text-white flex items-center justify-center gap-1.5"
+                  >
+                    <Truck className="w-4 h-4" /> Mark as Out for Delivery
+                  </Button>
+                </div>
+              )}
+
+              {order.status === 'out_for_delivery' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 text-yellow-700 text-xs font-extrabold p-3.5 rounded-xl">
+                    <Truck className="w-4 h-4" /> Out for delivery today.
+                  </div>
+                  <Button
+                    onClick={() => updateStatus('delivered')}
+                    className="w-full rounded-xl h-10 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> Mark as Delivered
+                  </Button>
+                </div>
+              )}
+
+              {order.status === 'delivered' && (
+                <div className="flex items-center gap-2 bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-extrabold p-3.5 rounded-xl">
+                  <CheckCircle2 className="w-4 h-4" /> Completed (Delivered)
+                </div>
+              )}
+
+              {order.status === 'rejected' && (
+                <div className="flex items-center gap-2 bg-destructive/10 border border-destructive/20 text-destructive text-xs font-extrabold p-3.5 rounded-xl">
+                  <XCircle className="w-4 h-4" /> Rejected: {order.rejection_reason || 'Order rejected by Owner.'}
+                </div>
+              )}
+
+              {order.status === 'cancelled' && (
+                <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 text-slate-700 text-xs font-extrabold p-3.5 rounded-xl">
+                  <XCircle className="w-4 h-4" /> Order was cancelled.
+                </div>
+              )}
+
+              {/* Admin override — only show for orders that can be advanced */}
+              {['confirmed', 'packed', 'shipped', 'out_for_delivery'].includes(order.status) && (
+                <div className="pt-2 border-t border-border/30">
                   <Label className="text-xs text-muted-foreground mb-2 block font-semibold">Manual Status Override</Label>
                   <div className="grid grid-cols-2 gap-2">
-                    {statuses.map(st => (
+                    {statuses.filter(s => !['rejected', 'cancelled', 'pending_vendor_acceptance'].includes(s)).map(st => (
                       <Button
                         key={st}
                         onClick={() => updateStatus(st)}
@@ -3438,17 +3648,17 @@ function AdminOrderDetail({ orderId }) {
             </CardContent>
           </Card>
 
-          {/* 2. Assigned Logistics Partner Card (Read-only display replacing manual assign and notes) */}
+          {/* 2. Assigned Zonal Admin Card (Read-only display replacing manual assign and notes) */}
           <Card className="radius-xl shadow-soft border">
             <CardContent className="p-6 space-y-4">
               <h3 className="font-display font-extrabold text-lg flex items-center gap-2">
-                <Truck className="w-5 h-5 text-accent" /> Logistics Partner
+                <Truck className="w-5 h-5 text-accent" /> Zonal Admin
               </h3>
               <div className="p-4 rounded-xl bg-secondary/50 border space-y-3">
                 {order.vendor_name ? (
                   <div>
-                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Assigned Partner Unit</span>
-                    <span className={`font-semibold text-sm block ${order.vendor_name.includes('No vendor') ? 'text-destructive font-bold' : 'text-foreground'}`}>
+                    <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Assigned Zonal Admin</span>
+                    <span className={`font-semibold text-sm block ${order.vendor_name.includes('No zonal admin') ? 'text-destructive font-bold' : 'text-foreground'}`}>
                       {order.vendor_name}
                     </span>
                     {order.vendor_email && (
@@ -3466,7 +3676,7 @@ function AdminOrderDetail({ orderId }) {
                   <div>
                     <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider block">Fulfillment Status</span>
                     <span className="font-semibold text-xs text-destructive mt-1 block">
-                      No vendor assigned to this customer — please assign one in Customer Pricing
+                      No zonal admin assigned — please assign one in Customer Pricing
                     </span>
                   </div>
                 )}

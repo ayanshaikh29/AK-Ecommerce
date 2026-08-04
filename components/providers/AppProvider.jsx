@@ -218,7 +218,7 @@ function AppContentInner({ children }) {
           <div className="min-h-screen flex items-center justify-center bg-background">
             <div className="text-center space-y-3">
               <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-              <p className="text-sm text-muted-foreground font-medium">Redirecting to Admin Portal...</p>
+              <p className="text-sm text-muted-foreground font-medium">Redirecting to Owner Portal...</p>
             </div>
           </div>
         ) : children}

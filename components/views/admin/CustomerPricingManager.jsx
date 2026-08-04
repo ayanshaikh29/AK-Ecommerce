@@ -61,7 +61,7 @@ export function CustomerPricingManager() {
 
   // Admin Account Creation State (Customer & Vendor)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
-  const [newCustForm, setNewCustForm] = useState({ role: 'customer', full_name: '', email: '', phone: '', password: '' })
+  const [newCustForm, setNewCustForm] = useState({ role: 'customer', full_name: '', contact_person: '', email: '', phone: '', password: '' })
   const [confirmPassword, setConfirmPassword] = useState('')
 
   // B2B Catalog Access Approval states
@@ -99,7 +99,11 @@ export function CustomerPricingManager() {
   const handleCreateCustomer = async (e) => {
     e.preventDefault()
     if (!newCustForm.full_name || !newCustForm.email || !newCustForm.password) {
-      toast.error('Full Name, Email, and Password are required')
+      if (newCustForm.role === 'customer' && !newCustForm.full_name) {
+        toast.error('Business Name is required for customer accounts')
+      } else {
+        toast.error('Name, Email, and Password are required')
+      }
       return
     }
     if (newCustForm.role === 'customer') {
@@ -125,7 +129,8 @@ export function CustomerPricingManager() {
     try {
       const payload = {
         role: newCustForm.role || 'customer',
-        full_name: newCustForm.full_name,
+        full_name: newCustForm.role === 'customer' ? (newCustForm.contact_person || newCustForm.full_name) : newCustForm.full_name,
+        business_name: newCustForm.role === 'customer' ? newCustForm.full_name : undefined,
         email: newCustForm.email,
         phone: newCustForm.phone,
         password: newCustForm.password,
@@ -147,10 +152,19 @@ export function CustomerPricingManager() {
       }
 
       const data = await res.json()
-      toast.success(`${newCustForm.role === 'vendor' ? 'Vendor' : 'Customer'} account created successfully!`)
+      toast.success(`${newCustForm.role === 'vendor' ? 'Zonal Admin' : 'Customer'} account created successfully!`)
       setCreateDialogOpen(false)
-      setCreatedCredentials({ ...data.user, role: newCustForm.role })
-      setNewCustForm({ role: 'customer', full_name: '', email: '', phone: '', password: '', assigned_vendor_id: '' })
+      // For customers, include assigned zonal admin details
+      const assignedVendor = newCustForm.role === 'customer' && newCustForm.assigned_vendor_id
+        ? (vendors || []).find(v => v.id === newCustForm.assigned_vendor_id)
+        : null
+      setCreatedCredentials({
+        ...data.user,
+        role: newCustForm.role,
+        assigned_zonal_admin_name: assignedVendor?.name || 'Not Assigned',
+        assigned_zonal_admin_email: assignedVendor?.email || 'Not Assigned'
+      })
+      setNewCustForm({ role: 'customer', full_name: '', contact_person: '', email: '', phone: '', password: '', assigned_vendor_id: '' })
       setConfirmPassword('')
       fetchCustomerList()
     } catch (err) {
@@ -1134,7 +1148,7 @@ export function CustomerPricingManager() {
         <DialogContent className="max-w-md radius-xl p-6 text-left">
           <DialogHeader>
             <DialogTitle className="font-display font-bold text-xl flex items-center gap-2">
-              <UserPlus className="w-5 h-5 text-accent" /> {newCustForm.role === 'vendor' ? 'Create New Vendor Account' : 'Create New Customer Account'}
+              <UserPlus className="w-5 h-5 text-accent" /> {newCustForm.role === 'vendor' ? 'Create New Zonal Admin Account' : 'Create New Customer Account'}
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreateCustomer} className="space-y-4 text-left mt-2">
@@ -1150,15 +1164,26 @@ export function CustomerPricingManager() {
               </select>
             </div>
             <div>
-              <label className="text-xs font-bold block mb-1">{newCustForm.role === 'vendor' ? 'Vendor / Company Name *' : 'Full Name / Business Name *'}</label>
+              <label className="text-xs font-bold block mb-1">{newCustForm.role === 'vendor' ? 'Zonal Admin / Company Name *' : 'Business Name *'}</label>
               <Input
-                required
-                placeholder={newCustForm.role === 'vendor' ? 'e.g. Swift Delivery or BlueDart' : 'e.g. Ayan Shaikh or Acme Corp'}
+                required={newCustForm.role !== 'customer'}
+                placeholder={newCustForm.role === 'vendor' ? 'e.g. Swift Delivery or BlueDart' : 'e.g. Acme Corp'}
                 value={newCustForm.full_name}
                 onChange={e => setNewCustForm(prev => ({ ...prev, full_name: e.target.value }))}
                 className="h-10 rounded-xl text-xs"
               />
             </div>
+            {newCustForm.role === 'customer' && (
+              <div>
+                <label className="text-xs font-bold block mb-1">Full Name (Contact Person)</label>
+                <Input
+                  placeholder="e.g. Ayan Shaikh"
+                  value={newCustForm.contact_person || ''}
+                  onChange={e => setNewCustForm(prev => ({ ...prev, contact_person: e.target.value }))}
+                  className="h-10 rounded-xl text-xs"
+                />
+              </div>
+            )}
             <div>
               <label className="text-xs font-bold block mb-1">Email Address *</label>
               <Input
@@ -1245,7 +1270,7 @@ export function CustomerPricingManager() {
             </div>
 
             <Button type="submit" disabled={creatingCust} className="w-full h-11 rounded-full gold-gradient text-primary font-bold text-xs mt-4">
-              {creatingCust ? 'Creating Account...' : (newCustForm.role === 'vendor' ? 'Create Vendor Account' : 'Create Customer Account')}
+              {creatingCust ? 'Creating Account...' : (newCustForm.role === 'vendor' ? 'Create Zonal Admin Account' : 'Create Customer Account')}
             </Button>
           </form>
         </DialogContent>
@@ -1308,7 +1333,7 @@ export function CustomerPricingManager() {
         <DialogContent className="max-w-md radius-xl p-6 text-left bg-white/90 backdrop-blur-md border border-[#ECECEC] shadow-2xl">
           <DialogHeader>
             <DialogTitle className="font-display font-black text-xl flex items-center gap-2 text-slate-800">
-              <CheckCircle2 className="w-6 h-6 text-[#F4B942] animate-bounce" /> {createdCredentials?.role === 'vendor' ? 'Vendor Account Managed' : 'Customer Account Managed'}
+              <CheckCircle2 className="w-6 h-6 text-[#F4B942] animate-bounce" /> {createdCredentials?.role === 'vendor' ? 'Zonal Admin Account Managed' : 'Customer Account Managed'}
             </DialogTitle>
           </DialogHeader>
 
@@ -1343,6 +1368,19 @@ export function CustomerPricingManager() {
                     <span className="font-mono font-bold text-slate-800">{createdCredentials.phone}</span>
                   </div>
                 )}
+                {/* Zonal Admin details for customer accounts */}
+                {createdCredentials.role === 'customer' && (
+                  <>
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                      <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Assigned Zonal Admin Name</span>
+                      <span className={`font-bold ${createdCredentials.assigned_zonal_admin_name === 'Not Assigned' ? 'text-destructive' : 'text-slate-800'}`}>{createdCredentials.assigned_zonal_admin_name}</span>
+                    </div>
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                      <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Assigned Zonal Admin Email</span>
+                      <span className={`font-mono font-bold ${createdCredentials.assigned_zonal_admin_email === 'Not Assigned' ? 'text-destructive' : 'text-slate-800'}`}>{createdCredentials.assigned_zonal_admin_email}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between items-center pt-0.5">
                   <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Last Changed</span>
                   <span className="font-semibold text-slate-500 text-[10px]">
@@ -1357,7 +1395,10 @@ export function CustomerPricingManager() {
                   <Button
                     onClick={() => {
                       const loginUrl = `${window.location.origin}${createdCredentials.role === 'vendor' ? '/vendor/login' : '/login'}`
-                      const text = `AK Enterprises B2B Portal\n\nLogin URL: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\nPhone: ${createdCredentials.phone || 'N/A'}`
+                      let text = `AK Enterprises B2B Portal\n\nLogin URL: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\nPhone: ${createdCredentials.phone || 'N/A'}`
+                      if (createdCredentials.role === 'customer') {
+                        text += `\nAssigned Zonal Admin: ${createdCredentials.assigned_zonal_admin_name} (${createdCredentials.assigned_zonal_admin_email})`
+                      }
                       navigator.clipboard.writeText(text)
                       setCopied(true)
                       toast.success('Credentials copied to clipboard!')
@@ -1388,7 +1429,11 @@ export function CustomerPricingManager() {
                 <Button
                   onClick={() => {
                     const loginUrl = `${window.location.origin}${createdCredentials.role === 'vendor' ? '/vendor/login' : '/login'}`
-                    const text = `*AK Enterprises B2B Portal*\n\nYour account credentials have been updated.\n\n*Login URL:* ${loginUrl}\n*Email:* ${createdCredentials.email}\n*Password:* ${createdCredentials.temporary_password}\n\n_Support details: Please contact procurement desk for customized pricing or warehouse support issues._`
+                    let text = `*AK Enterprises B2B Portal*\n\nYour account credentials have been updated.\n\n*Login URL:* ${loginUrl}\n*Email:* ${createdCredentials.email}\n*Password:* ${createdCredentials.temporary_password}`
+                    if (createdCredentials.role === 'customer') {
+                      text += `\n\n*Your Assigned Zonal Admin:* ${createdCredentials.assigned_zonal_admin_name} (${createdCredentials.assigned_zonal_admin_email})`
+                    }
+                    text += `\n\n_Support details: Please contact owner for customized pricing or warehouse support issues._`
                     const phone = createdCredentials.phone?.replace(/[^0-9]/g, '')
                     const url = phone ? `https://wa.me/91${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`
                     window.open(url, '_blank')
@@ -1618,7 +1663,7 @@ export function CustomerPricingManager() {
                                  if (!res.ok) {
                                   const errData = await res.json().catch(() => ({}))
                                   console.error('[Vendor Assignment Error Details]:', errData)
-                                  throw new Error(errData.error || errData.message || 'Failed to update vendor assignment')
+                                  throw new Error(errData.error || errData.message || 'Failed to update zonal admin assignment')
                                 }
                                 setProfileData(prev => ({
                                   ...prev,
@@ -1627,7 +1672,7 @@ export function CustomerPricingManager() {
                                     assigned_vendor_id: newVId
                                   }
                                 }))
-                                toast.success('Vendor assignment updated successfully!')
+                                toast.success('Zonal Admin assignment updated successfully!')
                                 fetchCustomerList()
                               } catch (err) {
                                 console.error('[Vendor Assignment Error]:', err)
@@ -1639,7 +1684,7 @@ export function CustomerPricingManager() {
                             disabled={updatingVendorId}
                             className="w-full h-10 rounded-xl text-xs bg-background border border-border px-3 font-semibold text-foreground focus:ring-accent"
                           >
-                            <option value="">Unassigned (No Vendor Linked)</option>
+                            <option value="">Unassigned (No Zonal Admin Linked)</option>
                             {(vendors || []).filter(v => v.is_enabled !== false).map(v => (
                               <option key={v.id} value={v.id}>
                                 🚚 {v.name} ({v.email})

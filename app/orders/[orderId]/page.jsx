@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   ArrowLeft, Loader2, Calendar, FileText, MapPin,
   CreditCard, CheckCircle2, Truck, Package, ExternalLink,
-  XCircle, RotateCcw, AlertCircle, X, ShieldAlert
+  XCircle, RotateCcw, AlertCircle, X, ShieldAlert, FileDown
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAppContext } from '@/components/providers/AppProvider'
@@ -60,10 +60,9 @@ function computeGST(items, customerState) {
 }
 
 const TIMELINE_STEPS = [
-  { key: 'pending', label: 'Order Placed', description: 'Your B2B purchase order has been received.' },
-  { key: 'confirmed', label: 'Admin Confirmed', description: 'Order verified and approved by operations.' },
-  { key: 'vendor_assigned', label: 'Vendor Assigned', description: 'Logistics fulfillment partner assigned.' },
-  { key: 'vendor_accepted', label: 'Vendor Accepted', description: 'Logistics partner accepted dispatch request.' },
+  { key: 'placed', label: 'Order Placed', description: 'Your B2B purchase order has been received.' },
+  { key: 'pending_vendor_acceptance', label: 'Awaiting Zonal Admin Acceptance', description: 'Zonal admin must accept or reject the order.' },
+  { key: 'confirmed', label: 'Zonal Admin Accepted — Processing', description: 'Order accepted by zonal admin and is being processed.' },
   { key: 'packed', label: 'Packed', description: 'Order items packed and labeled for dispatch.' },
   { key: 'shipped', label: 'Shipped', description: 'Dispatched via logistics carrier.' },
   { key: 'out_for_delivery', label: 'Out for Delivery', description: 'Out with delivery executive for arrival.' },
@@ -172,6 +171,26 @@ export default function OrderDetailsPage() {
     }
   }
 
+  const handleDownloadChallan = async () => {
+    try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : ''
+      const res = await fetch(`/api/orders/${orderId}/challan-pdf`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) throw new Error('Failed to download challan')
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `challan-${order?.order_number || orderId}.pdf`
+      link.click()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      logClientError(err, 'handleDownloadChallan')
+      toast.error(err?.message || 'Challan download failed')
+    }
+  }
+
   const handleCancelOrder = async () => {
     if (!confirm('Are you sure you want to cancel this order?')) return
     setCancelLoading(true)
@@ -232,6 +251,15 @@ export default function OrderDetailsPage() {
     }
   }, [user, orderId, mounted])
 
+  // Poll for status updates every 10 seconds
+  useEffect(() => {
+    if (!user || !orderId) return
+    const interval = setInterval(() => {
+      fetchOrderDetails()
+    }, 10000)
+    return () => clearInterval(interval)
+  }, [user, orderId])
+
   if (!mounted || !user || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -275,6 +303,14 @@ export default function OrderDetailsPage() {
             className="rounded-full h-9 px-4 flex items-center gap-2 shadow-sm border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/5 font-semibold"
           >
             <FileText className="w-4 h-4" /> Download Tax Invoice
+          </Button>
+          <Button
+            onClick={handleDownloadChallan}
+            variant="outline"
+            size="sm"
+            className="rounded-full h-9 px-4 flex items-center gap-2 shadow-sm border-blue-500/30 text-blue-600 hover:bg-blue-500/5 font-semibold"
+          >
+            <FileDown className="w-4 h-4" /> Download Challan
           </Button>
 
           {['pending', 'confirmed'].includes(orderStatus) && (
@@ -549,14 +585,35 @@ export default function OrderDetailsPage() {
               <CardContent className="p-6">
                 <div className="relative border-l border-border/70 pl-6 space-y-8">
                   {TIMELINE_STEPS.map((step, idx) => {
-                    const historyItem = statusHistory.find(h => (h?.status || '').toLowerCase() === step.key.toLowerCase())
-                    const isDone = !!historyItem
-                    const isLastActive = step.key === orderStatus
+                    const getStepStatusIndex = (status) => {
+                      const s = (status || '').toLowerCase().trim().replace(/_/g, ' ')
+                      if (s === 'pending' || s === 'pending vendor acceptance') return 1
+                      if (s === 'confirmed' || s === 'vendor assigned' || s === 'vendor accepted' || s === 'zonal admin assigned' || s === 'zonal admin accepted') return 2
+                      if (s === 'packed') return 3
+                      if (s === 'shipped') return 4
+                      if (s === 'out for delivery') return 5
+                      if (s === 'delivered') return 6
+                      return 0 // 'placed'
+                    }
+
+                    const currentStepIdx = getStepStatusIndex(orderStatus)
+                    const isDone = idx <= currentStepIdx
+                    const isLastActive = idx === currentStepIdx
+
+                    // Find corresponding history item for timestamp/details
+                    const historyItem = statusHistory.find(h => {
+                      const hStatus = (h?.status || '').toLowerCase().trim().replace(/_/g, ' ')
+                      if (step.key === 'placed') return true
+                      if (step.key === 'pending_vendor_acceptance' && (hStatus === 'pending vendor acceptance' || hStatus === 'pending')) return true
+                      if (step.key === 'confirmed' && (hStatus === 'confirmed' || hStatus === 'vendor assigned' || hStatus === 'vendor accepted' || hStatus === 'zonal admin assigned' || hStatus === 'zonal admin accepted')) return true
+                      return hStatus === step.key.replace(/_/g, ' ')
+                    })
 
                     let formattedTime = null
                     try {
-                      if (historyItem?.timestamp) {
-                        formattedTime = new Date(historyItem.timestamp).toLocaleString('en-IN', {
+                      const ts = (step.key === 'placed' && !historyItem) ? (order.placed_at || order.created_at) : historyItem?.timestamp
+                      if (ts) {
+                        formattedTime = new Date(ts).toLocaleString('en-IN', {
                           day: 'numeric',
                           month: 'short',
                           hour: '2-digit',

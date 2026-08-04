@@ -18,6 +18,7 @@ import {
   saveVendor, 
   getVendorByUserId 
 } from '@/lib/b2b-store'
+import { getDateRange, listISTDays, orderISTDateKey, startOfISTDay, DAY_MS } from '@/lib/date-helpers'
 
 export const maxDuration = 60 // seconds — Hobby plan max limit
 
@@ -179,30 +180,44 @@ function buildStatusHistory(o) {
   const pAt = o.placed_at || o.created_at
   const uAt = o.updated_at || pAt
   
-  const steps = ['pending', 'confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered']
-  const currentKey = statusStr.toLowerCase().trim().replace(/ /g, '_')
-  const activeIdx = steps.indexOf(currentKey)
+  // New order flow: pending_vendor_acceptance → confirmed → packed → shipped → out_for_delivery → delivered
+  // Legacy flow preserved for old orders: pending → confirmed → vendor_assigned → vendor_accepted → ...
+  const NEW_STEPS = ['pending_vendor_acceptance', 'confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered']
+  const LEGACY_STEPS = ['pending', 'confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered']
   
-  if (currentKey === 'rejected' || currentKey === 'vendor_rejected') {
+  const currentKey = statusStr.toLowerCase().trim().replace(/ /g, '_')
+  const newIdx = NEW_STEPS.indexOf(currentKey)
+  const legacyIdx = LEGACY_STEPS.indexOf(currentKey)
+  
+  // Determine which flow this order follows
+  const isNewFlow = newIdx !== -1 || currentKey === 'vendor_rejected' || currentKey === 'cancelled'
+  const steps = isNewFlow ? NEW_STEPS : LEGACY_STEPS
+  const activeIdx = isNewFlow ? newIdx : legacyIdx
+  
+  if (currentKey === 'vendor_rejected') {
+    statusHistory = [
+      { status: 'pending_vendor_acceptance', timestamp: pAt, note: 'Order placed — Awaiting zonal admin acceptance' },
+      { status: currentKey, timestamp: uAt, note: 'Zonal admin declined the order. Needs reassignment by owner.' }
+    ]
+  } else if (currentKey === 'rejected') {
     const reasonNote = o.rejection_reason ? `Reason: ${o.rejection_reason}` : 'Order was rejected'
     statusHistory = [
-      { status: 'pending', timestamp: pAt, note: 'Order placed — Pending Admin Approval' },
+      { status: 'pending_vendor_acceptance', timestamp: pAt, note: 'Order placed — Awaiting zonal admin acceptance' },
       { status: currentKey, timestamp: uAt, note: `Order Rejected. ${reasonNote}` }
     ]
+  } else if (currentKey === 'cancelled' || currentKey === 'returned') {
+    statusHistory = [
+      { status: 'pending_vendor_acceptance', timestamp: pAt, note: 'Order placed — Awaiting zonal admin acceptance' },
+      { status: currentKey, timestamp: uAt, note: `Order was ${currentKey}` }
+    ]
   } else if (activeIdx === -1) {
-    statusHistory = [{ status: statusStr, timestamp: uAt, note: `Order status is ${statusStr}` }]
-    if (currentKey === 'cancelled' || currentKey === 'returned') {
-      statusHistory = [
-        { status: 'pending', timestamp: pAt, note: 'Order placed — Pending Admin Approval' },
-        { status: statusStr, timestamp: uAt, note: `Order was ${statusStr}` }
-      ]
-    }
+    statusHistory = [{ status: currentKey, timestamp: uAt, note: `Order status is ${currentKey}` }]
   } else {
     statusHistory = []
     for (let i = 0; i <= activeIdx; i++) {
       const stepKey = steps[i]
       let ts = pAt
-      let note = 'Order submitted — Pending Admin Approval'
+      let note = ''
       
       if (i === activeIdx) {
         ts = uAt
@@ -212,14 +227,16 @@ function buildStatusHistory(o) {
         ts = new Date(pTime + (uTime - pTime) * (i / activeIdx)).toISOString()
       }
       
-      if (stepKey === 'pending') note = 'Order submitted — Pending Admin Approval'
-      if (stepKey === 'confirmed') note = 'Order accepted by Admin'
-      if (stepKey === 'vendor_assigned') note = 'Vendor logistics partner assigned'
-      if (stepKey === 'vendor_accepted') note = 'Vendor accepted the assignment'
+      if (stepKey === 'pending_vendor_acceptance') note = 'Order placed — Awaiting zonal admin acceptance'
+      if (stepKey === 'confirmed') note = 'Zonal admin accepted — Order confirmed, processing'
       if (stepKey === 'packed') note = 'Order packed at warehouse'
       if (stepKey === 'shipped') note = 'Package dispatched to courier partner'
       if (stepKey === 'out_for_delivery') note = 'Courier partner is delivering today'
       if (stepKey === 'delivered') note = 'Delivered to recipient location'
+      // Legacy notes for old flow
+      if (stepKey === 'pending' && !isNewFlow) note = 'Order submitted — Pending Owner Approval'
+      if (stepKey === 'vendor_assigned' && !isNewFlow) note = 'Zonal admin assigned'
+      if (stepKey === 'vendor_accepted' && !isNewFlow) note = 'Zonal admin accepted the assignment'
       
       statusHistory.push({ status: stepKey, timestamp: ts, note })
     }
@@ -670,7 +687,7 @@ async function route(req, method) {
   if (p[0] === 'customer-access' && method === 'GET') {
     if (!user) return json({ has_access: false, logged_in: false, message: "Log in required" })
     if (user.role === 'admin') return json({ has_access: true, is_admin: true })
-    if (user.role === 'vendor') return json({ has_access: false, is_vendor: true, message: "Vendor accounts do not have catalog access." })
+    if (user.role === 'vendor') return json({ has_access: false, is_vendor: true, message: "Zonal Admin accounts do not have catalog access." })
     
     const visibleMap = await getCustomerVisiblePricingMap(user.id)
     return json({ has_access: visibleMap.size > 0, visible_count: visibleMap.size })
@@ -687,7 +704,7 @@ async function route(req, method) {
         return json({ catalog_locked: true, products: [], message: "Catalog browsing is restricted. Please log in to view products and prices." }, 401)
       }
       if (user.role === 'vendor') {
-        return json({ catalog_locked: true, products: [], message: "Vendor accounts do not have catalog access." }, 403)
+        return json({ catalog_locked: true, products: [], message: "Zonal Admin accounts do not have catalog access." }, 403)
       }
 
       let customerPricingMap = null
@@ -759,7 +776,7 @@ async function route(req, method) {
     }
     if (method === 'GET' && p[1]) {
       if (!user) return err('Unauthorized', 401)
-      if (user.role === 'vendor') return err('Forbidden for vendors', 403)
+      if (user.role === 'vendor') return err('Forbidden for zonal admins', 403)
 
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p[1])
       const query = isUUID
@@ -1151,12 +1168,12 @@ async function route(req, method) {
           .eq('id', orderId)
           .maybeSingle()
         if (getErr || !o) return err('Order not found', 404)
-        if (user.role !== 'admin' && o.user_id !== user.id) return err('Forbidden', 403)
+        if (user.role !== 'admin' && user.role !== 'vendor' && o.user_id !== user.id) return err('Forbidden', 403)
 
         // Fetch customer profile details
         const { data: customer } = await supabase
           .from('users')
-          .select('company_name, gst_number')
+          .select('company_name, gst_number, business_name, full_name')
           .eq('id', o.user_id)
           .maybeSingle()
         o.customer_profile = customer || {}
@@ -1215,6 +1232,7 @@ async function route(req, method) {
     }
 
     // GET /api/orders/:orderId/challan-pdf
+    // Accessible to all roles: admin, vendor, and customer (for their own orders)
     if (p[1] && p[2] === 'challan-pdf' && method === 'GET') {
       if (!user) return err('Unauthorized', 401)
       try {
@@ -1225,12 +1243,15 @@ async function route(req, method) {
           .eq('id', orderId)
           .maybeSingle()
         if (getErr || !o) return err('Order not found', 404)
-        if (!['admin', 'vendor'].includes(user.role)) return err('Forbidden', 403)
+        // Allow admin, vendor, or the customer who placed the order
+        if (user.role !== 'admin' && user.role !== 'vendor' && o.user_id !== user.id) {
+          return err('Forbidden', 403)
+        }
 
         // Fetch customer profile details
         const { data: customer } = await supabase
           .from('users')
-          .select('company_name, gst_number')
+          .select('company_name, gst_number, business_name, full_name')
           .eq('id', o.user_id)
           .maybeSingle()
         o.customer_profile = customer || {}
@@ -1300,57 +1321,16 @@ async function route(req, method) {
       const from = (pageVal - 1) * limitVal
       const to = from + limitVal - 1
 
-      // 2. Date Filtering (Default to Last 12 Months if no specific time filters and admin role)
+      // 2. Date Filtering (IST-aware — Default to Last 12 Months for admin)
       const range = url.searchParams.get('range') || 'last-12-months'
       const startDateParam = url.searchParams.get('startDate')
       const endDateParam = url.searchParams.get('endDate')
 
-      let filterStart = null
-      let filterEnd = null
-
-      if (startDateParam || endDateParam) {
-        if (startDateParam) filterStart = new Date(startDateParam)
-        if (endDateParam) {
-          filterEnd = new Date(endDateParam)
-          filterEnd.setHours(23, 59, 59, 999)
-        }
-      } else if (range && range !== 'all') {
-        const now = new Date()
-        filterEnd = new Date()
-        filterEnd.setHours(23, 59, 59, 999)
-
-        if (range === 'today') {
-          filterStart = new Date()
-          filterStart.setHours(0, 0, 0, 0)
-        } else if (range === 'yesterday') {
-          filterStart = new Date()
-          filterStart.setDate(now.getDate() - 1)
-          filterStart.setHours(0, 0, 0, 0)
-          filterEnd = new Date()
-          filterEnd.setDate(now.getDate() - 1)
-          filterEnd.setHours(23, 59, 59, 999)
-        } else if (range === 'last-7-days') {
-          filterStart = new Date()
-          filterStart.setDate(now.getDate() - 7)
-          filterStart.setHours(0, 0, 0, 0)
-        } else if (range === 'last-30-days') {
-          filterStart = new Date()
-          filterStart.setDate(now.getDate() - 30)
-          filterStart.setHours(0, 0, 0, 0)
-        } else if (range === 'last-90-days') {
-          filterStart = new Date()
-          filterStart.setDate(now.getDate() - 90)
-          filterStart.setHours(0, 0, 0, 0)
-        } else if (range === 'last-6-months') {
-          filterStart = new Date()
-          filterStart.setMonth(now.getMonth() - 6)
-          filterStart.setHours(0, 0, 0, 0)
-        } else if (range === 'last-12-months') {
-          filterStart = new Date()
-          filterStart.setMonth(now.getMonth() - 12)
-          filterStart.setHours(0, 0, 0, 0)
-        }
-      }
+      // Reusable IST-aware range helper (lib/date-helpers.js) — guarantees the
+      // "Today"/"Yesterday" boundaries are aligned to the Indian business day.
+      const bounds = getDateRange(range, startDateParam, endDateParam)
+      const filterStart = bounds.start
+      const filterEnd = bounds.end
 
       if (filterStart) {
         query = query.gte('placed_at', filterStart.toISOString())
@@ -1375,7 +1355,7 @@ async function route(req, method) {
       const mapped = (dbOrders || []).map(o => {
         const { status: statusStr, history: statusHistory } = buildStatusHistory(o)
         // Filter out error-string vendor_name values (legacy data)
-        const vendorDisplay = (o.vendor_name && !o.vendor_name.startsWith('No vendor assigned')) ? o.vendor_name : null
+        const vendorDisplay = (o.vendor_name && !o.vendor_name.startsWith('No zonal admin assigned')) ? o.vendor_name : null
         return {
           ...o,
           status: statusStr,
@@ -1407,12 +1387,53 @@ async function route(req, method) {
         })
       }
 
+      // 5. Aggregated Summary — computed over the FULL filtered set (range +
+      //    status, ignoring pagination/search) so the KPI cards always match
+      //    the selected "Time Period" + "Fulfillment Status" filters.
+      let summaryQuery = supabase.from('orders').select('total, status')
+      if (user.role !== 'admin') {
+        summaryQuery = summaryQuery.eq('user_id', user.id)
+      }
+      if (filterStart) summaryQuery = summaryQuery.gte('placed_at', filterStart.toISOString())
+      if (filterEnd) summaryQuery = summaryQuery.lte('placed_at', filterEnd.toISOString())
+      if (status && status !== 'all') summaryQuery = summaryQuery.eq('status', status.toLowerCase().trim())
+
+      let summary = { revenue: 0, avgOrderValue: 0, delivered: 0, cancelled: 0, count: 0 }
+      try {
+        const { data: summaryOrders, error: summaryErr } = await summaryQuery
+        const list = summaryErr ? [] : (summaryOrders || [])
+        let delivered = 0
+        let cancelled = 0
+        let totalRevenue = 0
+        for (const o of list) {
+          const grandTotal = Number(o.total || 0)
+          if (o.status === 'delivered') {
+            delivered++
+            totalRevenue += grandTotal
+          } else if (o.status === 'cancelled' || o.status === 'rejected' || o.status === 'vendor_rejected') {
+            cancelled++
+          } else {
+            totalRevenue += grandTotal
+          }
+        }
+        summary = {
+          revenue: Math.round(totalRevenue * 100) / 100,
+          avgOrderValue: list.length > 0 ? Math.round((totalRevenue / list.length) * 100) / 100 : 0,
+          delivered,
+          cancelled,
+          count: list.length
+        }
+      } catch (summaryCatchErr) {
+        console.warn('[Orders Summary Failed]:', summaryCatchErr?.message)
+      }
+
       return json({
         orders: filtered,
         totalCount: count || filtered.length,
         limit: limitVal,
         page: pageVal,
-        totalPages: Math.ceil((count || filtered.length) / limitVal)
+        totalPages: Math.ceil((count || filtered.length) / limitVal),
+        summary
       })
     }
     
@@ -1641,7 +1662,7 @@ async function route(req, method) {
         id: orderId,
         user_id: user.id,
         order_number,
-        status: 'pending', // Starts as Pending Admin Approval
+        status: 'pending_vendor_acceptance', // New flow: order goes directly to vendor
         payment_method: payment_method || 'COD',
         subtotal: computedSubtotal,
         discount: body.discount || 0,
@@ -1677,9 +1698,63 @@ async function route(req, method) {
         return err('Order items database creation failed: ' + itemsErr.message, 500)
       }
       
+      // Auto-assign vendor from customer's assigned vendor
+      let assignedVendor = null
+      try {
+        const { data: customerVendor } = await supabase
+          .from('users')
+          .select('assigned_vendor_id')
+          .eq('id', user.id)
+          .maybeSingle()
+        
+        if (customerVendor?.assigned_vendor_id) {
+          const { data: vendorRecord } = await supabase
+            .from('vendors')
+            .select('*')
+            .eq('id', customerVendor.assigned_vendor_id)
+            .maybeSingle()
+          
+          if (vendorRecord) {
+            assignedVendor = vendorRecord
+          }
+        }
+      } catch (vendorErr) {
+        console.warn('Vendor auto-assign lookup failed:', vendorErr.message)
+      }
+      
+      // Update order with vendor assignment if found
+      if (assignedVendor) {
+        await supabase.from('orders').update({
+          assigned_vendor_id: assignedVendor.id,
+          vendor_name: assignedVendor.name || '',
+          vendor_email: assignedVendor.email || '',
+          assigned_at: now,
+          assigned_by: 'auto',
+          updated_at: now
+        }).eq('id', orderId)
+        
+        // Notify vendor about new order
+        try {
+          await supabase.from('activity_logs').insert({
+            id: uuidv4(),
+            user_id: user.id,
+            user_name: user.full_name || user.email,
+            user_email: user.email,
+            event_type: 'order',
+            category: 'orders',
+            title: `New order #${order_number} awaiting your acceptance`,
+            description: `Order #${order_number} requires your review. Please accept or reject.`,
+            metadata: { order_id: orderId, order_number, vendor_id: assignedVendor.id },
+            created_at: now
+          })
+        } catch (actErr) {
+          console.warn('Vendor notification insert failed:', actErr.message)
+        }
+      }
+      
       const trackingData = {
-        current: 'pending',
-        history: [{ status: 'pending', timestamp: now, note: 'Order submitted — Pending Admin Approval' }]
+        current: 'pending_vendor_acceptance',
+        history: [{ status: 'pending_vendor_acceptance', timestamp: now, note: 'Order placed — Awaiting vendor acceptance' }]
       }
       
       return json({
@@ -1710,7 +1785,7 @@ async function route(req, method) {
       
       // Self-cancellation by customer while pending
       if (user.role !== 'admin' && user.id === orderToUpdate.user_id) {
-        if (newStatus === 'cancelled' && ['pending', 'confirmed'].includes(orderToUpdate.status)) {
+        if (newStatus === 'cancelled' && ['pending', 'pending_vendor_acceptance', 'confirmed'].includes(orderToUpdate.status)) {
           await supabase.from('orders').update({ status: 'cancelled', updated_at: now }).eq('id', p[1])
           return json({ ok: true, status: 'cancelled' })
         }
@@ -1731,7 +1806,7 @@ async function route(req, method) {
 
       // Handle Admin Accept Order (move from pending -> confirmed)
       if (targetStatus === 'confirmed') {
-        if (orderToUpdate.status !== 'pending') {
+        if (!['pending', 'pending_vendor_acceptance'].includes(orderToUpdate.status)) {
           return err('Order has already been processed.', 400)
         }
         // Deduct stock & log stock movements (auto-adjusting stock if needed for B2B wholesale orders)
@@ -1783,7 +1858,7 @@ async function route(req, method) {
           updatePayload.vendor_name = chosenVendor.name || ''
           updatePayload.vendor_email = chosenVendor.email || ''
           updatePayload.assigned_at = now
-          updatePayload.assigned_by = 'Customer Vendor System'
+          updatePayload.assigned_by = 'Customer Zonal Admin System'
         } else {
           // If customer has no vendor assigned, or the assigned vendor is disabled
           // stay as 'confirmed' but do NOT store an error string as vendor_name
@@ -1819,7 +1894,7 @@ async function route(req, method) {
         }
         history.push({
           status: finalStatus,
-          note: finalStatus === 'vendor_assigned' ? `Vendor Auto-Assigned: ${updatePayload.vendor_name}` : `Order status updated to ${finalStatus.toUpperCase()}`,
+          note: finalStatus === 'vendor_assigned' ? `Zonal Admin Auto-Assigned: ${updatePayload.vendor_name}` : `Order status updated to ${finalStatus.toUpperCase()}`,
           timestamp: now
         })
         updatePayload.status_history = history
@@ -1842,7 +1917,7 @@ async function route(req, method) {
         }
 
         if (!vendorRecord) {
-          return err('Vendor not found for ID: ' + vendorId + '. Check that the vendor exists in the vendors table.', 404)
+          return err('Zonal Admin not found for ID: ' + vendorId + '. Check that the zonal admin exists in the vendors table.', 404)
         }
 
         updatePayload.vendor_name = vendorRecord.name || ''
@@ -1898,20 +1973,20 @@ async function route(req, method) {
           const notifications = []
           const notifNow = new Date().toISOString()
 
-          // Admin notification
+          // Owner notification
           notifications.push({
             id: uuidv4(), user_id: user.id,
-            title: 'Vendor Assigned Successfully',
-            message: `Vendor "${vendorRecord?.name || 'Partner'}" assigned to Order #${ordNum}.`,
+            title: 'Zonal Admin Assigned Successfully',
+            message: `Zonal Admin "${vendorRecord?.name || 'Partner'}" assigned to Order #${ordNum}.`,
             type: 'vendor_assigned', is_read: false, created_at: notifNow
           })
 
-          // Vendor notification
+          // Zonal Admin notification
           if (vendorRecord?.user_id) {
             notifications.push({
               id: uuidv4(), user_id: vendorRecord.user_id,
               title: 'New Dispatch Assignment',
-              message: `You have been assigned Order #${ordNum}. Open your Vendor Portal to accept.`,
+              message: `You have been assigned Order #${ordNum}. Open your Zonal Admin Portal to accept.`,
               type: 'vendor_assigned', is_read: false, created_at: notifNow,
               link: '/vendor'
             })
@@ -1921,8 +1996,8 @@ async function route(req, method) {
           if (orderToUpdate.user_id) {
             notifications.push({
               id: uuidv4(), user_id: orderToUpdate.user_id,
-              title: 'Logistics Partner Assigned',
-              message: `Your order #${ordNum} has been assigned to a logistics partner and will be dispatched soon.`,
+              title: 'Zonal Admin Assigned',
+              message: `Your order #${ordNum} has been assigned to a zonal admin and will be dispatched soon.`,
               type: 'order_update', is_read: false, created_at: notifNow,
               link: '/orders/' + p[1]
             })
@@ -1941,11 +2016,11 @@ async function route(req, method) {
             await supabase.from('activity_logs').insert({
               id: uuidv4(),
               user_id: user.id,
-              user_name: user.full_name || 'Admin',
+              user_name: user.full_name || 'Owner',
               user_email: user.email,
               event_type: 'order',
-              title: 'Vendor Assigned',
-              description: `Vendor "${vendorRecord?.name || 'Partner'}" assigned to Order #${ordNum}`,
+              title: 'Zonal Admin Assigned',
+              description: `Zonal Admin "${vendorRecord?.name || 'Partner'}" assigned to Order #${ordNum}`,
               metadata: { order_id: p[1], vendor_id: vendorId, order_number: ordNum },
               created_at: notifNow
             })
@@ -1983,7 +2058,7 @@ async function route(req, method) {
   // ==================== ZOHO PDF DOWNLOAD ENDPOINTS (FALLBACK) ====================
   // GET /api/zoho/invoice/:invoiceId  — generate and return PDF locally as fallback
   if (p[0] === 'zoho' && p[1] === 'invoice' && p[2] && method === 'GET') {
-    if (!user || !['admin', 'customer'].includes(user.role)) return err('Unauthorized', 401)
+    if (!user || !['admin', 'customer', 'vendor'].includes(user.role)) return err('Unauthorized', 401)
     try {
       const supabase = db()
       const { data: o, error: getErr } = await supabase
@@ -2000,6 +2075,15 @@ async function route(req, method) {
           .eq('id', p[2])
           .maybeSingle()
         if (!o2) return err('Order not found', 404)
+
+        // Fetch customer profile details
+        const { data: customer } = await supabase
+          .from('users')
+          .select('company_name, gst_number, business_name, full_name')
+          .eq('id', o2.user_id)
+          .maybeSingle()
+        o2.customer_profile = customer || {}
+
         const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
         const pdfBuffer = await generateInvoicePDF(o2, settings || {})
         return new NextResponse(Buffer.from(pdfBuffer), {
@@ -2010,7 +2094,15 @@ async function route(req, method) {
           }
         })
       }
-      if (user.role !== 'admin' && o.user_id !== user.id) return err('Forbidden', 403)
+      if (user.role !== 'admin' && user.role !== 'vendor' && o.user_id !== user.id) return err('Forbidden', 403)
+
+      // Fetch customer profile details
+      const { data: customer } = await supabase
+        .from('users')
+        .select('company_name, gst_number, business_name, full_name')
+        .eq('id', o.user_id)
+        .maybeSingle()
+      o.customer_profile = customer || {}
 
       const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
       const pdfBuffer = await generateInvoicePDF(o, settings || {})
@@ -2030,7 +2122,7 @@ async function route(req, method) {
   // GET /api/zoho/challan/:challanId  — generate and return delivery challan PDF locally as fallback
   if (p[0] === 'zoho' && p[1] === 'challan' && p[2] && method === 'GET') {
     if (!user) return err('Unauthorized', 401)
-    if (!['admin', 'vendor'].includes(user.role)) return err('Forbidden', 403)
+    if (!user || !['admin', 'vendor', 'customer'].includes(user.role)) return err('Forbidden', 403)
     try {
       const supabase = db()
       const { data: o, error: getErr } = await supabase
@@ -2057,7 +2149,7 @@ async function route(req, method) {
           }
         })
       }
-      if (user.role !== 'admin' && o.user_id !== user.id) return err('Forbidden', 403)
+      if (user.role !== 'admin' && user.role !== 'vendor' && o.user_id !== user.id) return err('Forbidden', 403)
 
       const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
       const pdfBuffer = await generateChallanPDF(o, settings || {})
@@ -2217,19 +2309,95 @@ async function route(req, method) {
 
   if (p[0] === 'stats' && method === 'GET') {
     if (!user || user.role !== 'admin') return err('Forbidden', 403)
+
+    // Date range selector (defaults to Today in IST). All KPI values below are
+    // computed within this range so the dashboard cards + chart stay in sync.
+    const range = url.searchParams.get('range') || 'today'
+    const startDateParam = url.searchParams.get('startDate')
+    const endDateParam = url.searchParams.get('endDate')
+    const bounds = getDateRange(range, startDateParam, endDateParam)
+    const { start, end, days } = bounds
+
     const { count: productsCount } = await supabase.from('products').select('*', { count: 'exact', head: true })
     const { data: orders } = await supabase.from('orders').select('*')
     const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true })
-    
-    const revenue = (orders||[]).filter(o=>o.status!=='cancelled').reduce((s,o)=>s+(o.total||0),0)
-    const pending = (orders||[]).filter(o=>o.status==='pending').length
+
+    const isInRange = o => {
+      if (!start || !end) return true
+      const t = new Date(o.placed_at || o.created_at).getTime()
+      return !isNaN(t) && t >= start.getTime() && t <= end.getTime()
+    }
+
+    const rangeOrders = (orders || []).filter(isInRange)
+    const revenue = rangeOrders.filter(o => o.status !== 'cancelled').reduce((s, o) => s + (o.total || 0), 0)
+    const pending = rangeOrders.filter(o => o.status === 'pending').length
     const { data: lowStock } = await supabase.from('products').select('name, stock_quantity').lt('stock_quantity', 20).limit(10)
-    
+
+    // "Orders Today" / "Revenue Today" — always computed against the actual
+    // current IST day, regardless of the selected range, so these cards never
+    // accidentally show all-time totals.
+    const todayBounds = getDateRange('today')
+    const isToday = o => {
+      const t = new Date(o.placed_at || o.created_at).getTime()
+      return !isNaN(t) && t >= todayBounds.start.getTime() && t <= todayBounds.end.getTime()
+    }
+    const todayOrders = (orders || []).filter(isToday)
+    const ordersToday = todayOrders.length
+    const revenueToday = todayOrders.filter(o => o.status !== 'cancelled').reduce((s, o) => s + (o.total || 0), 0)
+
+    // Day-wise buckets (chart + breakdown table). For "all time" we fall back
+    // to the last 120 IST days for the daily view so the response stays sane.
+    let displayStart = start
+    let displayEnd = end
+    if (!displayStart || !displayEnd) {
+      const todayStart = startOfISTDay(new Date())
+      displayStart = new Date(todayStart.getTime() - 119 * DAY_MS)
+      displayEnd = new Date(todayStart.getTime() + DAY_MS - 1)
+    }
+
+    const dayMap = {}
+    for (const o of rangeOrders) {
+      const key = orderISTDateKey(o.placed_at || o.created_at)
+      if (!key) continue
+      if (!dayMap[key]) dayMap[key] = { date: key, orders: 0, revenue: 0 }
+      dayMap[key].orders++
+      if (o.status !== 'cancelled') dayMap[key].revenue += (o.total || 0)
+    }
+
     const byDay = {}
-    for (let i=6;i>=0;i--){ const d = new Date(); d.setDate(d.getDate()-i); const k = d.toISOString().slice(0,10); byDay[k]=0 }
-    (orders||[]).forEach(o=>{ const k = new Date(o.placed_at).toISOString().slice(0,10); if (k in byDay) byDay[k]++ })
-    
-    return json({ products: productsCount, orders: orders?.length||0, users: usersCount, revenue, pending, lowStock: lowStock||[], byDay })
+    const dailyBreakdown = []
+    for (const { key } of listISTDays(displayStart, displayEnd)) {
+      const row = dayMap[key] || { date: key, orders: 0, revenue: 0 }
+      byDay[key] = row.orders
+      dailyBreakdown.push({
+        date: key,
+        orders: row.orders,
+        revenue: Math.round(row.revenue * 100) / 100,
+        avgOrderValue: row.orders > 0 ? Math.round((row.revenue / row.orders) * 100) / 100 : 0
+      })
+    }
+    dailyBreakdown.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+
+    // Chart stays linked to the selected range but caps at 31 bars so very
+    // long ranges don't produce an unreadable chart.
+    const chartByDay = {}
+    const chartKeys = Object.keys(byDay).slice(-Math.min(Math.max(days, 1), 31))
+    for (const k of chartKeys) chartByDay[k] = byDay[k]
+
+    return json({
+      products: productsCount,
+      orders: rangeOrders.length,
+      users: usersCount,
+      revenue,
+      pending,
+      lowStock: lowStock || [],
+      byDay: chartByDay,
+      dailyBreakdown,
+      ordersToday,
+      revenueToday,
+      range,
+      rangeDays: days
+    })
   }
 
   // ==================== CATALOG ACCESS REQUESTS ====================
@@ -3182,8 +3350,8 @@ Current Conversation History:\n` +
   if (p[0] === 'admin' && p[1] === 'create-account' && method === 'POST') {
     if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
 
-    const { full_name, email, phone, password, role = 'customer' } = body
-    if (!full_name || !email || !password) return err('Full Name, Email, and Password required', 400)
+    const { full_name, email, phone, password, role = 'customer', business_name } = body
+    if (!full_name || !email || !password) return err('Name, Email, and Password required', 400)
 
     const cleanEmail = email.trim().toLowerCase()
 
@@ -3214,6 +3382,7 @@ Current Conversation History:\n` +
       email: cleanEmail,
       password: hashPw(password),
       full_name: full_name.trim(),
+      business_name: business_name ? business_name.trim() : (role === 'customer' ? full_name.trim() : ''),
       phone: phone ? phone.trim() : '',
       role: role === 'vendor' ? 'vendor' : 'customer',
       created_at: nowStr,
@@ -3358,7 +3527,7 @@ Current Conversation History:\n` +
 
     if (method === 'PUT') {
       const { id, is_enabled } = body
-      if (!id) return err('Vendor ID required', 400)
+      if (!id) return err('Zonal Admin ID required', 400)
 
       const supabase = db()
       const { data: disabledStore } = await supabase.from('settings').select('marquee_messages').eq('id', 'disabled_vendors').maybeSingle()
@@ -3422,7 +3591,7 @@ Current Conversation History:\n` +
     
     if (!vendor && user.role !== 'admin') {
       console.error(`[Vendor Audit] User ${user.email} (ID: ${user.id}) has role=vendor but no record in vendors table yet.`)
-      return err('Vendor profile not linked, contact admin', 403)
+      return err('Zonal Admin profile not linked, contact owner', 403)
     }
 
     if (method === 'GET') {
@@ -3477,20 +3646,71 @@ Current Conversation History:\n` +
     if (method === 'PUT' && p[2]) {
       const { status, action } = body
       const nowStr = new Date().toISOString()
-      // NOTE: vendor_accepted / vendor_accepted_at do NOT exist as DB columns — status field tracks this
       const updateData = { updated_at: nowStr }
 
-      if (action === 'accept' || status === 'accepted' || status === 'vendor_accepted') {
-        updateData.status = 'vendor_accepted'
-      } else if (status) {
-        let normStatus = status
-        if (normStatus === 'accepted') normStatus = 'vendor_accepted'
-        if (normStatus === 'out for delivery') normStatus = 'out_for_delivery'
-
-        if (!['confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'vendor_rejected', 'rejected'].includes(normStatus)) {
-          return err('Invalid vendor order status', 400)
+      // New workflow: vendor can only ACCEPT or REJECT orders in "pending_vendor_acceptance" status
+      // All other status updates (packed/shipped/delivered) are admin-only
+      if (action === 'accept' || status === 'accepted' || status === 'confirmed') {
+        // Verify order is in pending_vendor_acceptance status
+        const { data: orderToAccept } = await supabase.from('orders').select('id, status, order_number, user_id, status_history').eq('id', p[2]).maybeSingle()
+        if (!orderToAccept) return err('Order not found', 404)
+        if (orderToAccept.status !== 'pending_vendor_acceptance') {
+          return err('This order cannot be accepted — it may have already been processed', 400)
         }
-        updateData.status = normStatus
+        updateData.status = 'confirmed'
+        // Persist status_history so customer timeline updates
+        const history = Array.isArray(orderToAccept.status_history) ? [...orderToAccept.status_history] : []
+        history.push({ status: 'confirmed', note: `Accepted by ${vendor?.name || 'Zonal Admin'}`, timestamp: nowStr })
+        updateData.status_history = history
+        // Notify admin that vendor accepted
+        try {
+          await supabase.from('activity_logs').insert({
+            id: uuidv4(),
+            user_id: user.id,
+            user_name: vendor?.name || user.full_name || 'Zonal Admin',
+            user_email: user.email,
+            event_type: 'order',
+            category: 'orders',
+            title: `Order #${orderToAccept.order_number} confirmed by ${vendor?.name || 'vendor'}`,
+            description: 'Order accepted — ready for processing',
+            metadata: { order_id: p[2], order_number: orderToAccept.order_number },
+            created_at: nowStr
+          })
+        } catch (actErr) {
+          console.warn('Admin notification insert failed:', actErr.message)
+        }
+      } else if (action === 'reject' || status === 'vendor_rejected' || status === 'rejected') {
+        // Verify order is in pending_vendor_acceptance status
+        const { data: orderToReject } = await supabase.from('orders').select('id, status, order_number, user_id, status_history').eq('id', p[2]).maybeSingle()
+        if (!orderToReject) return err('Order not found', 404)
+        if (orderToReject.status !== 'pending_vendor_acceptance') {
+          return err('This order cannot be rejected — it may have already been processed', 400)
+        }
+        updateData.status = 'vendor_rejected'
+        updateData.rejection_reason = body.rejection_reason || `Rejected by ${vendor?.name || 'vendor'}`
+        // Persist status_history so customer timeline updates
+        const history = Array.isArray(orderToReject.status_history) ? [...orderToReject.status_history] : []
+        history.push({ status: 'vendor_rejected', note: `Rejected by ${vendor?.name || 'Zonal Admin'}. ${updateData.rejection_reason}`, timestamp: nowStr })
+        updateData.status_history = history
+        // Notify admin that vendor rejected
+        try {
+          await supabase.from('activity_logs').insert({
+            id: uuidv4(),
+            user_id: user.id,
+            user_name: vendor?.name || user.full_name || 'Zonal Admin',
+            user_email: user.email,
+            event_type: 'order',
+            category: 'orders',
+            title: `Order #${orderToReject.order_number} rejected by ${vendor?.name || 'vendor'}`,
+            description: 'Needs reassignment by admin',
+            metadata: { order_id: p[2], order_number: orderToReject.order_number },
+            created_at: nowStr
+          })
+        } catch (actErr) {
+          console.warn('Admin notification insert failed:', actErr.message)
+        }
+      } else {
+        return err('Vendors can only accept or reject pending orders. Status updates like packed/shipped/delivered are admin-only.', 400)
       }
 
       const { error } = await supabase.from('orders').update(updateData).eq('id', p[2])
@@ -3502,11 +3722,74 @@ Current Conversation History:\n` +
     }
   }
 
+  // ==================== VENDOR DASHBOARD STATS ====================
+  // GET /api/vendor/dashboard-stats?range=today|this-week|this-month|all
+  // Aggregates the current vendor's assigned orders (COUNT / SUM / AVG).
+  if (p[0] === 'vendor' && p[1] === 'dashboard-stats' && method === 'GET') {
+    if (!user) return err('Unauthorized', 401)
+    const vendor = await getVendorByUserId(user.id, user.email)
+    if (!vendor && user.role !== 'admin') {
+      return err('Zonal Admin profile not linked, contact owner', 403)
+    }
+    if (!vendor) return err('Zonal Admin not found', 404)
+
+    const rawRange = url.searchParams.get('range') || 'all'
+    const range = rawRange === 'all-time' ? 'all' : rawRange
+    const startDateParam = url.searchParams.get('startDate')
+    const endDateParam = url.searchParams.get('endDate')
+    const bounds = getDateRange(range, startDateParam, endDateParam)
+    const { start, end } = bounds
+
+    const { data: assignedOrders, error: fetchErr } = await supabase
+      .from('orders')
+      .select('id, total, status, placed_at, assigned_vendor_id')
+      .eq('assigned_vendor_id', vendor.id)
+
+    if (fetchErr) return err('Failed to fetch vendor stats: ' + fetchErr.message, 500)
+
+    const allOrders = assignedOrders || []
+    const within = o => {
+      if (!start || !end) return true
+      const t = new Date(o.placed_at).getTime()
+      return !isNaN(t) && t >= start.getTime() && t <= end.getTime()
+    }
+    const sumNonCancelled = arr => arr.filter(o => o.status !== 'cancelled').reduce((s, o) => s + (Number(o.total) || 0), 0)
+
+    // All-time assigned totals
+    const totalOrders = allOrders.length
+    const totalRevenue = sumNonCancelled(allOrders)
+
+    // Current IST month totals
+    const monthBounds = getDateRange('this-month')
+    const isThisMonth = o => {
+      const t = new Date(o.placed_at).getTime()
+      return !isNaN(t) && t >= monthBounds.start.getTime() && t <= monthBounds.end.getTime()
+    }
+    const thisMonthOrders = allOrders.filter(o => o.status !== 'cancelled' && isThisMonth(o))
+    const thisMonthRevenue = thisMonthOrders.reduce((s, o) => s + (Number(o.total) || 0), 0)
+
+    // Selected-range totals (drives Revenue + Avg Order Value KPI)
+    const rangeOrders = allOrders.filter(o => o.status !== 'cancelled' && within(o))
+    const rangeRevenue = rangeOrders.reduce((s, o) => s + (Number(o.total) || 0), 0)
+    const count = rangeOrders.length
+
+    return json({
+      range,
+      totalOrders,
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      thisMonthOrders: thisMonthOrders.length,
+      thisMonthRevenue: Math.round(thisMonthRevenue * 100) / 100,
+      rangeOrders: count,
+      rangeRevenue: Math.round(rangeRevenue * 100) / 100,
+      avgOrderValue: count > 0 ? Math.round((rangeRevenue / count) * 100) / 100 : 0
+    })
+  }
+
   // ==================== VENDOR REPORTS EXPORT PDF ====================
   if (p[0] === 'vendor' && p[1] === 'reports' && p[2] === 'export' && method === 'GET') {
     if (!user) return err('Unauthorized', 401)
     const vendor = await getVendorByUserId(user.id, user.email)
-    if (!vendor) return err('Vendor not found', 404)
+    if (!vendor) return err('Zonal Admin not found', 404)
 
     try {
       const { jsPDF } = require('jspdf')
@@ -3757,7 +4040,7 @@ Current Conversation History:\n` +
       return new NextResponse(pdfBuffer, {
         headers: {
           'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="Vendor_Report_Last_6_Months_${(vendor.name || 'Vendor').replace(/\s+/g, '_')}.pdf"`
+          'Content-Disposition': `attachment; filename="Zonal_Admin_Report_Last_6_Months_${(vendor.name || 'Zonal_Admin').replace(/\s+/g, '_')}.pdf"`
         }
       })
 
@@ -3770,7 +4053,7 @@ Current Conversation History:\n` +
   // ==================== VENDOR INVENTORY (READ-ONLY) ====================
   if (p[0] === 'vendor' && p[1] === 'inventory' && method === 'GET') {
     if (!user || (user.role !== 'vendor' && user.role !== 'admin')) {
-      return err('Forbidden — Vendor access required', 403)
+      return err('Forbidden — Zonal Admin access required', 403)
     }
 
     // NOTE: subcategory column does NOT exist in products table. Use category_id for display.
@@ -4461,7 +4744,7 @@ Current Conversation History:\n` +
       const history = Array.isArray(order.status_history) ? [...order.status_history] : []
       history.push({
         status: finalStatus,
-        note: `Vendor Manually Re-synced: ${vendorRecord.name} (Assigned by Admin)`,
+        note: `Zonal Admin Manually Re-synced: ${vendorRecord.name} (Assigned by Owner)`,
         timestamp: new Date().toISOString()
       })
       updatePayload.status_history = history
@@ -4473,7 +4756,7 @@ Current Conversation History:\n` +
 
       if (updateErr) return err('Failed to update order: ' + updateErr.message, 500)
 
-      return json({ ok: true, message: 'Vendor successfully re-synced to order', order: updatePayload })
+      return json({ ok: true, message: 'Zonal Admin successfully re-synced to order', order: updatePayload })
     } catch (e) {
       console.error('[Admin Order Resync Unexpected]:', e)
       return err('Internal error: ' + e.message, 500)
@@ -4528,7 +4811,7 @@ Current Conversation History:\n` +
             const history = Array.isArray(order.status_history) ? [...order.status_history] : []
             history.push({
               status: finalStatus,
-              note: `Vendor Bulk Re-synced: ${vendorRecord.name} (Assigned by Admin)`,
+              note: `Zonal Admin Bulk Re-synced: ${vendorRecord.name} (Assigned by Owner)`,
               timestamp: new Date().toISOString()
             })
             updatePayload.status_history = history

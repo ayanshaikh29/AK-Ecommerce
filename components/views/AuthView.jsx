@@ -83,7 +83,7 @@ export function AuthView({ mode = 'login' }) {
           <Info className="w-12 h-12 text-accent mx-auto mb-4" />
           <h2 className="font-display text-2xl font-extrabold text-foreground mb-2">Public Signup Disabled</h2>
           <p className="text-xs text-muted-foreground leading-relaxed mb-6">
-            Account registration is managed exclusively by AK Enterprises Admin. Please log in using the credentials provided to you.
+            Account registration is managed exclusively by AK Enterprises Owner. Please log in using the credentials provided to you.
           </p>
           <Button onClick={() => router.push('/login')} className="w-full rounded-full h-11 font-semibold gold-gradient text-primary">
             Proceed to Login
@@ -106,7 +106,7 @@ export function AuthView({ mode = 'login' }) {
           {isSignupDisabled && (
             <div className="mb-6 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2 text-left">
               <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-accent" />
-              <span><strong>Notice:</strong> Self-registration is disabled. Log in with credentials issued by Admin.</span>
+              <span><strong>Notice:</strong> Self-registration is disabled. Log in with credentials issued by Owner.</span>
             </div>
           )}
 
@@ -135,7 +135,7 @@ export function AuthView({ mode = 'login' }) {
           </form>
 
           <div className="mt-6 p-3.5 bg-secondary/60 rounded-xl text-xs text-muted-foreground text-center">
-            Logistics partners? <button onClick={() => router.push('/vendor/login')} className="text-accent font-bold hover:underline">Vendor Portal Login</button>
+            Zonal Admin? <button onClick={() => router.push('/vendor/login')} className="text-accent font-bold hover:underline">Zonal Admin Portal Login</button>
           </div>
         </CardContent>
       </Card>

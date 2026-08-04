@@ -6,7 +6,8 @@ import {
   Truck, Package, Phone, RefreshCw, LogOut, Search, 
   CheckCircle2, AlertCircle, FileText, Download, Calendar, User, 
   MapPin, Eye, ChevronRight, MessageSquare, Award, Clock, ClipboardCheck,
-  ShieldCheck, HelpCircle, Layers, ArrowLeft, Loader2
+  ShieldCheck, HelpCircle, Layers, ArrowLeft, Loader2,
+  IndianRupee, ShoppingCart, TrendingUp, CalendarRange
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -19,11 +20,12 @@ import { useRealtimeOrders } from '@/lib/hooks/useRealtime'
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
 const CHECKPOINT_COLORS = {
-  vendor_assigned: 'bg-amber-500/10 text-amber-600 border border-amber-500/20', // Pending Acceptance
-  vendor_accepted: 'bg-blue-500/10 text-blue-600 border border-blue-500/20',     // Accepted
-  packed: 'bg-purple-500/10 text-purple-600 border border-purple-500/20',        // Packed
-  out_for_delivery: 'bg-yellow-500/10 text-yellow-600 border border-yellow-500/20', // Out for Delivery
-  delivered: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',  // Delivered
+  pending_vendor_acceptance: 'bg-amber-500/10 text-amber-600 border border-amber-500/20',
+  confirmed: 'bg-blue-500/10 text-blue-600 border border-blue-500/20',
+  packed: 'bg-purple-500/10 text-purple-600 border border-purple-500/20',
+  shipped: 'bg-indigo-500/10 text-indigo-600 border border-indigo-500/20',
+  out_for_delivery: 'bg-yellow-500/10 text-yellow-600 border border-yellow-500/20',
+  delivered: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',
   cancelled: 'bg-rose-500/10 text-rose-600 border border-rose-500/20',
   vendor_rejected: 'bg-rose-500/10 text-rose-600 border border-rose-500/20',
   rejected: 'bg-rose-500/10 text-rose-600 border border-rose-500/20'
@@ -39,6 +41,11 @@ export function VendorView() {
   const [loadingOrders, setLoadingOrders] = useState(true)
   const [loadingInventory, setLoadingInventory] = useState(false)
   const [authReady, setAuthReady] = useState(false)
+
+  // Vendor financial KPI state (dashboard-stats)
+  const [vendorStats, setVendorStats] = useState(null)
+  const [loadingStats, setLoadingStats] = useState(false)
+  const [statsRange, setStatsRange] = useState('all')
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState('')
@@ -92,7 +99,31 @@ export function VendorView() {
     }
   }, [])
 
-  useRealtimeOrders(fetchVendorOrders)
+  // 3. Fetch Vendor Dashboard Stats (KPI aggregates for selected time period)
+  const fetchVendorStats = useCallback(async () => {
+    setLoadingStats(true)
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      if (!token) return
+      const q = new URLSearchParams({ range: statsRange })
+      const res = await fetch('/api/vendor/dashboard-stats?' + q.toString(), {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setVendorStats(data || null)
+      }
+    } catch (e) {
+      console.error('[Vendor Stats Fetch Exception]:', e)
+    } finally {
+      setLoadingStats(false)
+    }
+  }, [statsRange])
+
+  useRealtimeOrders(useCallback(() => {
+    fetchVendorOrders()
+    fetchVendorStats()
+  }, [fetchVendorOrders, fetchVendorStats]))
 
   // Auth Guard
   useEffect(() => {
@@ -112,7 +143,8 @@ export function VendorView() {
     if (!authReady) return
     fetchVendorOrders()
     fetchInventory()
-  }, [authReady, user, fetchVendorOrders, fetchInventory])
+    fetchVendorStats()
+  }, [authReady, user, fetchVendorOrders, fetchInventory, fetchVendorStats])
 
 
 
@@ -133,8 +165,8 @@ export function VendorView() {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      const vendorNameClean = (user?.full_name || 'Vendor').replace(/\s+/g, '_')
-      a.download = `Vendor_Report_Last_6_Months_${vendorNameClean}.pdf`
+      const vendorNameClean = (user?.full_name || 'Zonal Admin').replace(/\s+/g, '_')
+      a.download = `Zonal_Admin_Report_Last_6_Months_${vendorNameClean}.pdf`
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -166,6 +198,24 @@ export function VendorView() {
     }
   }
 
+  const handleDownloadInvoice = async (orderId, orderNum) => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}/invoice-pdf`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      if (!res.ok) throw new Error('Failed to download invoice')
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `invoice-${orderNum}.pdf`
+      link.click()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
   // Accept Order
   const handleAcceptOrder = async (orderId) => {
     try {
@@ -190,7 +240,8 @@ export function VendorView() {
 
   // Reject Order
   const handleRejectOrder = async (orderId) => {
-    if (!confirm('Decline this dispatch shipment?')) return
+    const reason = prompt('Reason for rejecting this order (optional):')
+    if (reason === null) return // user cancelled
     try {
       const res = await fetch(`/api/vendor/orders/${orderId}`, {
         method: 'PUT',
@@ -198,39 +249,17 @@ export function VendorView() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({ status: 'vendor_rejected' })
+        body: JSON.stringify({ status: 'vendor_rejected', rejection_reason: reason || undefined })
       })
       if (res.ok) {
-        toast.info('Shipment declined.')
+        toast.info('Order rejected. Owner will reassign.')
         fetchVendorOrders()
         setSelectedOrderId(null)
       } else {
-        toast.error('Failed to decline shipment')
+        toast.error('Failed to reject order')
       }
     } catch {
-      toast.error('Network error declining shipment')
-    }
-  }
-
-  // Live status transitions
-  const handleStatusUpdate = async (orderId, newStatus) => {
-    try {
-      const res = await fetch(`/api/vendor/orders/${orderId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ status: newStatus })
-      })
-      if (res.ok) {
-        toast.success(`Shipment checkpoint updated: ${newStatus.replace(/_/g, ' ').toUpperCase()}`)
-        fetchVendorOrders()
-      } else {
-        toast.error('Failed to update shipment status')
-      }
-    } catch {
-      toast.error('Network error updating status')
+      toast.error('Network error rejecting order')
     }
   }
 
@@ -264,20 +293,28 @@ export function VendorView() {
     })
   }, [orders, searchQuery, statusFilter])
 
-  // Stats Counters mapping
+  // Split orders into new (pending) and history (rest)
+  const newOrders = useMemo(() => filteredOrders.filter(o => o.status === 'pending_vendor_acceptance'), [filteredOrders])
+  const historyOrders = useMemo(() => filteredOrders.filter(o => o.status !== 'pending_vendor_acceptance'), [filteredOrders])
+
+  // Stats Counters mapping (updated for new flow)
   const stats = useMemo(() => {
     let pending = 0
     let active = 0
     let delivered = 0
 
     orders.forEach(o => {
-      if (o.status === 'vendor_assigned') pending++
-      else if (['vendor_accepted', 'packed', 'shipped', 'out_for_delivery'].includes(o.status)) active++
+      if (o.status === 'pending_vendor_acceptance') pending++
+      else if (['confirmed', 'packed', 'shipped', 'out_for_delivery'].includes(o.status)) active++
       else if (o.status === 'delivered') delivered++
     })
 
     return { pending, active, delivered }
   }, [orders])
+
+  // Label for the selected Time Period (drives the KPI card sub-labels)
+  const RANGE_LABELS = { today: 'Today', 'this-week': 'This Week', 'this-month': 'This Month', all: 'All Time' }
+  const rangeLabel = RANGE_LABELS[statsRange] || 'All Time'
 
   // Get currently selected order details object
   const selectedOrder = useMemo(() => {
@@ -287,12 +324,9 @@ export function VendorView() {
 
   // Inline Replacement: Render premium details view
   if (selectedOrder) {
-    const totalVal = selectedOrder.total_amount || 0
-    const subtotalVal = selectedOrder.total_amount - (selectedOrder.shipping_fee || 0)
-    const shippingVal = selectedOrder.shipping_fee || 0
 
-    // Derive active timeline step percentage
-    const stepMap = { 'vendor_assigned': 15, 'vendor_accepted': 40, 'packed': 60, 'out_for_delivery': 80, 'delivered': 100 }
+    // Derive active timeline step percentage (new flow)
+    const stepMap = { 'pending_vendor_acceptance': 15, 'confirmed': 40, 'packed': 60, 'shipped': 75, 'out_for_delivery': 85, 'delivered': 100 }
     const activePercent = stepMap[selectedOrder.status] || 10
 
     return (
@@ -319,6 +353,13 @@ export function VendorView() {
             </div>
             <div className="flex gap-3 flex-wrap">
               <Button 
+                onClick={() => handleDownloadInvoice(selectedOrder.id, selectedOrder.order_number)}
+                variant="outline"
+                className="rounded-full border-slate-900 text-slate-900 font-bold text-xs h-10 px-6 hover:bg-slate-100 shadow-sm"
+              >
+                <Download className="w-4 h-4 mr-2" /> Download Tax Invoice
+              </Button>
+              <Button 
                 onClick={() => handleDownloadChallan(selectedOrder.id, selectedOrder.order_number)}
                 className="rounded-full bg-slate-900 text-white font-bold text-xs h-10 px-6 hover:bg-slate-800 shadow-sm"
               >
@@ -332,22 +373,38 @@ export function VendorView() {
             {/* Left Column details container */}
             <div className="space-y-6">
               
-              {/* Product items costing snapshot */}
+              {/* Order Items — Logistics View */}
               <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden">
                 <CardContent className="p-6">
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-display font-extrabold text-sm text-slate-800">Fulfillment Product Costing Table</h3>
+                    <h3 className="font-display font-extrabold text-sm text-slate-800">Order Items</h3>
                     <Badge className="bg-[#F4B942]/10 text-[#A96B0D] font-bold border border-[#F4B942]/20">{selectedOrder.items?.length || 0} Products</Badge>
                   </div>
-                  <div className="divide-y divide-slate-100">
+                  <div className="space-y-3">
                     {selectedOrder.items?.map((it, i) => (
-                      <div key={i} className="py-4 flex gap-4 items-center">
-                        <div className="w-12 h-14 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-center shrink-0">
-                          <Package className="w-6 h-6 text-slate-400" />
+                      <div key={i} className="p-4 bg-[#F8F9FC] rounded-xl border border-slate-100">
+                        <div className="flex gap-3 items-start">
+                          {it.image && (
+                            <img src={it.image} alt="" className="w-14 h-14 object-cover rounded-lg border bg-white shrink-0" />
+                          )}
+                          <div className="flex-1 min-w-0 space-y-1.5">
+                            <p className="font-bold text-slate-800 text-sm">{it.product_name_snapshot}</p>
+                            {it.sku && <p className="text-[10px] text-slate-400 font-mono">SKU: {it.sku}</p>}
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold text-slate-800 truncate text-sm">{it.product_name_snapshot}</p>
-                          <p className="text-xs text-slate-400 mt-1">Quantity: <span className="font-semibold text-slate-700">{it.quantity}</span></p>
+                        <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-100 text-xs">
+                          <div>
+                            <span className="text-[9px] text-slate-400 font-bold uppercase block">Ordered</span>
+                            <span className="font-black text-slate-800">{it.quantity}</span>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-400 font-bold uppercase block">Delivered</span>
+                            <span className="font-black text-emerald-600">{it.delivered_quantity ?? (selectedOrder.status === 'delivered' ? it.quantity : 0)}</span>
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-400 font-bold uppercase block">Pending</span>
+                            <span className="font-black text-amber-600">{it.pending_quantity ?? (selectedOrder.status === 'delivered' ? 0 : it.quantity)}</span>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -411,6 +468,27 @@ export function VendorView() {
                 </CardContent>
               </Card>
 
+              {/* Logistics Info — Dates & Tracking */}
+              <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden">
+                <CardContent className="p-6 space-y-3">
+                  <h3 className="font-display font-bold text-sm text-slate-800">Dispatch & Delivery Details</h3>
+                  <div className="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Dispatch Date</span>
+                      <span className="font-bold text-slate-800 mt-1 block">{selectedOrder.dispatch_date ? new Date(selectedOrder.dispatch_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Delivery Date</span>
+                      <span className="font-bold text-slate-800 mt-1 block">{selectedOrder.delivered_at ? new Date(selectedOrder.delivered_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase block">Tracking Number</span>
+                      <span className="font-mono font-bold text-slate-800 mt-1 block">{selectedOrder.tracking_number || '—'}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
               {/* Status Timeline checkpoints with animated progress bar */}
               <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden">
                 <CardContent className="p-6 space-y-6">
@@ -425,14 +503,14 @@ export function VendorView() {
                   </div>
 
                   <div className="grid grid-cols-5 text-center text-[10px] font-bold text-slate-400 gap-1">
-                    <div className={selectedOrder.status_history?.some(h => h.status === 'vendor_assigned') ? 'text-[#F4B942] font-black' : ''}>
-                      ✔ Assigned
-                    </div>
-                    <div className={selectedOrder.status_history?.some(h => h.status === 'vendor_accepted') ? 'text-[#F4B942] font-black' : ''}>
-                      ✔ Accepted
+                    <div className={selectedOrder.status_history?.some(h => h.status === 'confirmed') ? 'text-[#F4B942] font-black' : ''}>
+                      ✔ Confirmed
                     </div>
                     <div className={selectedOrder.status_history?.some(h => h.status === 'packed') ? 'text-[#F4B942] font-black' : ''}>
                       📦 Packed
+                    </div>
+                    <div className={selectedOrder.status_history?.some(h => h.status === 'shipped') ? 'text-[#F4B942] font-black' : ''}>
+                      🚢 Shipped
                     </div>
                     <div className={selectedOrder.status_history?.some(h => h.status === 'out_for_delivery') ? 'text-[#F4B942] font-black' : ''}>
                       🚚 Dispatch
@@ -449,76 +527,49 @@ export function VendorView() {
             {/* Right Column sidebar */}
             <div className="space-y-6">
               
-              {/* Checkpoint controller actions */}
+              {/* Checkpoint controller actions — Accept/Reject ONLY for new orders, read-only for all others */}
               <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden border-l-4 border-l-[#F4B942]">
                 <CardContent className="p-6 space-y-4">
-                  <h3 className="font-display font-black text-xs uppercase text-slate-400 tracking-wider">Fulfillment Stage</h3>
+                  <h3 className="font-display font-black text-xs uppercase text-slate-400 tracking-wider">Order Status</h3>
                   
-                  {selectedOrder.status === 'vendor_assigned' ? (
-                    <div className="grid gap-2">
-                      <Button 
-                        onClick={() => handleAcceptOrder(selectedOrder.id)}
-                        className="w-full rounded-full font-bold h-11 bg-slate-900 text-white text-xs hover:bg-slate-800 shadow-sm"
-                      >
-                        Accept Shipment
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        onClick={() => handleRejectOrder(selectedOrder.id)}
-                        className="w-full rounded-full border-rose-200 text-rose-600 hover:bg-rose-50 font-bold h-11 text-xs"
-                      >
-                        Decline Shipment
-                      </Button>
+                  {selectedOrder.status === 'pending_vendor_acceptance' ? (
+                    <div className="space-y-3">
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                        <p className="text-xs font-bold text-amber-700">Action Required</p>
+                        <p className="text-[10px] text-amber-600 mt-1">Please review and accept or reject this order. Once accepted, the Owner will proceed with fulfillment.</p>
+                      </div>
+                      <div className="grid gap-2">
+                        <Button 
+                          onClick={() => handleAcceptOrder(selectedOrder.id)}
+                          className="w-full rounded-full font-bold h-11 bg-slate-900 text-white text-xs hover:bg-slate-800 shadow-sm"
+                        >
+                          ✓ Accept Order
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          onClick={() => handleRejectOrder(selectedOrder.id)}
+                          className="w-full rounded-full border-rose-200 text-rose-600 hover:bg-rose-50 font-bold h-11 text-xs"
+                        >
+                          ✕ Reject Order
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Fulfillment checkpoint:</span>
-                      <div className="grid gap-2">
-                        {[
-                          { key: 'vendor_accepted', label: '✓ Vendor Accepted' },
-                          { key: 'packed', label: '📦 Mark Packed' },
-                          { key: 'shipped', label: '🚢 Mark Shipped' },
-                          { key: 'out_for_delivery', label: '🚚 Out for Delivery' },
-                          { key: 'delivered', label: '✅ Mark Delivered' }
-                        ].map(st => (
-                          <Button
-                            key={st.key}
-                            onClick={() => handleStatusUpdate(selectedOrder.id, st.key)}
-                            variant={selectedOrder.status === st.key ? 'default' : 'outline'}
-                            size="sm"
-                            className={`w-full rounded-full text-xs font-bold h-10 ${
-                              selectedOrder.status === st.key 
-                                ? 'bg-slate-900 text-white hover:bg-slate-800' 
-                                : 'border-slate-200 hover:bg-slate-50'
-                            }`}
-                          >
-                            {st.label}
-                          </Button>
-                        ))}
-                      </div>
+                      <Badge className={`capitalize font-bold text-[10px] rounded-full px-3 py-1 ${CHECKPOINT_COLORS[selectedOrder.status] || 'bg-slate-100 text-slate-600'}`}>
+                        {selectedOrder.status?.replace(/_/g, ' ')}
+                      </Badge>
+                      <p className="text-[10px] text-slate-400 font-medium">
+                        {selectedOrder.status === 'confirmed' && 'Order accepted — Owner will process fulfillment.'}
+                        {selectedOrder.status === 'packed' && 'Order packed at warehouse, awaiting dispatch.'}
+                        {selectedOrder.status === 'shipped' && 'Package dispatched to courier partner.'}
+                        {selectedOrder.status === 'out_for_delivery' && 'Courier partner is delivering today.'}
+                        {selectedOrder.status === 'delivered' && 'Order delivered successfully.'}
+                        {selectedOrder.status === 'vendor_rejected' && 'You rejected this order — needs Owner reassignment.'}
+                        {selectedOrder.status === 'cancelled' && 'Order was cancelled.'}
+                      </p>
                     </div>
                   )}
-                </CardContent>
-              </Card>
-
-              {/* Financial cost breakdown sidebar */}
-              <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden">
-                <CardContent className="p-6">
-                  <h3 className="font-display font-extrabold text-sm text-slate-800 mb-3">Cost Breakdown</h3>
-                  <div className="space-y-2 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400 font-medium">Subtotal</span>
-                      <span className="font-semibold text-slate-800">{formatINR(subtotalVal)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400 font-medium">Shipping Fee</span>
-                      <span className="font-semibold text-slate-800">{shippingVal === 0 ? 'FREE' : formatINR(shippingVal)}</span>
-                    </div>
-                    <div className="pt-3 border-t border-slate-100 flex justify-between font-display font-black text-sm text-slate-900">
-                      <span>Grand Total</span>
-                      <span>{formatINR(totalVal)}</span>
-                    </div>
-                  </div>
                 </CardContent>
               </Card>
 
@@ -542,14 +593,14 @@ export function VendorView() {
               <Truck className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="font-display font-black text-sm text-slate-800 tracking-tight leading-none">AK Enterprises Vendor Portal</h1>
-              <span className="text-[10px] text-muted-foreground font-bold mt-1 block">Logistics & Delivery Partner Dashboard</span>
+              <h1 className="font-display font-black text-sm text-slate-800 tracking-tight leading-none">AK Enterprises Zonal Admin Portal</h1>
+              <span className="text-[10px] text-muted-foreground font-bold mt-1 block">Zonal Admin Dashboard</span>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex flex-col text-right">
-              <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider leading-none">Logistics Unit</span>
+              <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider leading-none">Zonal Admin</span>
               <span className="text-xs font-black text-slate-800 mt-1">{user?.full_name || user?.email}</span>
             </div>
             <Button variant="ghost" size="sm" onClick={logout} className="rounded-full h-9 px-4 text-xs font-bold text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100">
@@ -568,9 +619,9 @@ export function VendorView() {
             <Truck className="w-48 h-48" />
           </div>
           <div className="space-y-1 relative z-10">
-            <h2 className="font-display font-black text-xl md:text-2xl tracking-tight">👋 Welcome back, {user?.full_name || 'Delivery Partner'}</h2>
+            <h2 className="font-display font-black text-xl md:text-2xl tracking-tight">Welcome back, {user?.full_name || 'Zonal Admin'}</h2>
             <p className="text-xs text-slate-400 font-medium">
-              You have <strong className="text-white">{stats.pending} orders</strong> awaiting acceptance and <strong className="text-white">{stats.active} shipments</strong> active in transit.
+              You have <strong className="text-white">{stats.pending} orders</strong> awaiting your acceptance and <strong className="text-white">{stats.active} orders</strong> confirmed for processing.
             </p>
           </div>
         </div>
@@ -583,7 +634,7 @@ export function VendorView() {
                 <Clock className="w-6 h-6" />
               </div>
               <div>
-                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Pending Orders</span>
+                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Awaiting Acceptance</span>
                 <span className="text-2xl font-black text-slate-800 mt-1 block">{stats.pending}</span>
               </div>
             </CardContent>
@@ -595,7 +646,7 @@ export function VendorView() {
                 <Truck className="w-6 h-6" />
               </div>
               <div>
-                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Active Deliveries</span>
+                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Confirmed Orders</span>
                 <span className="text-2xl font-black text-slate-800 mt-1 block">{stats.active}</span>
               </div>
             </CardContent>
@@ -607,30 +658,208 @@ export function VendorView() {
                 <CheckCircle2 className="w-6 h-6" />
               </div>
               <div>
-                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Delivered Shipments</span>
+                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Delivered Orders</span>
                 <span className="text-2xl font-black text-slate-800 mt-1 block">{stats.delivered}</span>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Tab switcher navigation exactly as requested */}
-        <div className="flex bg-white p-1 rounded-full border border-[#ECECEC] max-w-md shadow-xs">
+        {/* Zonal Admin Financial KPI Cards + Time Period Filter */}
+        <div className="bg-white p-4 border border-[#ECECEC] rounded-2xl shadow-xs flex flex-col sm:flex-row flex-wrap justify-between items-start sm:items-center gap-3">
+          <div>
+            <h3 className="font-display font-black text-sm text-slate-800">Performance Snapshot</h3>
+            <p className="text-[10px] text-slate-400 mt-0.5 font-medium">Orders, revenue & average order value across your assigned dispatches.</p>
+          </div>
+          <div className="w-full sm:w-44">
+            <label className="text-[9px] uppercase font-bold text-slate-400 block mb-1 tracking-wider">Time Period</label>
+            <Select value={statsRange} onValueChange={setStatsRange}>
+              <SelectTrigger className="w-full rounded-full h-10 text-xs bg-white border-[#ECECEC]">
+                <SelectValue placeholder="Time Period" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="this-week">This Week</SelectItem>
+                <SelectItem value="this-month">This Month</SelectItem>
+                <SelectItem value="all">All Time</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          {/* Total Orders Assigned (all-time) */}
+          <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs overflow-hidden">
+            <CardContent className="p-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-indigo-500/10 text-indigo-600 flex items-center justify-center shrink-0">
+                <Package className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Total Orders Assigned</span>
+                <span className="text-2xl font-black text-slate-800 mt-1 block">{loadingStats ? '…' : (vendorStats?.totalOrders ?? 0)}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Revenue (selected time period) */}
+          <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs overflow-hidden">
+            <CardContent className="p-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
+                <IndianRupee className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Revenue ({rangeLabel})</span>
+                <span className="text-xl font-black text-slate-800 mt-1 block truncate">{loadingStats ? '…' : formatINR(vendorStats?.rangeRevenue ?? 0)}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* This Month Orders */}
+          <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs overflow-hidden">
+            <CardContent className="p-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0">
+                <ShoppingCart className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">This Month Orders</span>
+                <span className="text-2xl font-black text-slate-800 mt-1 block">{loadingStats ? '…' : (vendorStats?.thisMonthOrders ?? 0)}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* This Month Revenue */}
+          <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs overflow-hidden">
+            <CardContent className="p-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+                <TrendingUp className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">This Month Revenue</span>
+                <span className="text-xl font-black text-slate-800 mt-1 block truncate">{loadingStats ? '…' : formatINR(vendorStats?.thisMonthRevenue ?? 0)}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Avg Order Value (selected time period) */}
+          <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs overflow-hidden">
+            <CardContent className="p-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-rose-500/10 text-rose-600 flex items-center justify-center shrink-0">
+                <Award className="w-6 h-6" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Avg Order Value</span>
+                <span className="text-xl font-black text-slate-800 mt-1 block truncate">{loadingStats ? '…' : formatINR(vendorStats?.avgOrderValue ?? 0)}</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Tab switcher navigation — New Orders + Order History + Performance */}
+        <div className="flex bg-white p-1 rounded-full border border-[#ECECEC] max-w-lg shadow-xs">
+          <button
+            onClick={() => { setActiveTab('new-orders'); setStatusFilter('all') }}
+            className={`flex-1 py-2 px-3 rounded-full font-bold text-xs transition ${activeTab === 'new-orders' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            New Orders ({stats.pending})
+          </button>
           <button
             onClick={() => { setActiveTab('orders'); setStatusFilter('all') }}
-            className={`flex-1 py-2 px-4 rounded-full font-bold text-xs transition ${activeTab === 'orders' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+            className={`flex-1 py-2 px-3 rounded-full font-bold text-xs transition ${activeTab === 'orders' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           >
-            Assigned Orders ({orders.length})
+            Order History
           </button>
           <button
             onClick={() => { setActiveTab('performance'); setStatusFilter('all') }}
-            className={`flex-1 py-2 px-4 rounded-full font-bold text-xs transition ${activeTab === 'performance' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+            className={`flex-1 py-2 px-3 rounded-full font-bold text-xs transition ${activeTab === 'performance' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           >
-            Performance &amp; Reports
+            Reports
           </button>
         </div>
 
-        {/* Feed lists tabs */}
+        {/* ======================== NEW ORDERS TAB ======================== */}
+        {activeTab === 'new-orders' && (
+          <div className="space-y-4 slide-up">
+            {loadingOrders ? (
+              <div className="text-center py-16 text-xs text-slate-400 font-semibold animate-pulse">Syncing new orders...</div>
+            ) : newOrders.length === 0 ? (
+              <div className="bg-white border border-[#ECECEC] rounded-2xl py-16 text-center shadow-xs">
+                <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
+                <p className="text-sm font-bold text-slate-800">All caught up!</p>
+                <p className="text-[10px] text-slate-400 mt-1">No new orders awaiting your acceptance right now.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {newOrders.map(o => {
+                  const totalItems = o.items?.reduce((s, it) => s + (it.quantity || 0), 0) || 0
+                  return (
+                    <Card key={o.id} className="bg-white border-2 border-amber-300 hover:border-amber-400 transition-all rounded-3xl shadow-sm overflow-hidden">
+                      <CardContent className="p-6 space-y-4">
+                        <div className="flex flex-wrap justify-between items-center gap-3 border-b border-amber-100 pb-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-black text-sm text-slate-800">Order #{o.order_number}</span>
+                              <Badge className="bg-amber-500/10 text-amber-600 border border-amber-500/20 font-bold text-[9px] rounded-full px-2.5 py-0.5">
+                                Awaiting Acceptance
+                              </Badge>
+                            </div>
+                            <span className="text-[10px] text-slate-400 block font-medium">Placed on {new Date(o.placed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button size="sm" onClick={() => handleAcceptOrder(o.id)} className="h-9 text-xs font-bold rounded-full bg-slate-900 hover:bg-slate-800 text-white px-5">
+                              Accept
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => handleRejectOrder(o.id)} className="h-9 text-xs font-bold rounded-full border-rose-200 text-rose-600 hover:bg-rose-50 px-5">
+                              Reject
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-[1.5fr_1fr] gap-4">
+                          <div className="bg-[#F8F9FC] p-5 rounded-2xl border border-slate-100 space-y-2 text-xs">
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Shipping Address & Contact</span>
+                            <p className="font-black text-slate-800 text-sm mt-2">{o.address?.full_name}</p>
+                            <p className="text-slate-500 font-bold">Phone: {o.address?.phone}</p>
+                            <p className="text-slate-500 leading-relaxed font-medium">
+                              {o.address?.line1}, {o.address?.line2 && o.address.line2 + ', '}{o.address?.city}, {o.address?.state} — <strong className="text-slate-700">{o.address?.pincode}</strong>
+                            </p>
+                          </div>
+                          <div className="bg-[#F8F9FC] p-5 rounded-2xl border border-slate-100 space-y-3 text-xs flex flex-col justify-between">
+                            <div>
+                              <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                                <span>Items ({o.items?.length || 0})</span>
+                                <span>Qty {totalItems}</span>
+                              </div>
+                              <div className="divide-y divide-slate-100 max-h-36 overflow-y-auto mt-2 pr-1 font-medium text-slate-700">
+                                {o.items?.map((it, idx) => (
+                                  <div key={idx} className="py-1.5 flex justify-between items-center text-xs">
+                                    <span className="truncate max-w-[200px]">{it.product_name_snapshot}</span>
+                                    <Badge className="font-bold text-[10px] bg-slate-100 text-slate-700 shrink-0">Qty {it.quantity}</Badge>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex justify-between items-center border-t border-slate-200/60 pt-3">
+                              <span className="text-[10px] text-slate-400 font-bold">{o.items?.length || 0} items</span>
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => setSelectedOrderId(o.id)} 
+                                className="h-8 text-xs font-bold text-slate-900 hover:bg-slate-100 rounded-full"
+                              >
+                                View Details →
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ======================== ORDER HISTORY TAB ======================== */}
         {activeTab === 'orders' && (
           <div className="space-y-4 slide-up">
             
@@ -648,15 +877,16 @@ export function VendorView() {
               <div className="flex items-center gap-2 w-full md:w-auto">
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="w-40 rounded-full h-10 text-xs bg-white border-[#ECECEC]">
-                    <SelectValue placeholder="All Orders" />
+                    <SelectValue placeholder="All Statuses" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Orders</SelectItem>
-                    <SelectItem value="vendor_assigned">Assigned</SelectItem>
-                    <SelectItem value="vendor_accepted">Accepted</SelectItem>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="confirmed">Confirmed</SelectItem>
                     <SelectItem value="packed">Packed</SelectItem>
+                    <SelectItem value="shipped">Shipped</SelectItem>
                     <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
                     <SelectItem value="delivered">Delivered</SelectItem>
+                    <SelectItem value="vendor_rejected">Rejected</SelectItem>
                   </SelectContent>
                 </Select>
                 <Button variant="outline" size="sm" onClick={fetchVendorOrders} className="rounded-full h-10 text-xs px-4">
@@ -665,22 +895,19 @@ export function VendorView() {
               </div>
             </div>
 
-            {/* Render Orders list */}
             {loadingOrders ? (
-              <div className="text-center py-16 text-xs text-slate-400 font-semibold animate-pulse">Syncing shipments database...</div>
-            ) : filteredOrders.length === 0 ? (
+              <div className="text-center py-16 text-xs text-slate-400 font-semibold animate-pulse">Syncing orders database...</div>
+            ) : historyOrders.length === 0 ? (
               <div className="bg-white border border-[#ECECEC] rounded-2xl py-16 text-center text-xs text-slate-400 font-bold shadow-xs">
-                No assigned shipments found matching selection.
+                No orders match your filters.
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-4">
-                {filteredOrders.map(o => {
+                {historyOrders.map(o => {
                   const totalItems = o.items?.reduce((s, it) => s + (it.quantity || 0), 0) || 0
                   return (
                     <Card key={o.id} className="bg-white border border-[#ECECEC] hover:border-slate-300 transition-all rounded-3xl shadow-sm overflow-hidden">
                       <CardContent className="p-6 space-y-4">
-                        
-                        {/* Upper status checkpoint triggers */}
                         <div className="flex flex-wrap justify-between items-center gap-3 border-b border-slate-100 pb-4">
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
@@ -689,55 +916,25 @@ export function VendorView() {
                                 {o.status.replace(/_/g, ' ')}
                               </Badge>
                             </div>
-                            <span className="text-[10px] text-slate-400 block font-medium">Assigned on {new Date(o.placed_at).toLocaleDateString('en-IN')}</span>
+                            <span className="text-[10px] text-slate-400 block font-medium">Placed on {new Date(o.placed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                           </div>
-
-                          <div className="flex flex-wrap gap-2 items-center">
-                            <span className="text-[10px] text-slate-400 font-bold mr-1">Update Status:</span>
-                            {o.status === 'vendor_assigned' ? (
-                              <div className="flex gap-2">
-                                <Button size="sm" onClick={() => handleAcceptOrder(o.id)} className="h-8 text-xs font-bold rounded-full bg-slate-900 hover:bg-slate-800 text-white px-4">
-                                  Accept
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => handleRejectOrder(o.id)} className="h-8 text-xs font-bold rounded-full border-rose-200 text-rose-600 hover:bg-rose-50 px-4">
-                                  Decline
-                                </Button>
-                              </div>
-                            ) : (
-                              ['vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered'].map(st => (
-                                <Button
-                                  key={st}
-                                  size="sm"
-                                  onClick={() => handleStatusUpdate(o.id, st)}
-                                  variant={o.status === st ? 'default' : 'outline'}
-                                  className={`h-8 text-[10px] font-bold rounded-full capitalize px-3 ${
-                                    o.status === st 
-                                      ? 'bg-slate-900 text-white hover:bg-slate-800' 
-                                      : 'border-slate-200 hover:bg-slate-50'
-                                  }`}
-                                >
-                                  {st.replace(/_/g, ' ')}
-                                </Button>
-                              ))
-                            )}
-                          </div>
+                          <Badge variant="outline" className="text-[10px] font-bold text-slate-500 border-slate-200">
+                            {o.status === 'delivered' ? 'Completed' : o.status === 'vendor_rejected' ? 'Rejected' : 'In Progress'}
+                          </Badge>
                         </div>
-
-                        {/* Mid columns info split */}
                         <div className="grid grid-cols-1 md:grid-cols-[1.5fr_1fr] gap-4">
                           <div className="bg-[#F8F9FC] p-5 rounded-2xl border border-slate-100 space-y-2 text-xs">
                             <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Shipping Address & Contact</span>
                             <p className="font-black text-slate-800 text-sm mt-2">{o.address?.full_name}</p>
-                            <p className="text-slate-500 font-bold">📞 Phone: {o.address?.phone}</p>
+                            <p className="text-slate-500 font-bold">Phone: {o.address?.phone}</p>
                             <p className="text-slate-500 leading-relaxed font-medium">
                               {o.address?.line1}, {o.address?.line2 && o.address.line2 + ', '}{o.address?.city}, {o.address?.state} — <strong className="text-slate-700">{o.address?.pincode}</strong>
                             </p>
                           </div>
-
                           <div className="bg-[#F8F9FC] p-5 rounded-2xl border border-slate-100 space-y-3 text-xs flex flex-col justify-between">
                             <div>
                               <div className="flex justify-between items-center text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                                <span>Dispatch Items ({o.items?.length || 0})</span>
+                                <span>Items ({o.items?.length || 0})</span>
                                 <span>Qty {totalItems}</span>
                               </div>
                               <div className="divide-y divide-slate-100 max-h-36 overflow-y-auto mt-2 pr-1 font-medium text-slate-700">
@@ -749,28 +946,25 @@ export function VendorView() {
                                 ))}
                               </div>
                             </div>
-
                             <div className="flex justify-between items-center border-t border-slate-200/60 pt-3">
-                              <span className="font-black text-base text-[#F4B942]">{formatINR(o.total_amount)}</span>
+                              <span className="text-[10px] text-slate-400 font-bold">{o.items?.length || 0} items</span>
                               <Button 
                                 variant="ghost" 
                                 size="sm" 
                                 onClick={() => setSelectedOrderId(o.id)} 
                                 className="h-8 text-xs font-bold text-slate-900 hover:bg-slate-100 rounded-full"
                               >
-                                View Complete Details &rarr;
+                                View Details →
                               </Button>
                             </div>
                           </div>
                         </div>
-
                       </CardContent>
                     </Card>
                   )
                 })}
               </div>
             )}
-
           </div>
         )}
 
@@ -791,7 +985,7 @@ export function VendorView() {
                     <FileText className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-sm text-slate-800">Vendor summary Report</h3>
+                    <h3 className="font-bold text-sm text-slate-800">Zonal Admin Summary Report</h3>
                     <p className="text-[10.5px] text-slate-400 mt-0.5">Comprehensive review of your orders, revenue, stats, and deliveries for the last 6 months.</p>
                   </div>
                 </div>

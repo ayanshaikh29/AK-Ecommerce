@@ -104,12 +104,12 @@ export function Navbar({ settings }) {
           ))}
           {user?.role === 'admin' && (
             <Link href="/admin" className="ml-2 px-3 py-1.5 gold-gradient text-primary rounded-full text-xs font-bold shadow-soft">
-              ADMIN
+              OWNER
             </Link>
           )}
           {user?.role === 'vendor' && (
             <Link href="/vendor" className="ml-2 px-3 py-1.5 gold-gradient text-primary rounded-full text-xs font-bold shadow-soft">
-              VENDOR PORTAL
+              ZONAL ADMIN PORTAL
             </Link>
           )}
         </nav>
@@ -213,7 +213,7 @@ export function Navbar({ settings }) {
                           onClick={() => setProfileOpen(false)}
                           className="flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-secondary/60 text-primary font-bold transition"
                         >
-                          <Package className="w-4 h-4" /> Admin Panel
+                          <Package className="w-4 h-4" /> Owner Panel
                         </Link>
                       )}
                       {user.role === 'vendor' && (
@@ -222,7 +222,7 @@ export function Navbar({ settings }) {
                           onClick={() => setProfileOpen(false)}
                           className="flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-secondary/60 text-accent font-bold transition"
                         >
-                          <Package className="w-4 h-4" /> Vendor Dashboard
+                          <Package className="w-4 h-4" /> Zonal Admin Dashboard
                         </Link>
                       )}
                     </div>

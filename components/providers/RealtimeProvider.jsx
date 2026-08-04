@@ -94,15 +94,15 @@ export function RealtimeProvider({ children }) {
         } else if (eventType === 'UPDATE') {
           const orderNum = newRow.order_number || newRow.id?.slice(0, 8)
 
-          // 1. Notification for Admin
+          // 1. Notification for Owner
           if (user?.role === 'admin') {
             playAlertSound()
             if (newRow.status === 'vendor_accepted' && oldRow?.status !== 'vendor_accepted') {
-              toast.success(`🟢 Vendor Accepted Order #${orderNum}`, {
-                description: `Logistics partner accepted dispatch assignment.`
+              toast.success(`🟢 Zonal Admin Accepted Order #${orderNum}`, {
+                description: `Zonal admin accepted dispatch assignment.`
               })
             } else if (newRow.assigned_vendor_id && !oldRow?.assigned_vendor_id) {
-              toast.info(`🚚 Assigned Order #${orderNum} to Vendor`)
+              toast.info(`🚚 Assigned Order #${orderNum} to Zonal Admin`)
             } else {
               toast.info(`Order #${orderNum} status: ${newRow.status?.toUpperCase()}`)
             }
@@ -112,7 +112,7 @@ export function RealtimeProvider({ children }) {
           if (user?.role === 'customer' && newRow.user_id === user.id) {
             playAlertSound()
             if (newRow.status === 'vendor_accepted' && oldRow?.status !== 'vendor_accepted') {
-              toast.success(`🚚 Vendor Accepted Delivery for Order #${orderNum}`, {
+              toast.success(`🚚 Zonal Admin Accepted Delivery for Order #${orderNum}`, {
                 description: `Your order is being prepared for dispatch.`
               })
             } else {

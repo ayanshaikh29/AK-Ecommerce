@@ -54,10 +54,10 @@ export function VendorManager() {
         const data = await res.json()
         setVendors(data || [])
       } else {
-        toast.error('Failed to load vendor list')
+        toast.error('Failed to load zonal admin list')
       }
     } catch {
-      toast.error('Error fetching vendors')
+      toast.error('Error fetching zonal admins')
     } finally {
       setLoading(false)
     }
@@ -81,7 +81,7 @@ export function VendorManager() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to delete account')
-      toast.success('Vendor account deleted successfully')
+      toast.success('Zonal Admin account deleted successfully')
       setDeleteDialogUser(null)
       fetchVendors()
     } catch (err) {
@@ -105,7 +105,7 @@ export function VendorManager() {
         const data = await res.json()
         throw new Error(data.error || 'Failed to update status')
       }
-      toast.success(`Vendor ${v.is_enabled ? 'disabled' : 'enabled'} successfully`)
+      toast.success(`Zonal Admin ${v.is_enabled ? 'disabled' : 'enabled'} successfully`)
       fetchVendors()
     } catch (err) {
       toast.error(err.message)
@@ -137,7 +137,7 @@ export function VendorManager() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!name || !email || !password) {
-      toast.error('Vendor Name, Email, and Password are required')
+      toast.error('Zonal Admin Name, Email, and Password are required')
       return
     }
     if (password.length < 8) {
@@ -230,7 +230,7 @@ export function VendorManager() {
                     type="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    placeholder="vendor@logistics.com"
+                    placeholder="zonaladmin@akenterprises.com"
                     className="h-10 rounded-xl"
                     autoComplete="new-password"
                   />
@@ -247,7 +247,7 @@ export function VendorManager() {
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold block mb-1">Vendor Access Password *</label>
+                  <label className="text-xs font-semibold block mb-1">Zonal Admin Access Password *</label>
                   <PasswordInput
                     required
                     value={password}
@@ -350,7 +350,7 @@ export function VendorManager() {
                         const res = await fetch(`/api/admin/user-credentials?user_id=${v.user_id || v.id}`, {
                           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
                         })
-                        if (!res.ok) throw new Error('Failed to retrieve vendor credentials')
+                        if (!res.ok) throw new Error('Failed to retrieve zonal admin credentials')
                         const data = await res.json()
                         setCreatedCredentials({
                           id: data.id,
@@ -361,7 +361,7 @@ export function VendorManager() {
                           temporary_password: data.plain_password || 'No password assigned',
                           updated_at: data.updated_at
                         })
-                        toast.success('Vendor credentials ready to manage!')
+                        toast.success('Zonal Admin credentials ready to manage!')
                       } catch (err) {
                         toast.error(err.message)
                       }
@@ -397,28 +397,28 @@ export function VendorManager() {
         </div>
       )}
 
-      {/* Created Vendor Credentials Modal */}
+      {/* Created Zonal Admin Credentials Modal */}
       <Dialog open={!!createdCredentials} onOpenChange={() => setCreatedCredentials(null)}>
         <DialogContent className="max-w-md radius-xl p-6 text-left bg-white/90 backdrop-blur-md border border-[#ECECEC] shadow-2xl">
           <DialogHeader>
             <DialogTitle className="font-display font-black text-xl flex items-center gap-2 text-slate-800">
-              <CheckCircle2 className="w-6 h-6 text-[#F4B942] animate-bounce" /> Vendor Account Managed
+              <CheckCircle2 className="w-6 h-6 text-[#F4B942] animate-bounce" /> Zonal Admin Account Managed
             </DialogTitle>
           </DialogHeader>
 
           {createdCredentials && (
             <div className="space-y-5 mt-2">
               <p className="text-xs text-slate-500 leading-relaxed">
-                Managed vendor profile credentials and logistics access configs:
+                Managed zonal admin profile credentials and logistics access configs:
               </p>
 
               <div className="bg-[#F8F9FC] p-5 rounded-2xl border border-slate-100 space-y-3.5 text-xs">
                 <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Vendor Name</span>
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Zonal Admin Name</span>
                   <span className="font-bold text-slate-800">{createdCredentials.full_name}</span>
                 </div>
                 <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Vendor Portal URL</span>
+                  <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Zonal Admin Portal URL</span>
                   <span className="font-mono font-bold text-[#F4B942] max-w-[200px] truncate">
                     {typeof window !== 'undefined' ? `${window.location.origin}/vendor/login` : '/vendor/login'}
                   </span>
@@ -454,7 +454,7 @@ export function VendorManager() {
                       const text = `AK Enterprises B2B Portal\n\nLogin URL: ${loginUrl}\nEmail: ${createdCredentials.email}\nPassword: ${createdCredentials.temporary_password}\nPhone: ${createdCredentials.phone || 'N/A'}`
                       navigator.clipboard.writeText(text)
                       setCopied(true)
-                      toast.success('Vendor credentials copied!')
+                      toast.success('Zonal admin credentials copied!')
                       setTimeout(() => setCopied(false), 2000)
                     }}
                     variant="outline"
@@ -468,7 +468,7 @@ export function VendorManager() {
                     onClick={() => {
                       navigator.clipboard.writeText(createdCredentials.temporary_password)
                       setCopiedPass(true)
-                      toast.success('Vendor password copied!')
+                      toast.success('Zonal admin password copied!')
                       setTimeout(() => setCopiedPass(false), 2000)
                     }}
                     variant="outline"
@@ -482,7 +482,7 @@ export function VendorManager() {
                 <Button
                   onClick={() => {
                     const loginUrl = `${window.location.origin}/vendor/login`
-                    const text = `*AK Enterprises B2B Portal*\n\nYour vendor portal account credentials have been updated.\n\n*Login URL:* ${loginUrl}\n*Email:* ${createdCredentials.email}\n*Password:* ${createdCredentials.temporary_password}\n\n_Support details: Please contact procurement desk for customized pricing or warehouse support issues._`
+                    const text = `*AK Enterprises B2B Portal*\n\nYour zonal admin portal account credentials have been updated.\n\n*Login URL:* ${loginUrl}\n*Email:* ${createdCredentials.email}\n*Password:* ${createdCredentials.temporary_password}\n\n_Support details: Please contact owner for customized pricing or warehouse support issues._`
                     const phone = createdCredentials.phone?.replace(/[^0-9]/g, '')
                     const url = phone ? `https://wa.me/91${phone}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`
                     window.open(url, '_blank')
@@ -512,7 +512,7 @@ export function VendorManager() {
         <DialogContent className="max-w-md radius-xl p-6 text-left bg-white border border-[#ECECEC] shadow-2xl">
           <DialogHeader>
             <DialogTitle className="font-display font-black text-lg flex items-center gap-2 text-slate-800">
-              <Lock className="w-5 h-5 text-[#F4B942]" /> Change Vendor Password
+              <Lock className="w-5 h-5 text-[#F4B942]" /> Change Zonal Admin Password
             </DialogTitle>
           </DialogHeader>
 
@@ -549,7 +549,7 @@ export function VendorManager() {
 
                 if (!res.ok) {
                   const errData = await res.json()
-                  throw new Error(errData.error || errData.message || 'Failed to update vendor password')
+                  throw new Error(errData.error || errData.message || 'Failed to update zonal admin password')
                 }
 
                 setCreatedCredentials({
@@ -557,7 +557,7 @@ export function VendorManager() {
                   temporary_password: changePwForm.newPassword,
                   updated_at: new Date().toISOString()
                 })
-                toast.success('Vendor password updated successfully!')
+                toast.success('Zonal Admin password updated successfully!')
                 setChangePwOpen(false)
                 fetchVendors()
               } catch (err) {
@@ -637,14 +637,14 @@ export function VendorManager() {
         <DialogContent className="max-w-sm radius-xl p-6 text-left">
           <DialogHeader>
             <DialogTitle className="font-display font-bold text-xl flex items-center gap-2 text-destructive">
-              <Trash2 className="w-5 h-5" /> Delete Vendor Account
+              <Trash2 className="w-5 h-5" /> Delete Zonal Admin Account
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 mt-2">
             <p className="text-xs text-muted-foreground">
-              Are you sure you want to delete <strong className="text-foreground">{deleteDialogUser?.name || deleteDialogUser?.full_name}</strong>'s vendor account ({deleteDialogUser?.email})? This action cannot be undone.
+              Are you sure you want to delete <strong className="text-foreground">{deleteDialogUser?.name || deleteDialogUser?.full_name}</strong>'s zonal admin account ({deleteDialogUser?.email})? This action cannot be undone.
             </p>
-            <p className="text-[11px] text-destructive font-semibold">All associated data will be removed. Orders assigned to this vendor will be preserved.</p>
+            <p className="text-[11px] text-destructive font-semibold">All associated data will be removed. Orders assigned to this zonal admin will be preserved.</p>
             <div className="flex gap-3 pt-2">
               <Button variant="outline" onClick={() => setDeleteDialogUser(null)} className="rounded-xl h-10 text-xs font-bold flex-1">Cancel</Button>
               <Button onClick={() => handleDeleteVendor(deleteDialogUser)} disabled={deleting} className="rounded-xl h-10 text-xs font-bold bg-destructive hover:bg-destructive/90 text-white flex-1">
@@ -661,7 +661,7 @@ export function VendorManager() {
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setProfileUserId(null)} />
           <div className="relative w-full max-w-lg bg-card border-l shadow-2xl overflow-y-auto">
             <div className="sticky top-0 z-10 bg-card border-b px-6 py-4 flex items-center justify-between">
-              <h2 className="font-display font-bold text-lg">Vendor Profile</h2>
+              <h2 className="font-display font-bold text-lg">Zonal Admin Profile</h2>
               <button onClick={() => setProfileUserId(null)} className="p-1.5 rounded-lg hover:bg-secondary"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6 space-y-6">

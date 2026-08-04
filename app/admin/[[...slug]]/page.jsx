@@ -1,7 +1,7 @@
 import { AdminApp } from '@/components/views/admin/AdminApp'
 
 export const metadata = {
-  title: 'Admin Dashboard | AK Enterprises',
+  title: 'Owner Dashboard | AK Enterprises',
 }
 
 export default function AdminPage() {

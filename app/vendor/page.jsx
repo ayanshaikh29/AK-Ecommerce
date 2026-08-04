@@ -2,8 +2,8 @@ import React from 'react'
 import { VendorView } from '@/components/views/VendorView'
 
 export const metadata = {
-  title: 'Vendor Fulfillment Portal | AK Enterprises',
-  description: 'Logistics and delivery partner order fulfillment portal'
+  title: 'Zonal Admin Portal | AK Enterprises',
+  description: 'Zonal Admin order fulfillment portal'
 }
 
 export default function VendorPage() {
