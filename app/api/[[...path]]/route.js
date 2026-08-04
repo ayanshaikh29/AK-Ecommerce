@@ -1093,16 +1093,16 @@ async function route(req, method) {
     }
     
     if (method === 'POST') {
-      const { full_name, phone, line1, line2, city, state, pincode, is_default } = body
+      const { full_name, phone, line1, line2, city, state, pincode, is_default, gst } = body
       if (!full_name || !phone || !line1 || !city || !state || !pincode) return err('Missing address fields')
       const addrId = uuidv4()
       const now = new Date().toISOString()
-      
+
       if (is_default) {
         const { error: updErr } = await supabase.from('addresses').update({ is_default: false }).eq('user_id', user.id)
         if (updErr) return err('Failed to clear default address: ' + updErr.message, 500)
       }
-      
+
       const newAddr = {
         id: addrId,
         user_id: user.id,
@@ -1114,6 +1114,7 @@ async function route(req, method) {
         state,
         pincode,
         is_default: !!is_default,
+        gst: gst || null,
         created_at: now,
         updated_at: now
       }
@@ -1124,14 +1125,14 @@ async function route(req, method) {
     }
     
     if (method === 'PUT' && p[1]) {
-      const { full_name, phone, line1, line2, city, state, pincode, is_default } = body
+      const { full_name, phone, line1, line2, city, state, pincode, is_default, gst } = body
       const now = new Date().toISOString()
-      
+
       if (is_default) {
         const { error: updErr } = await supabase.from('addresses').update({ is_default: false }).eq('user_id', user.id)
         if (updErr) return err('Failed to clear default address: ' + updErr.message, 500)
       }
-      
+
       const upd = {
         full_name,
         phone,
@@ -1141,6 +1142,7 @@ async function route(req, method) {
         state,
         pincode,
         is_default: !!is_default,
+        gst: gst || null,
         updated_at: now
       }
       
@@ -1598,6 +1600,28 @@ async function route(req, method) {
       let addrId = address.id
       const now = new Date().toISOString()
       
+      // ── Persist GSTIN from checkout to users table ─────────────────────────
+      // addresses table has no gst column — so if customer enters GSTIN
+      // at checkout, we backfill it to users.gst_number so it's always
+      // available when generating invoices / challans
+      const checkoutGst = (address.gst || '').trim().toUpperCase()
+      if (checkoutGst) {
+        try {
+          const { data: existingUser } = await supabase
+            .from('users')
+            .select('gst_number')
+            .eq('id', user.id)
+            .maybeSingle()
+          // Only update if not already set (or if new one is being provided)
+          if (!existingUser?.gst_number || existingUser.gst_number !== checkoutGst) {
+            await supabase.from('users').update({ gst_number: checkoutGst }).eq('id', user.id)
+          }
+        } catch (gstErr) {
+          // Non-fatal — continue with order creation even if GST save fails
+          console.warn('[Order] Failed to backfill GST to user:', gstErr?.message)
+        }
+      }
+      
       let needsNewAddress = !addrId || typeof addrId !== 'string' || addrId.length < 10
 
       if (addrId && !needsNewAddress) {
@@ -1648,6 +1672,7 @@ async function route(req, method) {
             state: address.state,
             pincode: address.pincode,
             is_default: false,
+            gst: address.gst || null,
             created_at: now,
             updated_at: now
           })

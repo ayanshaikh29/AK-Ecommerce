@@ -1,0 +1,24 @@
+
+{
+  "env": {
+    "ANTHROPIC_API_KEY": "sk-56a8844fb153a1ed-bddbed-051dfcc3",
+    "ANTHROPIC_BASE_URL": "http://localhost:20128/v1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "oc/deepseek-v4-flash-free",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "oc/big-pickle",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "nvidia/minimaxai/minimax-m2.7",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kr/claude-sonnet-4.5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kr/claude-haiku-4.5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kr/minimax-m2.5"
+  },
+  "model": "opus",
+
+  "statusLine": {
+    "type": "command",
+    "command": "node \"C:\\Users\\yourDeviceName(userName)\\.claude\\statusline.js\""
+  },
+
+  "effortLevel": "low",
+  "theme": "dark",
+  "switchModelsOnFlag": false
+}
