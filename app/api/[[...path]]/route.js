@@ -1175,13 +1175,13 @@ async function route(req, method) {
         // Fetch customer profile details
         const { data: customer } = await supabase
           .from('users')
-          .select('company_name, gst_number, business_name, full_name')
+          .select('company_name, gst_number, business_name, full_name, phone')
           .eq('id', o.user_id)
           .maybeSingle()
         o.customer_profile = customer || {}
 
         const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
-        
+
         // Validate Data before generation
         const validation = validateInvoiceData(o, settings || {}, false)
         if (!validation.valid) {
@@ -1253,13 +1253,13 @@ async function route(req, method) {
         // Fetch customer profile details
         const { data: customer } = await supabase
           .from('users')
-          .select('company_name, gst_number, business_name, full_name')
+          .select('company_name, gst_number, business_name, full_name, phone')
           .eq('id', o.user_id)
           .maybeSingle()
         o.customer_profile = customer || {}
 
         const { data: settings } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
-        
+
         // Validate Data before generation
         const validation = validateInvoiceData(o, settings || {}, true)
         if (!validation.valid) {
@@ -2104,7 +2104,7 @@ async function route(req, method) {
         // Fetch customer profile details
         const { data: customer } = await supabase
           .from('users')
-          .select('company_name, gst_number, business_name, full_name')
+          .select('company_name, gst_number, business_name, full_name, phone')
           .eq('id', o2.user_id)
           .maybeSingle()
         o2.customer_profile = customer || {}
@@ -2124,7 +2124,7 @@ async function route(req, method) {
       // Fetch customer profile details
       const { data: customer } = await supabase
         .from('users')
-        .select('company_name, gst_number, business_name, full_name')
+        .select('company_name, gst_number, business_name, full_name, phone')
         .eq('id', o.user_id)
         .maybeSingle()
       o.customer_profile = customer || {}
@@ -2168,7 +2168,7 @@ async function route(req, method) {
         // Fetch customer profile details
         const { data: customer } = await supabase
           .from('users')
-          .select('company_name, gst_number, business_name, full_name')
+          .select('company_name, gst_number, business_name, full_name, phone')
           .eq('id', o2.user_id)
           .maybeSingle()
         o2.customer_profile = customer || {}
@@ -2188,7 +2188,7 @@ async function route(req, method) {
       // Fetch customer profile details
       const { data: customer } = await supabase
         .from('users')
-        .select('company_name, gst_number, business_name, full_name')
+        .select('company_name, gst_number, business_name, full_name, phone')
         .eq('id', o.user_id)
         .maybeSingle()
       o.customer_profile = customer || {}

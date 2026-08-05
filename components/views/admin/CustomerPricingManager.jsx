@@ -1814,8 +1814,10 @@ function ProductPricingRow({ product, pendingEdit, onChange, onSave }) {
   }, [product, pendingEdit, currentPrice, currentVis])
 
   const handlePriceChange = (val) => {
-    setPrice(val)
-    onChange(val, visible)
+    // Fix: Parse as number to avoid string concatenation (e.g., "0" + "25" = "025")
+    const numVal = val === '' ? '' : (isNaN(parseFloat(val)) ? val : parseFloat(val))
+    setPrice(numVal)
+    onChange(numVal, visible)
   }
 
   const handleVisibilityToggle = (val) => {
@@ -1861,6 +1863,7 @@ function ProductPricingRow({ product, pendingEdit, onChange, onSave }) {
             type="number"
             value={price}
             onChange={e => handlePriceChange(e.target.value)}
+            onFocus={e => e.target.select()}
             className={`pl-6 h-8 text-xs rounded-lg font-mono font-bold ${isDirty ? 'border-amber-500 ring-1 ring-amber-500/50 bg-background' : ''}`}
           />
         </div>
