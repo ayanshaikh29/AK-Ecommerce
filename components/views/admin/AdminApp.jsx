@@ -3,9 +3,9 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Image from 'next/image'
 import { useRouter, useParams } from 'next/navigation'
 import { toast } from 'sonner'
-import { 
-  LayoutDashboard, Grid3x3, Plus, Upload, ClipboardList, ImageIcon, 
-  Users, Settings, LogOut, Package, TrendingUp, AlertTriangle, 
+import {
+  LayoutDashboard, LayoutTemplate, Grid3x3, Plus, Upload, ClipboardList, ImageIcon,
+  Users, Settings, LogOut, Package, TrendingUp, AlertTriangle,
   Trash2, Video, FileText, Building2, Bell, BellRing, Menu, X, MessageSquare,
   Loader2, ShieldCheck, Truck, CheckCircle2, XCircle, Activity, Search,
   ShieldAlert, RefreshCw, Clock
@@ -22,11 +22,13 @@ import { Separator } from '@/components/ui/separator'
 import { INDIAN_STATES } from '@/lib/constants/indian-states'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useAppContext } from '@/components/providers/AppProvider'
+import { getStatusLabel, getStatusShortLabel } from '@/lib/status-labels'
 
 import { CustomerPricingManager } from './CustomerPricingManager'
 import { InventoryManager } from './InventoryManager'
 import { VendorManager } from './VendorManager'
 import { BillingManager } from './BillingManager'
+import { AdminSiteContent } from './AdminSiteContent'
 import { AdminHeaderNotifications } from './AdminHeaderNotifications'
 import { AdminToastFeed } from './AdminToastFeed'
 import { AdminLiveActivityFeed } from './AdminLiveActivityFeed'
@@ -448,7 +450,7 @@ export function AdminApp() {
                 const isActive = section === s || 
                   (s === 'products' && section === 'product-edit') ||
                   (s === 'product-new' && section === 'csv') ||
-                  (s === 'settings' && ['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners'].includes(section))
+                  (s === 'settings' && ['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners', 'site-content'].includes(section))
 
                 return (
                   <button 
@@ -507,7 +509,7 @@ export function AdminApp() {
                 const isActive = section === s || 
                   (s === 'products' && section === 'product-edit') ||
                   (s === 'product-new' && section === 'csv') ||
-                  (s === 'settings' && ['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners'].includes(section))
+                  (s === 'settings' && ['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners', 'site-content'].includes(section))
 
                 return (
                   <button 
@@ -574,10 +576,10 @@ export function AdminApp() {
             {section === 'vendors' && <VendorManager />}
             {section === 'billing' && <BillingManager />}
             {section === 'reports' && <AdminReports/>}
-            {['settings', 'faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners'].includes(section) && (
+            {['settings', 'faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners', 'site-content'].includes(section) && (
               <AdminSettingsSection
                 setSettings={setSettings}
-                defaultTab={['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners'].includes(section) ? section : 'site'}
+                defaultTab={['faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners', 'site-content'].includes(section) ? section : 'site'}
               />
             )}
             {/* Centered New Order Notification Popup */}
@@ -715,6 +717,7 @@ function AdminSettingsSection({ setSettings, defaultTab = 'site' }) {
 
   const settingsTabs = [
     { id: 'site', label: 'Site Settings', icon: Settings },
+    { id: 'site-content', label: 'Site Content', icon: LayoutTemplate },
     { id: 'banners', label: 'Hero Banners', icon: ImageIcon },
     { id: 'faqs', label: 'FAQ Manager', icon: FileText },
     { id: 'chat-logs', label: 'Chat Logs', icon: MessageSquare },
@@ -757,6 +760,7 @@ function AdminSettingsSection({ setSettings, defaultTab = 'site' }) {
       {/* Settings Active Tab Component */}
       <div>
         {activeTab === 'site' && <AdminSettings setSettings={setSettings} />}
+        {activeTab === 'site-content' && <AdminSiteContent />}
         {activeTab === 'banners' && <AdminBanners />}
         {activeTab === 'faqs' && <AdminFAQs />}
         {activeTab === 'chat-logs' && <AdminChatLogs />}
@@ -1860,7 +1864,7 @@ function AdminOrders({ refreshTrigger, router }) {
     }
   }
 
-  const statuses = ['pending', 'confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'rejected']
+  const statuses = ['pending', 'pending_approval', 'pending_vendor_acceptance', 'pending_admin_approval', 'vendor_accepted_pending_admin_approval', 'admin_rejected', 'confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'rejected']
   
   return (
     <div className="slide-up space-y-6">
@@ -1973,7 +1977,7 @@ function AdminOrders({ refreshTrigger, router }) {
                 <SelectContent>
                   <SelectItem value="all">All Statuses</SelectItem>
                   {statuses.map(s => (
-                    <SelectItem key={s} value={s} className="capitalize">{s.replace(/_/g, ' ')}</SelectItem>
+                    <SelectItem key={s} value={s} className="capitalize">{getStatusLabel(s)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1998,6 +2002,30 @@ function AdminOrders({ refreshTrigger, router }) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Pending My Approval — Quick Filter */}
+      {(() => {
+        const pendingApprovalOrders = orders.filter(o => ['vendor_accepted_pending_admin_approval', 'pending_admin_approval', 'vendor_accepted'].includes(o.status))
+        if (pendingApprovalOrders.length === 0) return null
+        return (
+          <div className="flex items-center gap-3 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center shrink-0">
+              <Clock className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <p className="font-extrabold text-sm text-amber-700">{pendingApprovalOrders.length} Order{pendingApprovalOrders.length > 1 ? 's' : ''} Awaiting Your Final Approval</p>
+              <p className="text-xs text-amber-600 mt-0.5">These orders need your Accept or Reject decision before processing.</p>
+            </div>
+            <Button
+              size="sm"
+              className="rounded-xl h-9 font-bold text-xs bg-amber-500 hover:bg-amber-600 text-white shrink-0"
+              onClick={() => { setStatus('pending_approval'); setPage(1) }}
+            >
+              View Pending Approvals
+            </Button>
+          </div>
+        )
+      })()}
 
       {/* Orders Table Container */}
       <Card className="radius-lg shadow-soft">
@@ -2076,7 +2104,7 @@ function AdminOrders({ refreshTrigger, router }) {
                     </td>
                     <td className="p-4">
                       <Badge className="capitalize rounded-full font-bold px-2.5 py-0.5 text-[10px] w-fit block">
-                        {(o.status || '').replace(/_/g, ' ')}
+                        {getStatusLabel(o.status)}
                       </Badge>
                     </td>
                     <td className="p-4 text-center">
@@ -2747,6 +2775,49 @@ function AdminReports() {
   const [loading, setLoading] = useState(true)
   const [monthlyTrends, setMonthlyTrends] = useState([])
   const [trendsLoading, setTrendsLoading] = useState(true)
+  const [reportRange, setReportRange] = useState('all')
+  const [customStartDate, setCustomStartDate] = useState('')
+  const [customEndDate, setCustomEndDate] = useState('')
+  const [exportingPdf, setExportingPdf] = useState(false)
+  const [exportingExcel, setExportingExcel] = useState(false)
+
+  const buildReportUrl = (type) => {
+    const q = new URLSearchParams({ type, range: reportRange })
+    if (reportRange === 'custom') {
+      if (dates.start) q.set('start_date', new Date(dates.start).toISOString())
+      if (dates.end) q.set('end_date', new Date(dates.end).toISOString())
+    }
+    return `/api/admin/reports/export?${q.toString()}`
+  }
+
+  const handleExport = async (type) => {
+    const setExporting = type === 'pdf' ? setExportingPdf : setExportingExcel
+    setExporting(true)
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(buildReportUrl(type), {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Failed to export')
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = type === 'excel' ? 'AK_Enterprises_Sales_Report.xlsx' : 'AK_Enterprises_Sales_Report.pdf'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success(`Report exported as ${type.toUpperCase()}`)
+    } catch (e) {
+      toast.error(e.message || 'Export failed')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const fetchMonthlyTrends = async () => {
     setTrendsLoading(true)
@@ -2832,21 +2903,47 @@ function AdminReports() {
           <p className="text-sm text-muted-foreground">Monitor performance, track orders, and export data for accounting.</p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={exportCSV} disabled={!data} className="rounded-full"><Plus className="w-4 h-4 mr-1"/>Export CSV</Button>
-          <Button onClick={triggerBulkInvoice} disabled={!data} variant="outline" className="rounded-full">Bulk Invoices ZIP</Button>
+          <Button onClick={() => handleExport('pdf')} disabled={!data || exportingPdf} className="rounded-full text-xs font-bold">
+            {exportingPdf ? <><RefreshCw className="w-3.5 h-3.5 animate-spin mr-1"/>Generating...</> : <><FileText className="w-3.5 h-3.5 mr-1"/>Export PDF</>}
+          </Button>
+          <Button onClick={() => handleExport('excel')} disabled={!data || exportingExcel} variant="outline" className="rounded-full text-xs font-bold">
+            {exportingExcel ? <><RefreshCw className="w-3.5 h-3.5 animate-spin mr-1"/>Generating...</> : <><FileText className="w-3.5 h-3.5 mr-1"/>Export Excel</>}
+          </Button>
+          <Button onClick={triggerBulkInvoice} disabled={!data} variant="outline" className="rounded-full text-xs">Bulk Invoices ZIP</Button>
         </div>
       </div>
 
       <Card className="radius-lg shadow-soft">
         <CardContent className="p-4 flex flex-wrap gap-4 items-end">
           <div>
-            <Label className="text-xs">Start Date</Label>
-            <Input type="date" value={dates.start} onChange={e => setDates({ ...dates, start: e.target.value })} className="h-10 rounded-xl"/>
+            <Label className="text-xs">Date Range</Label>
+            <select
+              value={reportRange}
+              onChange={e => setReportRange(e.target.value)}
+              className="h-10 rounded-xl text-xs bg-card border border-border px-3 font-semibold text-foreground"
+            >
+              <option value="this-month">This Month</option>
+              <option value="last-month">Last Month</option>
+              <option value="last-30-days">Last 30 Days</option>
+              <option value="last-90-days">Last 90 Days</option>
+              <option value="last-6-months">Last 6 Months</option>
+              <option value="last-12-months">Last 1 Year</option>
+              <option value="all">All Time</option>
+              <option value="custom">Custom Range</option>
+            </select>
           </div>
-          <div>
-            <Label className="text-xs">End Date</Label>
-            <Input type="date" value={dates.end} onChange={e => setDates({ ...dates, end: e.target.value })} className="h-10 rounded-xl"/>
-          </div>
+          {reportRange === 'custom' && (
+            <>
+              <div>
+                <Label className="text-xs">Start Date</Label>
+                <Input type="date" value={dates.start} onChange={e => setDates({ ...dates, start: e.target.value })} className="h-10 rounded-xl"/>
+              </div>
+              <div>
+                <Label className="text-xs">End Date</Label>
+                <Input type="date" value={dates.end} onChange={e => setDates({ ...dates, end: e.target.value })} className="h-10 rounded-xl"/>
+              </div>
+            </>
+          )}
           <Button onClick={fetchReports} className="rounded-xl h-10 px-6">Apply Filters</Button>
         </CardContent>
       </Card>
@@ -3350,7 +3447,7 @@ function AdminOrderDetail({ orderId }) {
     )
   }
 
-  const statuses = ['pending_vendor_acceptance', 'confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'rejected', 'cancelled', 'vendor_rejected']
+  const statuses = ['pending_vendor_acceptance', 'pending_admin_approval', 'vendor_accepted_pending_admin_approval', 'admin_rejected', 'confirmed', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'rejected', 'cancelled', 'vendor_rejected']
   
   const totalVal = order.total || 0
   const subtotalVal = order.subtotal || totalVal
@@ -3448,7 +3545,7 @@ function AdminOrderDetail({ orderId }) {
                   <div key={idx} className="relative">
                     <div className="absolute -left-[31px] top-1 w-4 h-4 rounded-full bg-primary border-4 border-background" />
                     <div>
-                      <p className="text-sm font-bold text-foreground capitalize">{(step.status || '').replace(/_/g, ' ')}</p>
+                      <p className="text-sm font-bold text-foreground capitalize">{getStatusLabel(step.status)}</p>
                       <p className="text-xs text-muted-foreground mt-0.5">{step.note}</p>
                       <span className="text-[10px] text-muted-foreground/60 block mt-1">{new Date(step.timestamp).toLocaleString('en-IN')}</span>
                     </div>
@@ -3473,7 +3570,7 @@ function AdminOrderDetail({ orderId }) {
                       <div className="w-2 h-2 rounded-full bg-accent" />
                     </div>
                     <div>
-                      <p className="font-semibold text-foreground capitalize">{(step.status || '').replace(/_/g, ' ')}</p>
+                      <p className="font-semibold text-foreground capitalize">{getStatusLabel(step.status)}</p>
                       <p className="text-muted-foreground mt-0.5">{step.note}</p>
                       <span className="text-[10px] text-muted-foreground/50 block mt-0.5">{new Date(step.timestamp).toLocaleString('en-IN')}</span>
                     </div>
@@ -3496,12 +3593,12 @@ function AdminOrderDetail({ orderId }) {
               </h3>
               <div className="bg-secondary/30 p-3 rounded-xl border flex items-center justify-between">
                 <span className="text-xs text-muted-foreground uppercase font-bold">Current Status</span>
-                <Badge className="capitalize rounded-full font-bold">{(order.status || '').replace(/_/g, ' ')}</Badge>
+                <Badge className="capitalize rounded-full font-bold">{getStatusLabel(order.status)}</Badge>
               </div>
 
               {order.status === 'pending_vendor_acceptance' && (
                 <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 text-xs font-extrabold p-3.5 rounded-xl">
-                    <Clock className="w-4 h-4" /> Awaiting zonal admin acceptance — zonal admin must accept or reject.
+                  <Clock className="w-4 h-4" /> Awaiting zonal admin acceptance — zonal admin must accept or reject.
                 </div>
               )}
 
@@ -3512,13 +3609,13 @@ function AdminOrderDetail({ orderId }) {
                   </div>
                   <div className="grid grid-cols-2 gap-2 pt-1">
                     <Button
-                      onClick={() => updateStatus('confirmed')}
+                      onClick={() => updateStatus('admin_confirmed')}
                       className="rounded-xl h-10 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5"
                     >
-                      <CheckCircle2 className="w-4 h-4" /> Re-approve & Assign New Zonal Admin
+                      <CheckCircle2 className="w-4 h-4" /> Override & Confirm
                     </Button>
                     <Button
-                      onClick={() => updateStatus('rejected')}
+                      onClick={() => updateStatus('admin_rejected')}
                       variant="outline"
                       className="rounded-xl h-10 font-extrabold text-xs border-destructive/40 text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1.5"
                     >
@@ -3528,10 +3625,58 @@ function AdminOrderDetail({ orderId }) {
                 </div>
               )}
 
+              {/* Pending Admin Approval — from vendor accepted */}
+              {(order.status === 'vendor_accepted_pending_admin_approval' || order.status === 'vendor_accepted') && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-extrabold p-3.5 rounded-xl">
+                    <CheckCircle2 className="w-4 h-4" /> Zonal Admin Accepted — Awaiting your final approval.
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      onClick={() => updateStatus('admin_confirmed')}
+                      className="rounded-xl h-10 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> ✓ Confirm Order
+                    </Button>
+                    <Button
+                      onClick={() => updateStatus('admin_rejected')}
+                      variant="outline"
+                      className="rounded-xl h-10 font-extrabold text-xs border-destructive/40 text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1.5"
+                    >
+                      <XCircle className="w-4 h-4" /> ✗ Reject Order
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Direct Pending Admin Approval — no vendor assigned */}
+              {(order.status === 'pending_admin_approval' || order.status === 'pending') && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-800 text-xs font-extrabold p-3.5 rounded-xl">
+                    <Clock className="w-4 h-4" /> Direct approval required — no Zonal Admin assigned for this customer.
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      onClick={() => updateStatus('admin_confirmed')}
+                      className="rounded-xl h-10 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> ✓ Confirm Order
+                    </Button>
+                    <Button
+                      onClick={() => updateStatus('admin_rejected')}
+                      variant="outline"
+                      className="rounded-xl h-10 font-extrabold text-xs border-destructive/40 text-destructive hover:bg-destructive/10 flex items-center justify-center gap-1.5"
+                    >
+                      <XCircle className="w-4 h-4" /> ✗ Reject Order
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {order.status === 'confirmed' && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-extrabold p-3.5 rounded-xl">
-                    <CheckCircle2 className="w-4 h-4" /> Zonal Admin accepted — ready for fulfillment.
+                    <CheckCircle2 className="w-4 h-4" /> Confirmed by Owner — ready for fulfillment.
                   </div>
                   <Button
                     onClick={() => updateStatus('packed')}
@@ -3539,6 +3684,13 @@ function AdminOrderDetail({ orderId }) {
                   >
                     <Package className="w-4 h-4" /> Mark as Packed
                   </Button>
+                </div>
+              )}
+
+              {/* Admin Rejected */}
+              {order.status === 'admin_rejected' && (
+                <div className="flex items-center gap-2 bg-destructive/10 border border-destructive/20 text-destructive text-xs font-extrabold p-3.5 rounded-xl">
+                  <XCircle className="w-4 h-4" /> Rejected by Owner: {order.rejection_reason || 'Order rejected by Owner.'}
                 </div>
               )}
 
@@ -3606,16 +3758,17 @@ function AdminOrderDetail({ orderId }) {
               {['confirmed', 'packed', 'shipped', 'out_for_delivery'].includes(order.status) && (
                 <div className="pt-2 border-t border-border/30">
                   <Label className="text-xs text-muted-foreground mb-2 block font-semibold">Manual Status Override</Label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {statuses.filter(s => !['rejected', 'cancelled', 'pending_vendor_acceptance'].includes(s)).map(st => (
                       <Button
                         key={st}
                         onClick={() => updateStatus(st)}
                         variant={order.status === st ? 'default' : 'outline'}
                         size="sm"
-                        className="capitalize rounded-full text-xs"
+                        className="rounded-full text-[11px] px-3 h-8 whitespace-normal text-center leading-tight"
+                        title={getStatusLabel(st)}
                       >
-                        {st.replace(/_/g, ' ')}
+                        {getStatusShortLabel(st)}
                       </Button>
                     ))}
                   </div>

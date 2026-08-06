@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAppContext } from '@/components/providers/AppProvider'
+import { getStatusLabel } from '@/lib/status-labels'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
@@ -61,8 +62,10 @@ function computeGST(items, customerState) {
 
 const TIMELINE_STEPS = [
   { key: 'placed', label: 'Order Placed', description: 'Your B2B purchase order has been received.' },
-  { key: 'pending_vendor_acceptance', label: 'Awaiting Zonal Admin Acceptance', description: 'Zonal admin must accept or reject the order.' },
-  { key: 'confirmed', label: 'Zonal Admin Accepted — Processing', description: 'Order accepted by zonal admin and is being processed.' },
+  { key: 'pending_vendor_acceptance', label: 'Awaiting Zonal Admin Acceptance', description: 'Your assigned zonal admin must review and accept the order.', optional: true },
+  { key: 'vendor_accepted_pending_admin_approval', label: 'Zonal Admin Accepted — Pending Owner Approval', description: 'Zonal admin accepted — awaiting Owner final confirmation.', optional: true },
+  { key: 'pending_admin_approval', label: 'Awaiting Owner Approval', description: 'Order sent directly to Owner for approval (no zonal admin assigned).', optional: true },
+  { key: 'confirmed', label: 'Confirmed by AK Enterprises', description: 'Order reviewed and confirmed by AK Enterprises. Processing has begun.' },
   { key: 'packed', label: 'Packed', description: 'Order items packed and labeled for dispatch.' },
   { key: 'shipped', label: 'Shipped', description: 'Dispatched via logistics carrier.' },
   { key: 'out_for_delivery', label: 'Out for Delivery', description: 'Out with delivery executive for arrival.' },
@@ -586,27 +589,44 @@ export default function OrderDetailsPage() {
                 <div className="relative border-l border-border/70 pl-6 space-y-8">
                   {TIMELINE_STEPS.map((step, idx) => {
                     const getStepStatusIndex = (status) => {
-                      const s = (status || '').toLowerCase().trim().replace(/_/g, ' ')
-                      if (s === 'pending' || s === 'pending vendor acceptance') return 1
-                      if (s === 'confirmed' || s === 'vendor assigned' || s === 'vendor accepted' || s === 'zonal admin assigned' || s === 'zonal admin accepted') return 2
-                      if (s === 'packed') return 3
-                      if (s === 'shipped') return 4
-                      if (s === 'out for delivery') return 5
-                      if (s === 'delivered') return 6
-                      return 0 // 'placed'
+                      const s = (status || '').toLowerCase().trim()
+                      if (s === 'placed') return 0
+                      if (s === 'pending_vendor_acceptance') return 1
+                      if (s === 'vendor_accepted_pending_admin_approval' || s === 'vendor_accepted') return 2
+                      if (s === 'pending_admin_approval') return 3
+                      if (s === 'confirmed') return 4
+                      if (s === 'packed') return 5
+                      if (s === 'shipped') return 6
+                      if (s === 'out_for_delivery') return 7
+                      if (s === 'delivered') return 8
+                      // legacy statuses
+                      if (s === 'pending' || s === 'vendor_assigned') return 4
+                      return 0
+                    }
+
+                    // Check if this is a direct-to-admin order (no vendor step)
+                    const isDirectAdmin = statusHistory.some(h => h?.status === 'pending_admin_approval' || h?.status === 'pending') ||
+                      orderStatus === 'pending_admin_approval' || orderStatus === 'pending'
+                    // Skip optional vendor steps for direct-to-admin orders
+                    if (step.optional) {
+                      if (isDirectAdmin && (step.key === 'pending_vendor_acceptance' || step.key === 'vendor_accepted_pending_admin_approval')) return null
+                      if (!isDirectAdmin && step.key === 'pending_admin_approval') return null
                     }
 
                     const currentStepIdx = getStepStatusIndex(orderStatus)
-                    const isDone = idx <= currentStepIdx
-                    const isLastActive = idx === currentStepIdx
+                    const stepIdx = getStepStatusIndex(step.key === 'placed' ? 'placed' : step.key)
+                    const isDone = stepIdx <= currentStepIdx
+                    const isLastActive = step.key === orderStatus || (step.key === 'placed' && currentStepIdx === 0)
 
                     // Find corresponding history item for timestamp/details
                     const historyItem = statusHistory.find(h => {
-                      const hStatus = (h?.status || '').toLowerCase().trim().replace(/_/g, ' ')
+                      const hStatus = (h?.status || '').toLowerCase().trim()
                       if (step.key === 'placed') return true
-                      if (step.key === 'pending_vendor_acceptance' && (hStatus === 'pending vendor acceptance' || hStatus === 'pending')) return true
-                      if (step.key === 'confirmed' && (hStatus === 'confirmed' || hStatus === 'vendor assigned' || hStatus === 'vendor accepted' || hStatus === 'zonal admin assigned' || hStatus === 'zonal admin accepted')) return true
-                      return hStatus === step.key.replace(/_/g, ' ')
+                      if (step.key === 'pending_vendor_acceptance' && (hStatus === 'pending_vendor_acceptance' || hStatus === 'pending')) return true
+                      if (step.key === 'vendor_accepted_pending_admin_approval' && (hStatus === 'vendor_accepted_pending_admin_approval' || hStatus === 'vendor_accepted')) return true
+                      if (step.key === 'pending_admin_approval' && hStatus === 'pending_admin_approval') return true
+                      if (step.key === 'confirmed' && (hStatus === 'confirmed' || hStatus === 'vendor_assigned')) return true
+                      return hStatus === step.key
                     })
 
                     let formattedTime = null

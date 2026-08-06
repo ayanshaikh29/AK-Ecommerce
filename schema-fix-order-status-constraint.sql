@@ -1,8 +1,10 @@
 -- ========================================================
--- ADD pending_vendor_acceptance STATUS TO ORDERS CONSTRAINT
+-- ORDER STATUS CHECK CONSTRAINT (includes admin approval flow)
 -- ========================================================
--- The new order workflow uses pending_vendor_acceptance as initial status
--- but the existing CHECK constraint doesn't include it.
+-- Supports the full B2B order lifecycle:
+--   pending_vendor_acceptance → vendor_accepted_pending_admin_approval → confirmed
+--   OR pending_admin_approval (direct to admin) → confirmed
+--   Also supports rejection: admin_rejected
 
 -- 1. Drop existing constraint
 DO $$
@@ -22,11 +24,14 @@ BEGIN
   END IF;
 END $$;
 
--- 2. Add new CHECK constraint with all valid statuses including pending_vendor_acceptance
+-- 2. Add new CHECK constraint with ALL valid statuses
 ALTER TABLE public.orders ADD CONSTRAINT orders_status_check
   CHECK (status IN (
     'pending',
     'pending_vendor_acceptance',
+    'pending_admin_approval',
+    'vendor_accepted_pending_admin_approval',
+    'admin_rejected',
     'confirmed',
     'vendor_assigned',
     'vendor_accepted',

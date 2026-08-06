@@ -6,16 +6,13 @@
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "oc/deepseek-v4-flash-free",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "oc/big-pickle",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "nvidia/minimaxai/minimax-m2.7",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kr/claude-sonnet-4.5",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kr/claude-haiku-4.5",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "kr/minimax-m2.5"
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "oc/mimo-v2.5-free"
   },
   "model": "opus",
 
   "statusLine": {
     "type": "command",
-    "command": "node \"C:\\Users\\yourDeviceName(userName)\\.claude\\statusline.js\""
+    "command": "node \"C:\\Users\\HP\\.claude\\statusline.js\""
   },
 
   "effortLevel": "low",

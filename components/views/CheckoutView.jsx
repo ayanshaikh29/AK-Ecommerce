@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { MapPin, ChevronDown, CheckCircle2, ArrowRight, Eye, AlertTriangle, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { getStatusLabel } from '@/lib/status-labels'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -504,7 +505,7 @@ export function CheckoutView() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Status</span>
-                  <span className="font-bold capitalize text-amber-600">{(lastOrderData.status || 'pending').replace(/_/g, ' ')}</span>
+                  <span className="font-bold capitalize text-amber-600">{getStatusLabel(lastOrderData.status || 'pending')}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Est. Processing</span>

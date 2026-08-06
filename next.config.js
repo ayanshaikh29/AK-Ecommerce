@@ -4,7 +4,7 @@ const nextConfig = {
       { protocol: 'https', hostname: '**' },
     ],
   },
-  serverExternalPackages: [],
+  serverExternalPackages: ['xlsx'],
   webpack(config, { dev }) {
     if (dev) {
       // Reduce CPU/memory from file watching

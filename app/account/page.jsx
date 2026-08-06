@@ -58,8 +58,8 @@ export default function AccountPage() {
 
   const handleEditProfile = async (e) => {
     e.preventDefault()
-    if (!form.full_name || !form.email) {
-      toast.error('Name and Email are required')
+    if (!form.company_name || !form.email) {
+      toast.error('Company Name and Email are required')
       return
     }
     setLoading(true)
@@ -238,12 +238,12 @@ export default function AccountPage() {
                 <div className="max-h-[60vh] overflow-y-auto px-1 space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <Label htmlFor="full_name">Full Name</Label>
+                      <Label htmlFor="company_name">Company Name *</Label>
                       <Input 
-                        id="full_name"
-                        value={form.full_name} 
-                        onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} 
-                        placeholder="Enter your name" 
+                        id="company_name"
+                        value={form.company_name} 
+                        onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))} 
+                        placeholder="e.g. ICICI Lombard GIC Ltd" 
                         required
                       />
                     </div>
@@ -271,12 +271,12 @@ export default function AccountPage() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="company_name">Company Name</Label>
+                      <Label htmlFor="full_name">Contact Person Name (Order By)</Label>
                       <Input 
-                        id="company_name"
-                        value={form.company_name} 
-                        onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))} 
-                        placeholder="Enter company name" 
+                        id="full_name"
+                        value={form.full_name} 
+                        onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} 
+                        placeholder="e.g. Rohit Kale" 
                       />
                     </div>
                   </div>

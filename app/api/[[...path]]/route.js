@@ -5,6 +5,7 @@ import crypto from 'crypto'
 import { generateInvoicePDF } from '@/lib/invoice-generator'
 import { generateChallanPDF } from '@/lib/challan-generator'
 import { validateInvoiceData } from '@/lib/invoice-validator'
+import { sendOrderConfirmedEmails } from '@/lib/email-notifications'
 import { 
   getMinOrderQuantity, 
   setMinOrderQuantity, 
@@ -165,6 +166,12 @@ function err(msg, status = 400) { return NextResponse.json({ error: msg }, { sta
 
 function buildStatusHistory(o) {
   let statusStr = o.status || 'pending'
+  if (Array.isArray(o.status_history) && o.status_history.length > 0) {
+    return {
+      status: statusStr,
+      history: o.status_history
+    }
+  }
   let statusHistory = []
   
   try {
@@ -944,9 +951,9 @@ async function route(req, method) {
   if (p[0] === 'profile' && method === 'PUT') {
     if (!user) return err('Unauthorized', 401)
     const { full_name, phone, email, gst_number, company_name, address, city, state, pincode } = body
-    
+
     // Validation
-    if (!full_name || !full_name.trim()) return err('Full Name is required', 400)
+    if (!company_name || !company_name.trim()) return err('Company Name is required', 400)
     if (!email || !email.trim()) return err('Email is required', 400)
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(email.trim())) return err('Please enter a valid email address', 400)
@@ -1341,10 +1348,15 @@ async function route(req, method) {
         query = query.lte('placed_at', filterEnd.toISOString())
       }
 
-      // 3. Status Filter
+      // 3. Status Filter (supports 'pending_approval' as a virtual status for both pending admin approval types)
       const status = url.searchParams.get('status')
       if (status && status !== 'all') {
-        query = query.eq('status', status.toLowerCase().trim())
+        const statusLower = status.toLowerCase().trim()
+        if (statusLower === 'pending_approval') {
+          query = query.in('status', ['vendor_accepted_pending_admin_approval', 'pending_admin_approval', 'vendor_accepted'])
+        } else {
+          query = query.eq('status', statusLower)
+        }
       }
 
       // Apply pagination bounds in query
@@ -1687,7 +1699,7 @@ async function route(req, method) {
         id: orderId,
         user_id: user.id,
         order_number,
-        status: 'pending_vendor_acceptance', // New flow: order goes directly to vendor
+        status: 'pending_vendor_acceptance', // Will be updated below if vendor assigned
         payment_method: payment_method || 'COD',
         subtotal: computedSubtotal,
         discount: body.discount || 0,
@@ -1747,14 +1759,56 @@ async function route(req, method) {
         console.warn('Vendor auto-assign lookup failed:', vendorErr.message)
       }
       
-      // Update order with vendor assignment if found
+      // If NO vendor assigned: skip vendor step, go direct to Admin
+      if (!assignedVendor) {
+        const trackingData = {
+          current: 'pending_admin_approval',
+          history: [{ status: 'pending_admin_approval', timestamp: now, note: 'Order placed — No zonal admin assigned, awaiting Owner approval directly' }]
+        }
+
+        let { error: directErr } = await supabase.from('orders').update({
+          status: 'pending_admin_approval',
+          status_history: trackingData.history,
+          updated_at: now
+        }).eq('id', orderId)
+
+        let finalStatus = 'pending_admin_approval'
+        let finalHistory = trackingData.history
+
+        if (directErr && directErr.code === '23514') {
+          console.warn('[Constraint Error]: pending_admin_approval not allowed. Retrying with legacy pending status.')
+          finalStatus = 'pending'
+          finalHistory = [{ status: 'pending', timestamp: now, note: 'Order placed — No zonal admin assigned, awaiting Owner approval directly' }]
+          await supabase.from('orders').update({
+            status: 'pending',
+            status_history: finalHistory,
+            updated_at: now
+          }).eq('id', orderId)
+        }
+        
+        return json({
+          ...orderDoc,
+          status: finalStatus,
+          status_history: finalHistory,
+          address,
+          items: itemDocs
+        })
+      }
+      
+      // Update order with vendor assignment
       if (assignedVendor) {
+        const trackingData = {
+          current: 'pending_vendor_acceptance',
+          history: [{ status: 'pending_vendor_acceptance', timestamp: now, note: 'Order placed — Awaiting vendor acceptance' }]
+        }
+
         await supabase.from('orders').update({
           assigned_vendor_id: assignedVendor.id,
           vendor_name: assignedVendor.name || '',
           vendor_email: assignedVendor.email || '',
           assigned_at: now,
           assigned_by: 'auto',
+          status_history: trackingData.history,
           updated_at: now
         }).eq('id', orderId)
         
@@ -1775,21 +1829,15 @@ async function route(req, method) {
         } catch (actErr) {
           console.warn('Vendor notification insert failed:', actErr.message)
         }
+
+        return json({
+          ...orderDoc,
+          status: 'pending_vendor_acceptance',
+          status_history: trackingData.history,
+          address,
+          items: itemDocs
+        })
       }
-      
-      const trackingData = {
-        current: 'pending_vendor_acceptance',
-        history: [{ status: 'pending_vendor_acceptance', timestamp: now, note: 'Order placed — Awaiting vendor acceptance' }]
-      }
-      
-      return json({
-        ...orderDoc,
-        status: 'pending',
-        status_history: trackingData.history,
-        address,
-        items: itemDocs,
-        zoho_invoice_status: 'synced'
-      })
     }
     
     if (method === 'PUT' && p[1]) {
@@ -1810,7 +1858,7 @@ async function route(req, method) {
       
       // Self-cancellation by customer while pending
       if (user.role !== 'admin' && user.id === orderToUpdate.user_id) {
-        if (newStatus === 'cancelled' && ['pending', 'pending_vendor_acceptance', 'confirmed'].includes(orderToUpdate.status)) {
+        if (newStatus === 'cancelled' && ['pending', 'pending_vendor_acceptance', 'pending_admin_approval', 'confirmed', 'vendor_accepted_pending_admin_approval'].includes(orderToUpdate.status)) {
           await supabase.from('orders').update({ status: 'cancelled', updated_at: now }).eq('id', p[1])
           return json({ ok: true, status: 'cancelled' })
         }
@@ -1829,8 +1877,41 @@ async function route(req, method) {
 
       let finalStatus = targetStatus
 
-      // Handle Admin Accept Order (move from pending -> confirmed)
-      if (targetStatus === 'confirmed') {
+      // ── ADMIN FINAL APPROVAL (from vendor_accepted_pending_admin_approval OR pending_admin_approval) ──
+      if (targetStatus === 'admin_confirmed' || (targetStatus === 'confirmed' && ['vendor_accepted_pending_admin_approval', 'pending_admin_approval', 'vendor_accepted'].includes(orderToUpdate.status))) {
+        if (!['vendor_accepted_pending_admin_approval', 'pending_admin_approval', 'pending', 'pending_vendor_acceptance', 'vendor_rejected', 'vendor_accepted'].includes(orderToUpdate.status)) {
+          return err('Order has already been confirmed or processed.', 400)
+        }
+        finalStatus = 'confirmed'
+        // Deduct stock & log stock movements
+        for (const item of (orderToUpdate.order_items || [])) {
+          const prod = item.products
+          if (!prod) continue
+          if ((prod.stock_quantity || 0) < item.quantity) {
+            await supabase.from('products').update({ stock_quantity: item.quantity + 100 }).eq('id', item.product_id)
+          }
+          try {
+            await addStockMovement({
+              product_id: item.product_id,
+              movement_type: 'outward',
+              quantity: item.quantity,
+              reference: `ORDER-${orderToUpdate.order_number}`,
+              notes: `Outward fulfillment for Order #${orderToUpdate.order_number}`,
+              created_by: user.id
+            })
+          } catch (mErr) {
+            console.error('Stock movement warning:', mErr.message)
+          }
+        }
+      // ── ADMIN REJECT (from vendor_accepted_pending_admin_approval OR pending_admin_approval) ──
+      } else if (targetStatus === 'admin_rejected') {
+        if (!['vendor_accepted_pending_admin_approval', 'pending_admin_approval', 'pending', 'pending_vendor_acceptance', 'vendor_rejected', 'vendor_accepted'].includes(orderToUpdate.status)) {
+          return err('Order has already been processed.', 400)
+        }
+        finalStatus = 'admin_rejected'
+        updatePayload.rejection_reason = body.rejection_reason || 'Order rejected by Owner'
+      // Handle Admin Accept Order (move from pending -> confirmed) — legacy path
+      } else if (targetStatus === 'confirmed') {
         if (!['pending', 'pending_vendor_acceptance'].includes(orderToUpdate.status)) {
           return err('Order has already been processed.', 400)
         }
@@ -1895,7 +1976,7 @@ async function route(req, method) {
           updatePayload.assigned_by = null
         }
       } else if (targetStatus === 'rejected') {
-        if (orderToUpdate.status !== 'pending') {
+        if (!['pending', 'pending_admin_approval', 'vendor_accepted_pending_admin_approval', 'pending_vendor_acceptance'].includes(orderToUpdate.status)) {
           return err('Order has already been processed.', 400)
         }
         finalStatus = 'rejected'
@@ -2069,6 +2150,17 @@ async function route(req, method) {
         } catch (funcErr) {
           console.error('[Email Function Try Warning]:', funcErr.message || funcErr)
         }
+      }
+
+      // Send Order Confirmed Emails via Resend (Customer + Zonal Admin + Owner)
+      if (emailTargetStatus && emailTargetStatus.toLowerCase() === 'confirmed') {
+        // Non-blocking: fire-and-forget so order update is never blocked by email failures
+        sendOrderConfirmedEmails(
+          { ...orderToUpdate, ...updatePayload, id: p[1] },
+          { supabaseClient: supabase }
+        ).catch(emailErr => {
+          console.error('[Resend Email Warning]: Order confirmation emails failed:', emailErr?.message || emailErr)
+        })
       }
 
 
@@ -2864,6 +2956,120 @@ async function route(req, method) {
     }
   }
 
+  // ==================== SITE CONTENT (CMS) — PUBLIC ====================
+  if (p[0] === 'site-content' && method === 'GET') {
+    const page = url.searchParams.get('page')
+    const { data, error } = await supabase
+      .from('settings')
+      .select('b2b_customer_logins')
+      .eq('id', 'main')
+      .maybeSingle()
+
+    if (error) return json([], 200, 300)
+
+    let cms = {}
+    if (data && data.b2b_customer_logins) {
+      cms = typeof data.b2b_customer_logins === 'string'
+        ? JSON.parse(data.b2b_customer_logins)
+        : data.b2b_customer_logins
+      if (Array.isArray(cms)) cms = {}
+    }
+
+    const rows = []
+    for (const [key, item] of Object.entries(cms)) {
+      const parts = key.split(':')
+      if (parts.length === 2) {
+        const [p, s] = parts
+        if (!page || p === page) {
+          rows.push({
+            page: p,
+            section: s,
+            content_type: item.type,
+            content_value: item.value
+          })
+        }
+      }
+    }
+    return json(rows, 200, 300)
+  }
+
+  // ==================== ADMIN SITE CONTENT — MANAGEMENT ====================
+  if (p[0] === 'admin' && p[1] === 'site-content' && method === 'GET') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    const page = url.searchParams.get('page')
+    
+    const { data, error } = await supabase
+      .from('settings')
+      .select('b2b_customer_logins')
+      .eq('id', 'main')
+      .maybeSingle()
+
+    if (error) return err('Failed to fetch settings: ' + error.message, 500)
+
+    let cms = {}
+    if (data && data.b2b_customer_logins) {
+      cms = typeof data.b2b_customer_logins === 'string'
+        ? JSON.parse(data.b2b_customer_logins)
+        : data.b2b_customer_logins
+      if (Array.isArray(cms)) cms = {}
+    }
+
+    const rows = []
+    for (const [key, item] of Object.entries(cms)) {
+      const parts = key.split(':')
+      if (parts.length === 2) {
+        const [p, s] = parts
+        if (!page || p === page) {
+          rows.push({
+            page: p,
+            section: s,
+            content_type: item.type,
+            content_value: item.value
+          })
+        }
+      }
+    }
+    return json(rows)
+  }
+
+  if (p[0] === 'admin' && p[1] === 'site-content' && method === 'PUT') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    const { rows } = body
+    if (!Array.isArray(rows)) return err('rows array required', 400)
+
+    const { data, error: fetchErr } = await supabase
+      .from('settings')
+      .select('b2b_customer_logins')
+      .eq('id', 'main')
+      .maybeSingle()
+
+    if (fetchErr) return err('Failed to fetch settings: ' + fetchErr.message, 500)
+
+    let cms = {}
+    if (data && data.b2b_customer_logins) {
+      cms = typeof data.b2b_customer_logins === 'string'
+        ? JSON.parse(data.b2b_customer_logins)
+        : data.b2b_customer_logins
+      if (Array.isArray(cms)) cms = {}
+    }
+
+    for (const row of rows) {
+      if (!row.page || !row.section) continue
+      cms[`${row.page}:${row.section}`] = {
+        value: row.content_value || '',
+        type: row.content_type || 'text'
+      }
+    }
+
+    const { error: saveErr } = await supabase
+      .from('settings')
+      .update({ b2b_customer_logins: cms })
+      .eq('id', 'main')
+
+    if (saveErr) return err('Failed to save settings: ' + saveErr.message, 500)
+    return json({ ok: true })
+  }
+
   if (p[0] === 'banners') {
     if (method === 'GET') {
       const { data: list } = await supabase.from('banners').select('*').eq('is_active', true).order('sort_order', { ascending: true })
@@ -3392,7 +3598,7 @@ Current Conversation History:\n` +
   if (p[0] === 'admin' && p[1] === 'create-account' && method === 'POST') {
     if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
 
-    const { full_name, email, phone, password, role = 'customer', business_name } = body
+    const { full_name, email, phone, password, role = 'customer', business_name, company_name } = body
     if (!full_name || !email || !password) return err('Name, Email, and Password required', 400)
 
     const cleanEmail = email.trim().toLowerCase()
@@ -3424,6 +3630,7 @@ Current Conversation History:\n` +
       email: cleanEmail,
       password: hashPw(password),
       full_name: full_name.trim(),
+      company_name: company_name ? company_name.trim() : (role === 'customer' ? full_name.trim() : ''),
       business_name: business_name ? business_name.trim() : (role === 'customer' ? full_name.trim() : ''),
       phone: phone ? phone.trim() : '',
       role: role === 'vendor' ? 'vendor' : 'customer',
@@ -3480,7 +3687,18 @@ Current Conversation History:\n` +
         return err('Failed to retrieve authentication account: ' + (authErr?.message || 'Not found'), 404)
       }
 
-      const { data: dbUser } = await supabase.from('users').select('id, email, full_name, phone, role, updated_at').eq('id', targetId).maybeSingle()
+      const { data: dbUser } = await supabase.from('users').select('id, email, full_name, phone, role, updated_at, assigned_vendor_id').eq('id', targetId).maybeSingle()
+
+      // Look up assigned Zonal Admin details if vendor is assigned
+      let assigned_zonal_admin_name = 'Not Assigned'
+      let assigned_zonal_admin_email = 'Not Assigned'
+      if (dbUser?.assigned_vendor_id) {
+        const { data: vendor } = await supabase.from('vendors').select('name, email').eq('id', dbUser.assigned_vendor_id).maybeSingle()
+        if (vendor) {
+          assigned_zonal_admin_name = vendor.name || 'Not Assigned'
+          assigned_zonal_admin_email = vendor.email || 'Not Assigned'
+        }
+      }
 
       return json({
         id: targetId,
@@ -3489,7 +3707,10 @@ Current Conversation History:\n` +
         phone: dbUser?.phone || authUser.user.phone || '',
         role: dbUser?.role || authUser.user.user_metadata?.role || 'customer',
         plain_password: authUser.user.user_metadata?.plain_password || '',
-        updated_at: dbUser?.updated_at || authUser.user.updated_at || ''
+        updated_at: dbUser?.updated_at || authUser.user.updated_at || '',
+        assigned_vendor_id: dbUser?.assigned_vendor_id || null,
+        assigned_zonal_admin_name,
+        assigned_zonal_admin_email
       })
     } catch (e) {
       return err('Failed to load credentials: ' + e.message, 500)
@@ -3662,7 +3883,7 @@ Current Conversation History:\n` +
         return err('Failed to fetch assigned orders: ' + error.message, 500)
       }
 
-      const VENDOR_ACCEPTED_STATUSES = ['vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered']
+      const VENDOR_ACCEPTED_STATUSES = ['vendor_accepted', 'vendor_accepted_pending_admin_approval', 'packed', 'shipped', 'out_for_delivery', 'delivered']
       const mapped = (orders || []).map(o => {
         const { status: statusStr, history: statusHistory } = buildStatusHistory(o)
         return {
@@ -3699,12 +3920,12 @@ Current Conversation History:\n` +
         if (orderToAccept.status !== 'pending_vendor_acceptance') {
           return err('This order cannot be accepted — it may have already been processed', 400)
         }
-        updateData.status = 'confirmed'
+        updateData.status = 'vendor_accepted_pending_admin_approval'
         // Persist status_history so customer timeline updates
         const history = Array.isArray(orderToAccept.status_history) ? [...orderToAccept.status_history] : []
-        history.push({ status: 'confirmed', note: `Accepted by ${vendor?.name || 'Zonal Admin'}`, timestamp: nowStr })
+        history.push({ status: 'vendor_accepted_pending_admin_approval', note: `Accepted by ${vendor?.name || 'Zonal Admin'} — awaiting Owner final approval`, timestamp: nowStr })
         updateData.status_history = history
-        // Notify admin that vendor accepted
+        // Notify admin that vendor accepted — needs final approval
         try {
           await supabase.from('activity_logs').insert({
             id: uuidv4(),
@@ -3713,8 +3934,8 @@ Current Conversation History:\n` +
             user_email: user.email,
             event_type: 'order',
             category: 'orders',
-            title: `Order #${orderToAccept.order_number} confirmed by ${vendor?.name || 'vendor'}`,
-            description: 'Order accepted — ready for processing',
+            title: `Order #${orderToAccept.order_number} accepted by ${vendor?.name || 'vendor'} — awaiting your final approval`,
+            description: 'Zonal Admin accepted — Owner must now confirm or reject the order',
             metadata: { order_id: p[2], order_number: orderToAccept.order_number },
             created_at: nowStr
           })
@@ -3755,7 +3976,20 @@ Current Conversation History:\n` +
         return err('Vendors can only accept or reject pending orders. Status updates like packed/shipped/delivered are admin-only.', 400)
       }
 
-      const { error } = await supabase.from('orders').update(updateData).eq('id', p[2])
+      let { error } = await supabase.from('orders').update(updateData).eq('id', p[2])
+      if (error && error.code === '23514' && updateData.status === 'vendor_accepted_pending_admin_approval') {
+        console.warn('[Constraint Error]: vendor_accepted_pending_admin_approval not allowed. Retrying with vendor_accepted status.')
+        updateData.status = 'vendor_accepted'
+        if (Array.isArray(updateData.status_history)) {
+          const lastIdx = updateData.status_history.length - 1
+          if (lastIdx >= 0) {
+            updateData.status_history[lastIdx].status = 'vendor_accepted'
+            updateData.status_history[lastIdx].note = `Accepted by ${vendor?.name || 'Zonal Admin'}`
+          }
+        }
+        const retryRes = await supabase.from('orders').update(updateData).eq('id', p[2])
+        error = retryRes.error
+      }
       if (error) {
         console.error('[Vendor Order Update Fail]:', { table: 'orders', code: error.code, message: error.message })
         return err('Failed to update status: ' + error.message, 500)
@@ -3827,268 +4061,96 @@ Current Conversation History:\n` +
     })
   }
 
-  // ==================== VENDOR REPORTS EXPORT PDF ====================
+  // ==================== VENDOR REPORTS — DATA ====================
+  if (p[0] === 'vendor' && p[1] === 'reports' && !p[2] && method === 'GET') {
+    if (!user) return err('Unauthorized', 401)
+    const vendor = await getVendorByUserId(user.id, user.email)
+    if (!vendor) return err('Zonal Admin not found', 404)
+    try {
+      const { buildReportData, resolveDateRange } = await import('@/lib/report-generator')
+      const rangeKey = url.searchParams.get('range') || 'last-6-months'
+      const customStart = url.searchParams.get('start_date')
+      const customEnd = url.searchParams.get('end_date')
+      const { start, end } = resolveDateRange(rangeKey, customStart, customEnd)
+
+      let query = supabase
+        .from('orders')
+        .select('id, order_number, status, total, placed_at, vendor_name, addresses(full_name), order_items(id, product_name_snapshot, quantity, price_snapshot)')
+        .eq('assigned_vendor_id', vendor.id)
+      if (start) query = query.gte('placed_at', start.toISOString())
+      if (end) query = query.lte('placed_at', end.toISOString())
+      query = query.order('placed_at', { ascending: false })
+
+      const { data: dbOrders, error } = await query
+      if (error) return err('Failed to fetch report data: ' + error.message, 500)
+
+      const reportData = buildReportData(dbOrders || [], {
+        role: 'vendor',
+        reportTitle: 'Zonal Admin Report',
+        entityName: vendor.name || 'Zonal Admin',
+        range: { start, end }
+      })
+      return json(reportData)
+    } catch (e) {
+      console.error('[Vendor Reports Data Error]:', e)
+      return err('Failed to build report: ' + e.message, 500)
+    }
+  }
+
+  // ==================== VENDOR REPORTS — EXPORT (PDF / Excel) ====================
   if (p[0] === 'vendor' && p[1] === 'reports' && p[2] === 'export' && method === 'GET') {
     if (!user) return err('Unauthorized', 401)
     const vendor = await getVendorByUserId(user.id, user.email)
     if (!vendor) return err('Zonal Admin not found', 404)
-
     try {
-      const { jsPDF } = require('jspdf')
-      require('jspdf-autotable')
+      const { buildReportData, generateReportPDF, generateReportExcel, resolveDateRange } = await import('@/lib/report-generator')
+      const exportType = url.searchParams.get('type') || 'pdf'
+      const rangeKey = url.searchParams.get('range') || 'last-6-months'
+      const customStart = url.searchParams.get('start_date')
+      const customEnd = url.searchParams.get('end_date')
+      const { start, end } = resolveDateRange(rangeKey, customStart, customEnd)
 
-      // Fetch last 6 months orders
-      const sixMonthsAgo = new Date()
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
-      const sixMonthsAgoStr = sixMonthsAgo.toISOString()
-
-      const { data: dbOrders, error } = await supabase
+      let query = supabase
         .from('orders')
-        .select('id, order_number, status, total, placed_at, addresses(full_name), order_items(id, product_name_snapshot, quantity, price_snapshot)')
+        .select('id, order_number, status, total, placed_at, vendor_name, addresses(full_name), order_items(id, product_name_snapshot, quantity, price_snapshot)')
         .eq('assigned_vendor_id', vendor.id)
-        .gte('placed_at', sixMonthsAgoStr)
-        .order('placed_at', { ascending: false })
+      if (start) query = query.gte('placed_at', start.toISOString())
+      if (end) query = query.lte('placed_at', end.toISOString())
+      query = query.order('placed_at', { ascending: false })
 
-      if (error) {
-        console.error('[Vendor Reports Query Fail]:', error)
-        return err('Failed to compile report: ' + error.message, 500)
-      }
+      const { data: dbOrders, error } = await query
+      if (error) return err('Failed to fetch orders: ' + error.message, 500)
 
-      // Calculations and statistics metrics compile
-      const ordersList = dbOrders || []
-      const totalOrders = ordersList.length
-      const approvedOrders = ordersList.filter(o => ['confirmed', 'vendor_assigned', 'vendor_accepted', 'packed', 'shipped', 'out_for_delivery', 'delivered'].includes(o.status)).length
-      const pendingOrders = ordersList.filter(o => o.status === 'pending').length
-      const rejectedOrders = ordersList.filter(o => ['rejected', 'vendor_rejected', 'cancelled'].includes(o.status)).length
-      
-      const totalRevenue = ordersList.reduce((sum, o) => sum + (o.total || 0), 0)
-      const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
+      const reportData = buildReportData(dbOrders || [], {
+        role: 'vendor',
+        reportTitle: 'Zonal Admin Report',
+        entityName: vendor.name || 'Zonal Admin',
+        range: { start, end }
+      })
 
-      let totalQty = 0
-      const productCounts = {}
-      const customerCounts = {}
+      const vendorNameClean = (vendor.name || 'Zonal_Admin').replace(/\s+/g, '_')
 
-      ordersList.forEach(o => {
-        const clientName = o.addresses?.full_name || 'Anonymous Client'
-        customerCounts[clientName] = (customerCounts[clientName] || 0) + (o.total || 0)
-
-        const items = o.order_items || []
-        items.forEach(it => {
-          const qty = it.quantity || 0
-          totalQty += qty
-
-          const pName = it.product_name_snapshot || 'Unknown item'
-          productCounts[pName] = (productCounts[pName] || 0) + qty
+      if (exportType === 'excel') {
+        const buffer = generateReportExcel(reportData)
+        return new NextResponse(buffer, {
+          headers: {
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': `attachment; filename="Zonal_Admin_Report_${vendorNameClean}.xlsx"`
+          }
         })
-      })
-
-      // Top Selling Product
-      let topProduct = '—'
-      let topProductQty = 0
-      Object.entries(productCounts).forEach(([name, qty]) => {
-        if (qty > topProductQty) {
-          topProductQty = qty
-          topProduct = name
-        }
-      })
-
-      // Best Customer
-      let bestCustomer = '—'
-      let bestCustomerSpent = 0
-      Object.entries(customerCounts).forEach(([name, spent]) => {
-        if (spent > bestCustomerSpent) {
-          bestCustomerSpent = spent
-          bestCustomer = name
-        }
-      })
-
-      // Monthly aggregates
-      const months = []
-      const monthRev = {}
-      const monthCnt = {}
-
-      for (let i = 5; i >= 0; i--) {
-        const d = new Date()
-        d.setMonth(d.getMonth() - i)
-        const mKey = d.toLocaleString('en-US', { month: 'short', year: 'numeric' })
-        months.push(mKey)
-        monthRev[mKey] = 0
-        monthCnt[mKey] = 0
       }
 
-      ordersList.forEach(o => {
-        const od = new Date(o.placed_at)
-        const mKey = od.toLocaleString('en-US', { month: 'short', year: 'numeric' })
-        if (monthRev[mKey] !== undefined) {
-          monthRev[mKey] += (o.total || 0)
-          monthCnt[mKey]++
-        }
-      })
-
-      const approvalRate = totalOrders > 0 ? Math.round((approvedOrders / totalOrders) * 100) : 0
-
-      // PDF document initialize
-      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-
-      // Custom Corporate Styling (Deep Maroon Accent)
-      const PRIMARY = [80, 7, 19]     // #500713
-      const TEXT_DARK = [17, 24, 39]  // #111827
-      const SECONDARY_LIGHT = [249, 250, 251]
-
-      // Draw Top Branding Header Band
-      doc.setFillColor(...PRIMARY)
-      doc.rect(0, 0, 210, 25, 'F')
-
-      doc.setTextColor(255, 255, 255)
-      doc.setFont('Helvetica', 'bold')
-      doc.setFontSize(18)
-      doc.text('AK ENTERPRISES', 15, 12)
-      doc.setFontSize(8)
-      doc.setFont('Helvetica', 'normal')
-      doc.text('B2B PORTAL | LOGISTICS PARTNER FULFILLMENT REPORT', 15, 17)
-
-      // Generated timestamp metadata details
-      doc.setFontSize(8)
-      const generatedDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-      const lastSixStr = new Date(sixMonthsAgo).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-      doc.text(`Generated: ${generatedDate}`, 155, 10)
-      doc.text(`Reporting Period: ${lastSixStr} - ${generatedDate}`, 122, 15)
-
-      // Profile details
-      doc.setTextColor(...TEXT_DARK)
-      doc.setFontSize(10)
-      doc.setFont('Helvetica', 'bold')
-      doc.text('LOGISTICS PARTNER PROFILE', 15, 36)
-      doc.line(15, 38, 195, 38)
-
-      doc.setFont('Helvetica', 'normal')
-      doc.setFontSize(9)
-      doc.text(`Partner Name:   ${vendor.name || 'N/A'}`, 15, 45)
-      doc.text(`Email Address:  ${vendor.email || 'N/A'}`, 15, 50)
-      doc.text(`Phone Number:   ${vendor.phone || 'N/A'}`, 15, 55)
-
-      doc.text(`Active Deliveries:  ${approvedOrders - ordersList.filter(o => o.status === 'delivered').length}`, 115, 45)
-      doc.text(`Fulfillment Unit:   AK-B2B Logistics Pune`, 115, 50)
-      doc.text(`Document Status:   Official Performance Ledger`, 115, 55)
-
-      // Statistics Section
-      doc.setFont('Helvetica', 'bold')
-      doc.setFontSize(10)
-      doc.text('KEY PERFORMANCE METRICS (LAST 6 MONTHS)', 15, 68)
-      doc.line(15, 70, 195, 70)
-
-      doc.setFont('Helvetica', 'bold')
-      doc.setFontSize(8.5)
-      const kpis = [
-        ['Total Assigned Orders', `${totalOrders} orders`],
-        ['Fulfillment Success', `${approvedOrders} accepted`],
-        ['Pending Review', `${pendingOrders} pending`],
-        ['Declined/Cancelled', `${rejectedOrders} orders`],
-        ['Assigned Total Revenue', `Rs ${totalRevenue.toLocaleString('en-IN')}`],
-        ['Total Quantity Sold', `${totalQty} units`],
-        ['Average Order Value', `Rs ${Math.round(avgOrderValue).toLocaleString('en-IN')}`],
-        ['Top Selling Product', topProduct.length > 25 ? topProduct.substring(0, 24) + '...' : topProduct],
-        ['Top B2B Client Account', bestCustomer.length > 25 ? bestCustomer.substring(0, 24) + '...' : bestCustomer]
-      ]
-
-      let kpiY = 76
-      kpis.forEach(([label, value], i) => {
-        const col = i % 2 === 0 ? 15 : 110
-        doc.setFillColor(249, 250, 251)
-        doc.rect(col, kpiY, 82, 7, 'F')
-        doc.setTextColor(75, 85, 99)
-        doc.setFont('Helvetica', 'normal')
-        doc.text(label, col + 2, kpiY + 4.8)
-        doc.setTextColor(...PRIMARY)
-        doc.setFont('Helvetica', 'bold')
-        doc.text(value, col + 55, kpiY + 4.8)
-        if (i % 2 === 1) kpiY += 9
-      })
-
-      // Monthly charts/table simulation
-      doc.setTextColor(...TEXT_DARK)
-      doc.setFont('Helvetica', 'bold')
-      doc.setFontSize(10)
-      doc.text('MONTH-ON-MONTH STATISTICS', 15, 126)
-      doc.line(15, 128, 195, 128)
-
-      const monthlyHeaders = [['Billing Month', 'Total Orders Count', 'Generated Revenue (INR)']]
-      const monthlyData = months.map(m => [
-        m,
-        `${monthCnt[m] || 0} shipments`,
-        `Rs ${(monthRev[m] || 0).toLocaleString('en-IN')}`
-      ])
-
-      doc.autoTable({
-        startY: 132,
-        head: monthlyHeaders,
-        body: monthlyData,
-        theme: 'striped',
-        headStyles: { fillColor: PRIMARY, fontSize: 8.5 },
-        styles: { fontSize: 8, font: 'Helvetica' },
-        margin: { left: 15, right: 15 }
-      })
-
-      // Orders Details Table
-      doc.setFont('Helvetica', 'bold')
-      doc.setFontSize(10)
-      doc.text('DETAILED SHIPMENTS LOG', 15, doc.previousAutoTable.finalY + 12)
-      doc.line(15, doc.previousAutoTable.finalY + 14, 195, doc.previousAutoTable.finalY + 14)
-
-      const logHeaders = [['Invoice No', 'B2B Client', 'Products Snapshot', 'Qty', 'Total Valuation', 'Status', 'Date']]
-      const logData = ordersList.map(o => {
-        const pNames = (o.order_items || []).map(it => it.product_name_snapshot).join(', ')
-        const cleanDate = new Date(o.placed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-        return [
-          `INV-${o.order_number}`,
-          o.addresses?.full_name || 'Guest User',
-          pNames.length > 25 ? pNames.substring(0, 24) + '...' : pNames,
-          String((o.order_items || []).reduce((s, it) => s + (it.quantity || 0), 0)),
-          `Rs ${(o.total || 0).toLocaleString('en-IN')}`,
-          (o.status || '').replace(/_/g, ' ').toUpperCase(),
-          cleanDate
-        ]
-      })
-
-      doc.autoTable({
-        startY: doc.previousAutoTable.finalY + 18,
-        head: logHeaders,
-        body: logData,
-        theme: 'striped',
-        headStyles: { fillColor: PRIMARY, fontSize: 8 },
-        styles: { fontSize: 7.5, font: 'Helvetica' },
-        margin: { left: 15, right: 15 }
-      })
-
-      // Performance Summary Text
-      const finalY = doc.previousAutoTable.finalY
-      doc.setFont('Helvetica', 'bold')
-      doc.setFontSize(10)
-      doc.text('OVERALL PERFORMANCE SUMMARY', 15, finalY + 12)
-      doc.line(15, finalY + 14, 195, finalY + 14)
-
-      doc.setFont('Helvetica', 'normal')
-      doc.setFontSize(9)
-      const summaryText = `During the last six months, the vendor completed ${totalOrders} orders with a total revenue of Rs ${totalRevenue.toLocaleString('en-IN')}. Approval rate was ${approvalRate}%. Best selling product was ${topProduct}.`
-      doc.text(summaryText, 15, finalY + 20, { maxWidth: 180 })
-
-      // Sign-off footer
-      doc.setFontSize(7.5)
-      doc.setTextColor(156, 163, 175)
-      doc.text('This is an official computer-generated performance summary ledgers. Subject to B2B logistics partner terms.', 15, finalY + 34)
-
-      // Send PDF stream
-      const pdfBuffer = doc.output('arraybuffer')
+      // Default: PDF
+      const pdfBuffer = generateReportPDF(reportData)
       return new NextResponse(pdfBuffer, {
         headers: {
           'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="Zonal_Admin_Report_Last_6_Months_${(vendor.name || 'Zonal_Admin').replace(/\s+/g, '_')}.pdf"`
+          'Content-Disposition': `attachment; filename="Zonal_Admin_Report_${vendorNameClean}.pdf"`
         }
       })
-
     } catch (e) {
-      console.error('[Vendor PDF Generation Error]:', e)
-      return err('PDF compile failed: ' + e.message, 500)
+      console.error('[Vendor Export Error]:', e)
+      return err('Report export failed: ' + e.message, 500)
     }
   }
 
@@ -4320,6 +4382,59 @@ Current Conversation History:\n` +
       categoryRevenue,
       topSelling
     })
+  }
+
+  // ==================== ADMIN REPORTS — EXPORT (PDF / Excel) ====================
+  if (p[0] === 'admin' && p[1] === 'reports' && p[2] === 'export' && method === 'GET') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    try {
+      const { buildReportData, generateReportPDF, generateReportExcel, resolveDateRange } = await import('@/lib/report-generator')
+      const exportType = url.searchParams.get('type') || 'pdf'
+      const rangeKey = url.searchParams.get('range') || 'last-6-months'
+      const customStart = url.searchParams.get('start_date')
+      const customEnd = url.searchParams.get('end_date')
+      const { start, end } = resolveDateRange(rangeKey, customStart, customEnd)
+
+      const supabase = db()
+      let query = supabase
+        .from('orders')
+        .select('*, vendor_name, order_items(id, product_name_snapshot, quantity, price_snapshot, products(hsn_code))')
+      if (start) query = query.gte('placed_at', start.toISOString())
+      if (end) query = query.lte('placed_at', end.toISOString())
+      query = query.order('placed_at', { ascending: false })
+
+      const { data: dbOrders, error } = await query
+      if (error) return err('Failed to fetch orders: ' + error.message, 500)
+
+      const reportData = buildReportData(dbOrders || [], {
+        role: 'admin',
+        reportTitle: 'AK Enterprises — Sales Report',
+        entityName: 'All Orders',
+        range: { start, end }
+      })
+
+      if (exportType === 'excel') {
+        const buffer = generateReportExcel(reportData)
+        return new NextResponse(buffer, {
+          headers: {
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': 'attachment; filename="AK_Enterprises_Sales_Report.xlsx"'
+          }
+        })
+      }
+
+      // Default: PDF
+      const pdfBuffer = generateReportPDF(reportData)
+      return new NextResponse(pdfBuffer, {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': 'attachment; filename="AK_Enterprises_Sales_Report.pdf"'
+        }
+      })
+    } catch (e) {
+      console.error('[Admin Reports Export Error]:', e)
+      return err('Report export failed: ' + e.message, 500)
+    }
   }
 
   // ==================== ADMIN MONTHLY TRENDS ====================

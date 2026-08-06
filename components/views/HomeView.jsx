@@ -40,7 +40,7 @@ function useScrollReveal(deps = []) {
   }, deps)
 }
 
-export function HomeView({ initialFeatured, initialCats, initialTrending, initialBanners, initialClients }) {
+export function HomeView({ initialFeatured, initialCats, initialTrending, initialBanners, initialClients, siteContent = {} }) {
   const { user } = useAppContext()
   const router = useRouter()
   useScrollReveal([initialFeatured, initialCats, initialTrending, initialBanners, initialClients])
@@ -57,7 +57,7 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
   }, [user, router])
 
   if (!user) {
-    return <LoggedOutHomeView initialClients={initialClients || []} />
+    return <LoggedOutHomeView initialClients={initialClients || []} siteContent={siteContent} />
   }
 
   if (user.role === 'customer') {
@@ -239,8 +239,8 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
         <div className="max-w-7xl mx-auto mesh-hero radius-2xl p-10 md:p-16 relative overflow-hidden grain reveal-scale">
           <div className="max-w-2xl relative z-10">
             <Badge className="mb-4 bg-accent/20 text-accent border-accent/40 backdrop-blur">Limited Time</Badge>
-            <h3 className="font-display text-4xl md:text-6xl font-extrabold text-primary-foreground mb-4 text-balance">Bulk orders? Custom quotes in 2 hours.</h3>
-            <p className="text-primary-foreground/80 text-lg mb-8">Corporate purchase for 100+ units? WhatsApp us or use our contact form.</p>
+            <h3 className="font-display text-4xl md:text-6xl font-extrabold text-primary-foreground mb-4 text-balance">{siteContent.featured_banner_title?.value || 'Bulk orders? Custom quotes in 2 hours.'}</h3>
+            <p className="text-primary-foreground/80 text-lg mb-8">{siteContent.featured_banner_text?.value || 'Corporate purchase for 100+ units? WhatsApp us or use our contact form.'}</p>
             <div className="flex flex-wrap gap-3">
               <Link href="/contact">
                 <Button size="lg" className="rounded-full px-8 h-12 bg-accent text-accent-foreground hover:bg-accent/90 btn-shine ripple font-semibold shadow-glow">Request Bulk Quote <ArrowRight className="ml-2 w-4 h-4" /></Button>
@@ -599,13 +599,19 @@ function HeroSlider({ whatsappUrl }) {
   )
 }
 
-function LoggedOutHomeView({ initialClients }) {
+function LoggedOutHomeView({ initialClients, siteContent = {} }) {
+  const heroBadge = siteContent.hero_badge?.value || 'Est. 2020 — Pune, India'
+  const heroTitle = siteContent.hero_title?.value || 'Your Trusted'
+  const heroAccent = siteContent.hero_title_accent?.value || 'B2B Partner'
+  const heroSubtitle = siteContent.hero_subtitle?.value || 'Office Stationery · Housekeeping · UPS Solutions'
+  const heroImage = siteContent.hero_image?.value || '/category-stationery.jpg'
+
   return (
     <div>
       {/* ───── 1. HERO SECTION ───── */}
       <section className="relative h-[92vh] min-h-[700px] overflow-hidden bg-[#120606]">
         <div className="absolute inset-0">
-          <Image src="/category-stationery.jpg" alt="" fill className="object-cover opacity-60" priority sizes="100vw" />
+          <Image src={heroImage} alt="" fill className="object-cover opacity-60" priority sizes="100vw" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#120606]/98 via-[#1a0a0a]/90 to-[#2a1212]/70" />
           <div className="absolute inset-0 bg-gradient-to-t from-[#120606]/90 via-transparent to-transparent" />
         </div>
@@ -617,17 +623,17 @@ function LoggedOutHomeView({ initialClients }) {
             <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}>
               <div className="inline-flex items-center gap-3 glass-dark border border-accent/15 rounded-full px-5 py-2 mb-8">
                 <Award className="w-4 h-4 text-accent" />
-                <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-accent">Est. 2020 — Pune, India</span>
+                <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-accent">{heroBadge}</span>
               </div>
             </motion.div>
 
             <motion.h1 initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.2 }} className="font-display text-5xl sm:text-7xl md:text-8xl lg:text-9xl font-extrabold text-white mb-6 leading-[0.92] tracking-[-0.04em]">
-              Your Trusted<br />
-              <span className="gold-shine">B2B Partner</span>
+              {heroTitle}<br />
+              <span className="gold-shine">{heroAccent}</span>
             </motion.h1>
 
             <motion.p initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.4 }} className="text-lg md:text-xl lg:text-2xl text-white/70 max-w-2xl mb-10 font-light tracking-wide">
-              Office Stationery <span className="text-accent/50 mx-3">·</span> Housekeeping <span className="text-accent/50 mx-3">·</span> UPS Solutions
+              {heroSubtitle}
             </motion.p>
 
             <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.6 }} className="flex flex-wrap gap-4">
@@ -754,8 +760,8 @@ function LoggedOutHomeView({ initialClients }) {
             [TrendingUp, 'Wholesale Pricing', 'Best B2B rates with custom corporate rate cards & volume-based discounts.'],
             [Truck, 'Timely Delivery', 'Same-day dispatch in Maharashtra, next-day pan-India logistics network.'],
             [Shield, 'Dedicated Support', 'Personal account manager assigned to every corporate & bulk buyer.'],
-            [Building2, '5+ Years B2B', 'Trusted partner for finance, insurance, IT & manufacturing since 2020.'],
-            [Sparkles, '300+ Products', 'Wide catalog spanning office stationery, housekeeping & UPS solutions.']
+            [Building2, siteContent.stats_b2b_years?.value || '5+ Years B2B', siteContent.stats_b2b_desc?.value || 'Trusted partner for finance, insurance, IT & manufacturing since 2020.'],
+            [Sparkles, siteContent.stats_products_count?.value || '300+ Products', siteContent.stats_products_desc?.value || 'Wide catalog spanning office stationery, housekeeping & UPS solutions.']
           ].map(([I, t, d], i) => (
             <motion.div key={i} initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: (i % 3) * 0.1, duration: 0.5 }}>
               <div className="h-full p-8 bg-card radius-xl shadow-soft hover:shadow-elevated card-lift transition-all duration-300 border border-border/60 group">

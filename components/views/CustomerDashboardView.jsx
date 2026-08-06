@@ -15,6 +15,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useAppContext } from '@/components/providers/AppProvider'
 import { useRealtimeOrders, useRealtimePricing } from '@/lib/hooks/useRealtime'
+import { getStatusLabel } from '@/lib/status-labels'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
@@ -121,9 +122,16 @@ export function CustomerDashboardView({ user }) {
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mesh-hero rounded-3xl p-8 md:p-10 text-primary-foreground relative overflow-hidden">
         <div className="relative z-10">
           <Badge className="mb-4 bg-accent/20 text-accent border-accent/40 px-3.5 py-1 text-xs font-bold uppercase tracking-widest">Customer Dashboard</Badge>
-          <h1 className="font-display text-3xl sm:text-4xl md:text-5xl font-extrabold mb-3">
+          <h1 className="font-display text-3xl sm:text-4xl md:text-5xl font-extrabold mb-1">
             Hello, <span className="gold-shine">{user.full_name || user.email}</span>
           </h1>
+          {user.company_name && (
+            <p className="text-accent/90 text-sm font-bold uppercase tracking-widest mb-3 flex items-center gap-2">
+              <span className="inline-block w-4 h-px bg-accent/60" />
+              {user.company_name}
+              <span className="inline-block w-4 h-px bg-accent/60" />
+            </p>
+          )}
           <p className="text-primary-foreground/80 text-base md:text-lg max-w-2xl">
             Welcome to your B2B procurement hub. Manage orders, track shipments, and reorder supplies.
           </p>
@@ -247,7 +255,7 @@ export function CustomerDashboardView({ user }) {
                               Order #{order.order_number || order.id?.slice(0, 8)}
                             </p>
                             <p className="text-xs text-muted-foreground capitalize">
-                              {order.status?.replace(/_/g, ' ')}
+                              {getStatusLabel(order.status)}
                             </p>
                           </div>
                         </div>

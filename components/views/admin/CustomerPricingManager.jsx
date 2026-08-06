@@ -107,14 +107,10 @@ export function CustomerPricingManager() {
       return
     }
     if (newCustForm.role === 'customer') {
-      const activeVendors = (vendors || []).filter(v => v.is_enabled !== false)
-      if (activeVendors.length === 0) {
-        toast.error('Please create a Zonal Admin account first before adding customers')
-        return
-      }
+      // Zonal Admin is optional for new flow — customers without a vendor go direct to admin
+      // Just warn if no vendors exist at all (informational only)
       if (!newCustForm.assigned_vendor_id) {
-        toast.error('Please select a Zonal Admin to assign to the B2B customer')
-        return
+        console.info('[Create Customer] No Zonal Admin selected — order will go directly to Owner for approval.')
       }
     }
     if (newCustForm.password.length < 8) {
@@ -130,6 +126,7 @@ export function CustomerPricingManager() {
       const payload = {
         role: newCustForm.role || 'customer',
         full_name: newCustForm.role === 'customer' ? (newCustForm.contact_person || newCustForm.full_name) : newCustForm.full_name,
+        company_name: newCustForm.role === 'customer' ? newCustForm.full_name : undefined,
         business_name: newCustForm.role === 'customer' ? newCustForm.full_name : undefined,
         email: newCustForm.email,
         phone: newCustForm.phone,
@@ -868,7 +865,9 @@ export function CustomerPricingManager() {
                                     phone: data.phone,
                                     role: 'customer',
                                     temporary_password: data.plain_password || 'No password assigned',
-                                    updated_at: data.updated_at
+                                    updated_at: data.updated_at,
+                                    assigned_zonal_admin_name: data.assigned_zonal_admin_name || 'Not Assigned',
+                                    assigned_zonal_admin_email: data.assigned_zonal_admin_email || 'Not Assigned'
                                   })
                                   toast.success('Credentials ready to manage!')
                                 } catch (err) {
@@ -1145,7 +1144,7 @@ export function CustomerPricingManager() {
       )}
       {/* Create Account Dialog (Customer or Vendor) */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="max-w-md radius-xl p-6 text-left">
+        <DialogContent className="max-w-md radius-xl p-6 text-left max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display font-bold text-xl flex items-center gap-2">
               <UserPlus className="w-5 h-5 text-accent" /> {newCustForm.role === 'vendor' ? 'Create New Zonal Admin Account' : 'Create New Customer Account'}
@@ -1206,38 +1205,27 @@ export function CustomerPricingManager() {
             </div>
             {newCustForm.role === 'customer' && (
               <div>
-                <label className="text-xs font-bold block mb-1">Assign Zonal Admin *</label>
+                <label className="text-xs font-bold block mb-1">Assign Zonal Admin <span className="text-muted-foreground font-normal">(Optional)</span></label>
                 {(() => {
                   const activeVendors = (vendors || []).filter(v => v.is_enabled !== false)
-                  if (activeVendors.length === 0) {
-                    return (
-                      <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-600 flex flex-col gap-2">
-                        <p>Please create a Zonal Admin account first before adding customers.</p>
-                        <Button 
-                          type="button" 
-                          onClick={() => setNewCustForm(prev => ({ ...prev, role: 'vendor' }))}
-                          size="sm" 
-                          variant="outline" 
-                          className="w-full text-xs font-bold mt-1 h-8 rounded-lg"
-                        >
-                          Create Zonal Admin
-                        </Button>
-                      </div>
-                    )
-                  }
                   return (
-                    <select
-                      value={newCustForm.assigned_vendor_id || ''}
-                      onChange={e => setNewCustForm(prev => ({ ...prev, assigned_vendor_id: e.target.value }))}
-                      className="w-full h-10 rounded-xl text-xs bg-card border border-border px-3 font-semibold text-foreground focus:ring-accent"
-                    >
-                      <option value="">-- Select Zonal Admin --</option>
-                      {activeVendors.map(v => (
-                        <option key={v.id} value={v.id}>
-                          🚚 {v.name} ({v.email})
-                        </option>
-                      ))}
-                    </select>
+                    <div>
+                      <select
+                        value={newCustForm.assigned_vendor_id || ''}
+                        onChange={e => setNewCustForm(prev => ({ ...prev, assigned_vendor_id: e.target.value }))}
+                        className="w-full h-10 rounded-xl text-xs bg-card border border-border px-3 font-semibold text-foreground focus:ring-accent"
+                      >
+                        <option value="">— No Zonal Admin (Direct to Owner approval) —</option>
+                        {activeVendors.map(v => (
+                          <option key={v.id} value={v.id}>
+                            🚚 {v.name} ({v.email})
+                          </option>
+                        ))}
+                      </select>
+                      {!newCustForm.assigned_vendor_id && (
+                        <p className="text-[10px] text-amber-600 mt-1 font-semibold">⚠ Without a Zonal Admin, orders from this customer will go directly to you (Owner) for approval.</p>
+                      )}
+                    </div>
                   )
                 })()}
               </div>

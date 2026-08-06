@@ -15,12 +15,14 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useAppContext } from '@/components/providers/AppProvider'
+import { getStatusLabel } from '@/lib/status-labels'
 import { useRealtimeOrders } from '@/lib/hooks/useRealtime'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
 const CHECKPOINT_COLORS = {
   pending_vendor_acceptance: 'bg-amber-500/10 text-amber-600 border border-amber-500/20',
+  vendor_accepted_pending_admin_approval: 'bg-blue-500/10 text-blue-600 border border-blue-500/20',
   confirmed: 'bg-blue-500/10 text-blue-600 border border-blue-500/20',
   packed: 'bg-purple-500/10 text-purple-600 border border-purple-500/20',
   shipped: 'bg-indigo-500/10 text-indigo-600 border border-indigo-500/20',
@@ -35,7 +37,7 @@ export function VendorView() {
   const { user, setUser } = useAppContext()
   const router = useRouter()
 
-  const [activeTab, setActiveTab] = useState('orders') // 'orders' | 'inventory' | 'performance'
+  const [activeTab, setActiveTab] = useState('new-orders') // 'new-orders' | 'orders' | 'performance'
   const [orders, setOrders] = useState([])
   const [inventory, setInventory] = useState([])
   const [loadingOrders, setLoadingOrders] = useState(true)
@@ -54,6 +56,13 @@ export function VendorView() {
   // Selected Order for detail view page render (inline replacement mode)
   const [selectedOrderId, setSelectedOrderId] = useState(null)
   const [exportingReport, setExportingReport] = useState(false)
+
+  // Reports state
+  const [reportRange, setReportRange] = useState('last-6-months')
+  const [customStartDate, setCustomStartDate] = useState('')
+  const [customEndDate, setCustomEndDate] = useState('')
+  const [exportingPdf, setExportingPdf] = useState(false)
+  const [exportingExcel, setExportingExcel] = useState(false)
 
   // 1. Fetch Vendor Orders
   const fetchVendorOrders = useCallback(async () => {
@@ -148,35 +157,46 @@ export function VendorView() {
 
 
 
-  const handleExportReport = async () => {
-    setExportingReport(true)
+  const buildReportUrl = (type) => {
+    const q = new URLSearchParams({ type, range: reportRange })
+    if (reportRange === 'custom') {
+      if (customStartDate) q.set('start_date', customStartDate)
+      if (customEndDate) q.set('end_date', customEndDate)
+    }
+    return `/api/vendor/reports/export?${q.toString()}`
+  }
+
+  const handleExportReport = async (type = 'pdf') => {
+    const setExporting = type === 'pdf' ? setExportingPdf : setExportingExcel
+    setExporting(true)
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('/api/vendor/reports/export?range=6months', {
+      const res = await fetch(buildReportUrl(type), {
         headers: { Authorization: `Bearer ${token}` }
       })
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}))
         throw new Error(errorData.error || 'Failed to export report')
       }
-      
-      // Since backend returns PDF stream directly
+
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      const vendorNameClean = (user?.full_name || 'Zonal Admin').replace(/\s+/g, '_')
-      a.download = `Zonal_Admin_Report_Last_6_Months_${vendorNameClean}.pdf`
+      const vendorNameClean = (user?.full_name || 'Zonal_Admin').replace(/\s+/g, '_')
+      a.download = type === 'excel'
+        ? `Zonal_Admin_Report_${vendorNameClean}.xlsx`
+        : `Zonal_Admin_Report_${vendorNameClean}.pdf`
       document.body.appendChild(a)
       a.click()
       a.remove()
       window.URL.revokeObjectURL(url)
-      
-      toast.success('Report exported successfully.')
+
+      toast.success(`Report exported as ${type.toUpperCase()} successfully.`)
     } catch (err) {
       toast.error(err.message || 'Report export failed.')
     } finally {
-      setExportingReport(false)
+      setExporting(false)
     }
   }
 
@@ -228,7 +248,7 @@ export function VendorView() {
         body: JSON.stringify({ action: 'accept' })
       })
       if (res.ok) {
-        toast.success('Order Accepted! Added to Active Deliveries.')
+        toast.success('Order Accepted! Sent to Owner for final approval.')
         fetchVendorOrders()
       } else {
         toast.error('Failed to accept order')
@@ -326,7 +346,7 @@ export function VendorView() {
   if (selectedOrder) {
 
     // Derive active timeline step percentage (new flow)
-    const stepMap = { 'pending_vendor_acceptance': 15, 'confirmed': 40, 'packed': 60, 'shipped': 75, 'out_for_delivery': 85, 'delivered': 100 }
+    const stepMap = { 'pending_vendor_acceptance': 10, 'vendor_accepted_pending_admin_approval': 30, 'confirmed': 45, 'packed': 60, 'shipped': 75, 'out_for_delivery': 85, 'delivered': 100 }
     const activePercent = stepMap[selectedOrder.status] || 10
 
     return (
@@ -489,35 +509,24 @@ export function VendorView() {
                 </CardContent>
               </Card>
 
-              {/* Status Timeline checkpoints with animated progress bar */}
+              {/* Status Timeline checkpoints (vertical style matching owner/customer side) */}
               <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden">
-                <CardContent className="p-6 space-y-6">
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-display font-extrabold text-sm text-slate-800">Fulfillment Checklist Progress</h3>
-                    <span className="text-xs text-slate-400 font-bold">{activePercent}% Completed</span>
-                  </div>
-
-                  {/* Progress Line */}
-                  <div className="relative w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-4">
-                    <div className="absolute top-0 left-0 bg-[#F4B942] h-2 transition-all duration-500" style={{ width: `${activePercent}%` }} />
-                  </div>
-
-                  <div className="grid grid-cols-5 text-center text-[10px] font-bold text-slate-400 gap-1">
-                    <div className={selectedOrder.status_history?.some(h => h.status === 'confirmed') ? 'text-[#F4B942] font-black' : ''}>
-                      ✔ Confirmed
-                    </div>
-                    <div className={selectedOrder.status_history?.some(h => h.status === 'packed') ? 'text-[#F4B942] font-black' : ''}>
-                      📦 Packed
-                    </div>
-                    <div className={selectedOrder.status_history?.some(h => h.status === 'shipped') ? 'text-[#F4B942] font-black' : ''}>
-                      🚢 Shipped
-                    </div>
-                    <div className={selectedOrder.status_history?.some(h => h.status === 'out_for_delivery') ? 'text-[#F4B942] font-black' : ''}>
-                      🚚 Dispatch
-                    </div>
-                    <div className={selectedOrder.status === 'delivered' ? 'text-emerald-600 font-black' : ''}>
-                      🏠 Delivered
-                    </div>
+                <CardContent className="p-6">
+                  <h3 className="font-display font-bold text-sm text-slate-800 mb-6">Tracking Timeline</h3>
+                  <div className="relative pl-6 border-l-2 border-slate-200 space-y-5">
+                    {selectedOrder.status_history?.map((step, idx) => (
+                      <div key={idx} className="relative text-left">
+                        <div className="absolute -left-[31px] top-1 w-4 h-4 rounded-full bg-slate-950 border-4 border-white" />
+                        <div>
+                          <p className="text-xs font-bold text-slate-800 capitalize">{getStatusLabel(step.status)}</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">{step.note}</p>
+                          <span className="text-[9px] text-slate-400 block mt-1">{new Date(step.timestamp).toLocaleString('en-IN')}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {(!selectedOrder.status_history || selectedOrder.status_history.length === 0) && (
+                      <p className="text-xs text-slate-450 py-4 text-left">No status history available yet.</p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -557,7 +566,7 @@ export function VendorView() {
                   ) : (
                     <div className="space-y-2">
                       <Badge className={`capitalize font-bold text-[10px] rounded-full px-3 py-1 ${CHECKPOINT_COLORS[selectedOrder.status] || 'bg-slate-100 text-slate-600'}`}>
-                        {selectedOrder.status?.replace(/_/g, ' ')}
+                        {getStatusLabel(selectedOrder.status)}
                       </Badge>
                       <p className="text-[10px] text-slate-400 font-medium">
                         {selectedOrder.status === 'confirmed' && 'Order accepted — Owner will process fulfillment.'}
@@ -913,7 +922,7 @@ export function VendorView() {
                             <div className="flex items-center gap-2">
                               <span className="font-mono font-black text-sm text-slate-800">Order #{o.order_number}</span>
                               <Badge className={`capitalize font-bold text-[9px] rounded-full px-2.5 py-0.5 ${CHECKPOINT_COLORS[o.status] || 'bg-slate-100 text-slate-600'}`}>
-                                {o.status.replace(/_/g, ' ')}
+                                {getStatusLabel(o.status)}
                               </Badge>
                             </div>
                             <span className="text-[10px] text-slate-400 block font-medium">Placed on {new Date(o.placed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
@@ -978,6 +987,41 @@ export function VendorView() {
               <p className="text-[10px] text-slate-400 mt-0.5">Generate logistics summaries and download official fulfillment data sheets.</p>
             </div>
 
+            {/* Date Range Selector */}
+            <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs p-5">
+              <div className="flex flex-wrap items-end gap-4">
+                <div className="flex-1 min-w-[200px]">
+                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1.5 block">Date Range</label>
+                  <select
+                    value={reportRange}
+                    onChange={e => setReportRange(e.target.value)}
+                    className="w-full h-10 rounded-xl text-xs bg-slate-50 border border-slate-200 px-3 font-semibold text-slate-800 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition"
+                  >
+                    <option value="this-month">This Month</option>
+                    <option value="last-month">Last Month</option>
+                    <option value="last-3-months">Last 3 Months</option>
+                    <option value="last-6-months">Last 6 Months</option>
+                    <option value="last-12-months">Last 1 Year</option>
+                    <option value="all">All Time</option>
+                    <option value="custom">Custom Range</option>
+                  </select>
+                </div>
+                {reportRange === 'custom' && (
+                  <>
+                    <div>
+                      <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1.5 block">From</label>
+                      <input type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} className="h-10 rounded-xl text-xs bg-slate-50 border border-slate-200 px-3 font-semibold" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1.5 block">To</label>
+                      <input type="date" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} className="h-10 rounded-xl text-xs bg-slate-50 border border-slate-200 px-3 font-semibold" />
+                    </div>
+                  </>
+                )}
+              </div>
+            </Card>
+
+            {/* Export Buttons */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs p-6 space-y-4">
                 <div className="flex items-center gap-4">
@@ -985,29 +1029,46 @@ export function VendorView() {
                     <FileText className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-sm text-slate-800">Zonal Admin Summary Report</h3>
-                    <p className="text-[10.5px] text-slate-400 mt-0.5">Comprehensive review of your orders, revenue, stats, and deliveries for the last 6 months.</p>
+                    <h3 className="font-bold text-sm text-slate-800">Export as PDF</h3>
+                    <p className="text-[10.5px] text-slate-400 mt-0.5">Formatted summary report with KPIs and tables.</p>
                   </div>
                 </div>
-
-                <div className="border-t border-slate-100 pt-4 flex justify-between items-center">
-                  <div className="text-xs text-slate-500">
-                    <span className="font-bold text-slate-700 block">Period</span>
-                    Last 6 Months
-                  </div>
+                <div className="border-t border-slate-100 pt-4">
                   <Button
-                    onClick={handleExportReport}
-                    disabled={exportingReport}
-                    className="rounded-full text-xs font-bold px-5 bg-slate-950 text-white hover:bg-slate-800 h-10 shadow-xs flex items-center gap-1.5"
+                    onClick={() => handleExportReport('pdf')}
+                    disabled={exportingPdf}
+                    className="w-full rounded-full text-xs font-bold px-5 bg-slate-950 text-white hover:bg-slate-800 h-10 shadow-xs flex items-center justify-center gap-1.5"
                   >
-                    {exportingReport ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating PDF...
-                      </>
+                    {exportingPdf ? (
+                      <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</>
                     ) : (
-                      <>
-                        <FileText className="w-3.5 h-3.5" /> Export Last 6 Months Report
-                      </>
+                      <><FileText className="w-3.5 h-3.5" /> Download PDF</>
+                    )}
+                  </Button>
+                </div>
+              </Card>
+
+              <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs p-6 space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-800">Export as Excel</h3>
+                    <p className="text-[10.5px] text-slate-400 mt-0.5">Multi-sheet workbook with Summary + Detailed Orders.</p>
+                  </div>
+                </div>
+                <div className="border-t border-slate-100 pt-4">
+                  <Button
+                    onClick={() => handleExportReport('excel')}
+                    disabled={exportingExcel}
+                    variant="outline"
+                    className="w-full rounded-full text-xs font-bold px-5 h-10 shadow-xs flex items-center justify-center gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                  >
+                    {exportingExcel ? (
+                      <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</>
+                    ) : (
+                      <><FileText className="w-3.5 h-3.5" /> Download Excel</>
                     )}
                   </Button>
                 </div>

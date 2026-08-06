@@ -14,7 +14,7 @@ function useScrollReveal(deps = []) {
   }, deps)
 }
 
-export function AboutView({ settings = {} }) {
+export function AboutView({ settings = {}, siteContent = {} }) {
   const router = useRouter()
   useScrollReveal([])
   
@@ -33,29 +33,37 @@ export function AboutView({ settings = {} }) {
             <Award className="w-6 h-6 text-primary" />
           </div>
           <h3 className="font-display text-2xl font-extrabold mb-3">Our Mission</h3>
-          <p className="text-muted-foreground">To provide high-quality products and dependable services that help businesses maintain efficient, clean, and productive workplaces.</p>
+          {siteContent.mission?.value ? (
+            <div className="text-muted-foreground prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: siteContent.mission.value }} />
+          ) : (
+            <p className="text-muted-foreground">To provide high-quality products and dependable services that help businesses maintain efficient, clean, and productive workplaces.</p>
+          )}
         </div>
         <div className="p-8 radius-xl bg-card shadow-soft card-lift reveal" style={{ transitionDelay: '100ms' }}>
           <div className="w-14 h-14 gold-gradient rounded-2xl flex items-center justify-center mb-5 float" style={{ animationDelay: '0.5s' }}>
             <TrendingUp className="w-6 h-6 text-primary" />
           </div>
           <h3 className="font-display text-2xl font-extrabold mb-3">Our Vision</h3>
-          <p className="text-muted-foreground">To become one of India's most trusted suppliers of office essentials and facility support products.</p>
+          {siteContent.vision?.value ? (
+            <div className="text-muted-foreground prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: siteContent.vision.value }} />
+          ) : (
+            <p className="text-muted-foreground">To become one of India's most trusted suppliers of office essentials and facility support products.</p>
+          )}
         </div>
       </div>
       <div className="mesh-hero radius-2xl p-10 md:p-16 text-primary-foreground grain relative overflow-hidden reveal-scale">
-        <h3 className="font-display text-3xl font-extrabold mb-8 text-center">Company Info</h3>
+        <h3 className="font-display text-3xl font-extrabold mb-8 text-center">{siteContent.company_info_title?.value || 'Company Info'}</h3>
         <div className="grid md:grid-cols-3 gap-6 text-center">
           <div>
-            <p className="font-display text-6xl font-extrabold gold-shine">{settings.year_established || '2020'}</p>
+            <p className="font-display text-6xl font-extrabold gold-shine">{siteContent.established_year?.value || settings.year_established || '2020'}</p>
             <p className="text-primary-foreground/70 mt-2">Established</p>
           </div>
           <div>
-            <p className="font-display text-6xl font-extrabold gold-shine">7+</p>
+            <p className="font-display text-6xl font-extrabold gold-shine">{siteContent.team_members_count?.value || '7+'}</p>
             <p className="text-primary-foreground/70 mt-2">Team Members</p>
           </div>
           <div>
-            <p className="font-display text-6xl font-extrabold gold-shine">500+</p>
+            <p className="font-display text-6xl font-extrabold gold-shine">{siteContent.happy_clients_count?.value || '500+'}</p>
             <p className="text-primary-foreground/70 mt-2">Happy Clients</p>
           </div>
         </div>

@@ -2,7 +2,7 @@
 import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Truck, ShieldCheck, LogIn } from 'lucide-react'
+import { Truck, ShieldCheck, LogIn, User, Crown } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -112,6 +112,24 @@ export default function ZonalAdminLoginPage() {
 
           <div className="mt-6 pt-4 border-t text-center text-xs text-muted-foreground">
             Need credentials? Contact your AK Enterprises Account Owner.
+          </div>
+
+          <div className="mt-4 flex items-center justify-center gap-4 text-xs text-muted-foreground">
+            <button
+              type="button"
+              onClick={() => router.push('/login')}
+              className="flex items-center gap-1.5 text-accent hover:text-accent/80 font-medium hover:underline transition-colors"
+            >
+              <User className="w-3.5 h-3.5" /> Customer? Login here
+            </button>
+            <span className="text-border">|</span>
+            <button
+              type="button"
+              onClick={() => router.push('/login')}
+              className="flex items-center gap-1.5 text-accent hover:text-accent/80 font-medium hover:underline transition-colors"
+            >
+              <Crown className="w-3.5 h-3.5" /> Owner? Login here
+            </button>
           </div>
         </CardContent>
       </Card>

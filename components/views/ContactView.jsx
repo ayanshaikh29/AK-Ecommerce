@@ -21,7 +21,7 @@ function addRipple(e) {
   setTimeout(() => r.remove(), 600)
 }
 
-export function ContactView({ settings = {} }) {
+export function ContactView({ settings = {}, siteContent = {} }) {
   const [f, setF] = useState({ name: '', email: '', phone: '', message: '' })
   const [done, setDone] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -54,10 +54,10 @@ export function ContactView({ settings = {} }) {
       <div className="grid md:grid-cols-2 gap-8">
         <div className="space-y-4 slide-in-left">
           {[
-            [Phone, 'Mobile', settings.contact_phone || '+91 83088 60894', 'tel:' + (settings.contact_phone || '').replace(/\s/g, '')],
-            [Mail, 'Email', settings.contact_email || 'akenterprises1411@gmail.com', 'mailto:' + (settings.contact_email || '')],
-            [MapPin, 'Address', settings.contact_address || 'Pune, Maharashtra', null],
-            [User, 'Contact Person', settings.contact_person || 'Mr. Sagar Lahole', null]
+            [Phone, 'Mobile', siteContent.phone?.value || settings.contact_phone || '+91 83088 60894', 'tel:' + (siteContent.phone?.value || settings.contact_phone || '').replace(/\s/g, '')],
+            [Mail, 'Email', siteContent.email?.value || settings.contact_email || 'akenterprises1411@gmail.com', 'mailto:' + (siteContent.email?.value || settings.contact_email || '')],
+            [MapPin, 'Address', siteContent.address?.value || settings.contact_address || 'Pune, Maharashtra', null],
+            [User, 'Contact Person', siteContent.contact_person?.value || settings.contact_person || 'Mr. Sagar Lahole', null]
           ].map(([I, l, v, link], i) => (
             <div key={i} className="p-6 radius-lg bg-card shadow-soft card-lift flex gap-4">
               <div className="w-12 h-12 gold-gradient rounded-2xl flex items-center justify-center shrink-0">
