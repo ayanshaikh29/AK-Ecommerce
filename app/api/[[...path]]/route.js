@@ -4075,7 +4075,7 @@ Current Conversation History:\n` +
 
       let query = supabase
         .from('orders')
-        .select('id, order_number, status, total, placed_at, vendor_name, addresses(full_name), order_items(id, product_name_snapshot, quantity, price_snapshot)')
+        .select('id, order_number, status, total, placed_at, vendor_name, addresses(full_name, business_name), order_items(id, product_name_snapshot, quantity, price_snapshot)')
         .eq('assigned_vendor_id', vendor.id)
       if (start) query = query.gte('placed_at', start.toISOString())
       if (end) query = query.lte('placed_at', end.toISOString())
@@ -4112,7 +4112,7 @@ Current Conversation History:\n` +
 
       let query = supabase
         .from('orders')
-        .select('id, order_number, status, total, placed_at, vendor_name, addresses(full_name), order_items(id, product_name_snapshot, quantity, price_snapshot)')
+        .select('id, order_number, status, total, placed_at, vendor_name, addresses(full_name, business_name), order_items(id, product_name_snapshot, quantity, price_snapshot)')
         .eq('assigned_vendor_id', vendor.id)
       if (start) query = query.gte('placed_at', start.toISOString())
       if (end) query = query.lte('placed_at', end.toISOString())
@@ -4398,7 +4398,7 @@ Current Conversation History:\n` +
       const supabase = db()
       let query = supabase
         .from('orders')
-        .select('*, vendor_name, order_items(id, product_name_snapshot, quantity, price_snapshot, products(hsn_code))')
+        .select('*, addresses(full_name, business_name), order_items(id, product_name_snapshot, quantity, price_snapshot, products(hsn_code))')
       if (start) query = query.gte('placed_at', start.toISOString())
       if (end) query = query.lte('placed_at', end.toISOString())
       query = query.order('placed_at', { ascending: false })
