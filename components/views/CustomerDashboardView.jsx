@@ -122,15 +122,21 @@ export function CustomerDashboardView({ user }) {
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mesh-hero rounded-3xl p-8 md:p-10 text-primary-foreground relative overflow-hidden">
         <div className="relative z-10">
           <Badge className="mb-4 bg-accent/20 text-accent border-accent/40 px-3.5 py-1 text-xs font-bold uppercase tracking-widest">Customer Dashboard</Badge>
-          <h1 className="font-display text-3xl sm:text-4xl md:text-5xl font-extrabold mb-1">
-            Hello, <span className="gold-shine">{user.full_name || user.email}</span>
-          </h1>
-          {user.company_name && (
-            <p className="text-accent/90 text-sm font-bold uppercase tracking-widest mb-3 flex items-center gap-2">
-              <span className="inline-block w-4 h-px bg-accent/60" />
-              {user.company_name}
-              <span className="inline-block w-4 h-px bg-accent/60" />
-            </p>
+          {user.company_name ? (
+            <>
+              <h1 className="font-display text-3xl sm:text-4xl md:text-5xl font-extrabold mb-1">
+                Welcome, <span className="gold-shine">{user.company_name}</span>
+              </h1>
+              <p className="text-accent/90 text-sm font-bold uppercase tracking-widest mb-3 flex items-center gap-2">
+                <span className="inline-block w-4 h-px bg-accent/60" />
+                {user.full_name || user.email}
+                <span className="inline-block w-4 h-px bg-accent/60" />
+              </p>
+            </>
+          ) : (
+            <h1 className="font-display text-3xl sm:text-4xl md:text-5xl font-extrabold mb-3">
+              Welcome, <span className="gold-shine">{user.full_name || user.email}</span>
+            </h1>
           )}
           <p className="text-primary-foreground/80 text-base md:text-lg max-w-2xl">
             Welcome to your B2B procurement hub. Manage orders, track shipments, and reorder supplies.
