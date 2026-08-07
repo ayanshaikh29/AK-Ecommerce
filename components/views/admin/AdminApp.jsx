@@ -2097,7 +2097,37 @@ function AdminOrders({ refreshTrigger, router }) {
                     </td>
                     <td className="p-4 text-xs">
                       <Badge variant="outline" className="font-bold text-[9px] block w-fit mb-0.5">{o.payment_method || 'COD'}</Badge>
-                      <span className={`text-[10px] font-extrabold ${o.payment_status === 'Received' ? 'text-emerald-600' : 'text-amber-600'}`}>{o.payment_status || 'Pending'}</span>
+                      <span className={`text-[10px] font-extrabold ${o.payment_status === 'Received' || o.payment_status === 'Paid' || o.payment_status === 'paid' ? 'text-emerald-600' : 'text-amber-600'}`}>{o.payment_status || 'Pending'}</span>
+                      {o.status === 'delivered' && 
+                       (o.payment_method?.toLowerCase() === 'cod' || !o.payment_method) && 
+                       o.payment_status?.toLowerCase() !== 'paid' && 
+                       o.payment_status?.toLowerCase() !== 'received' && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const res = await fetch(`/api/orders/${o.id}`, {
+                                method: 'PUT',
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  Authorization: `Bearer ${localStorage.getItem('token')}`
+                                },
+                                body: JSON.stringify({ payment_status: 'Paid' })
+                              })
+                              if (res.ok) {
+                                toast.success('Payment marked as Paid')
+                                load()
+                              } else {
+                                toast.error('Failed to update payment status')
+                              }
+                            } catch (e) {
+                              toast.error(e.message)
+                            }
+                          }}
+                          className="mt-1 block text-[10px] text-emerald-600 hover:text-emerald-700 font-extrabold underline cursor-pointer"
+                        >
+                          Mark Paid
+                        </button>
+                      )}
                     </td>
                     <td className="p-4 text-right font-mono font-extrabold text-primary">
                       {formatINR(o.total)}
@@ -3363,6 +3393,28 @@ function AdminOrderDetail({ orderId }) {
     }
   }
 
+  const updatePaymentStatus = async (newPayStatus) => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ payment_status: newPayStatus })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        toast.success(`Payment status updated to ${newPayStatus.toUpperCase()}`)
+        load()
+      } else {
+        toast.error(data.error || 'Failed to update payment status')
+      }
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
   const handleDownloadInvoice = async () => {
     try {
       const res = await fetch(`/api/orders/${order.id}/invoice-pdf`, {
@@ -3737,8 +3789,20 @@ function AdminOrderDetail({ orderId }) {
               )}
 
               {order.status === 'delivered' && (
-                <div className="flex items-center gap-2 bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-extrabold p-3.5 rounded-xl">
-                  <CheckCircle2 className="w-4 h-4" /> Completed (Delivered)
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-extrabold p-3.5 rounded-xl">
+                    <CheckCircle2 className="w-4 h-4" /> Completed (Delivered)
+                  </div>
+                  {(order.payment_method?.toLowerCase() === 'cod' || !order.payment_method) && 
+                    order.payment_status?.toLowerCase() !== 'paid' && 
+                    order.payment_status?.toLowerCase() !== 'received' && (
+                      <Button
+                        onClick={() => updatePaymentStatus('Paid')}
+                        className="w-full rounded-xl h-10 font-extrabold text-xs bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1.5"
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Mark Payment as Paid (COD)
+                      </Button>
+                    )}
                 </div>
               )}
 
