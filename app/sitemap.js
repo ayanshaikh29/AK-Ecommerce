@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 export default async function sitemap() {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://akenterprises.in'
+  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://akcorporateworld.com'
 
   try {
     const supabase = createClient(

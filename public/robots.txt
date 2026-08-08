@@ -6,4 +6,4 @@ Disallow: /checkout
 Disallow: /orders
 Disallow: /account
 
-Sitemap: https://akenterprises.in/sitemap.xml
+Sitemap: https://akcorporateworld.com/sitemap.xml

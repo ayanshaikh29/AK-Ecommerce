@@ -17,8 +17,41 @@ const MobileBottomNav = dynamic(() => import('@/components/layout/MobileBottomNa
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
 
 export const metadata = {
-  title: 'AK Enterprises — Office Stationery, Housekeeping & UPS Solutions',
-  description: 'Your trusted B2B partner for office stationery, housekeeping materials and UPS supply. Pan India delivery. Established 2020, Pune.',
+  title: {
+    default: 'AK Enterprises | B2B Office Stationery, Housekeeping & UPS Solutions',
+    template: '%s | AK Enterprises'
+  },
+  description: 'Your trusted B2B partner for office stationery, housekeeping materials, pantry supplies, and UPS power solutions. Pan India delivery. Established 2020, Pune.',
+  keywords: ['AK Enterprises', 'AK Corporate World', 'Office Stationery Pune', 'B2B Stationery Supplier', 'Housekeeping materials Pune', 'UPS Solutions', 'Corporate Stationery supplier', 'Office supplies India'],
+  authors: [{ name: 'AK Enterprises' }],
+  metadataBase: new URL('https://akcorporateworld.com'),
+  alternates: {
+    canonical: '/',
+  },
+  openGraph: {
+    title: 'AK Enterprises | B2B Office Stationery, Housekeeping & UPS Solutions',
+    description: 'Your trusted B2B partner for office stationery, housekeeping materials, and corporate supplies. Pan India delivery.',
+    url: 'https://akcorporateworld.com',
+    siteName: 'AK Enterprises',
+    locale: 'en_IN',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'AK Enterprises | B2B Corporate Solutions',
+    description: 'Trusted B2B partner for office stationery, housekeeping, and UPS power solutions in India.',
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
   icons: {
     icon: [
       { url: '/favicon.ico', sizes: 'any' },
@@ -33,6 +66,45 @@ export const metadata = {
   manifest: '/site.webmanifest'
 }
 
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'LocalBusiness',
+  name: 'AK Enterprises',
+  image: 'https://akcorporateworld.com/logo.png',
+  '@id': 'https://akcorporateworld.com/#organization',
+  url: 'https://akcorporateworld.com',
+  telephone: '+918308860894',
+  address: {
+    '@type': 'PostalAddress',
+    streetAddress: 'Pune',
+    addressLocality: 'Pune',
+    addressRegion: 'Maharashtra',
+    postalCode: '411004',
+    addressCountry: 'IN'
+  },
+  geo: {
+    '@type': 'GeoCoordinates',
+    latitude: 18.5204,
+    longitude: 73.8567
+  },
+  openingHoursSpecification: {
+    '@type': 'OpeningHoursSpecification',
+    dayOfWeek: [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday'
+    ],
+    opens: '09:00',
+    closes: '18:00'
+  },
+  sameAs: [
+    'https://akcorporateworld.com'
+  ]
+}
+
 export default async function RootLayout({ children }) {
   const settings = await getSettings()
 
@@ -43,6 +115,10 @@ export default async function RootLayout({ children }) {
         <link rel="preload" as="style" href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&f[]=general-sans@600,500,400&display=swap" />
         <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&f[]=general-sans@600,500,400&display=swap" rel="stylesheet" media="print" onLoad="this.media='all'" />
         <noscript><link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&f[]=general-sans@600,500,400&display=swap" /></noscript>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
         {/* Google Analytics */}
         {process.env.NEXT_PUBLIC_GA_ID && (
           <>
