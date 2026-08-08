@@ -5,7 +5,7 @@ import crypto from 'crypto'
 import { generateInvoicePDF } from '@/lib/invoice-generator'
 import { generateChallanPDF } from '@/lib/challan-generator'
 import { validateInvoiceData } from '@/lib/invoice-validator'
-import { sendOrderConfirmedEmails } from '@/lib/email-notifications'
+import { sendOrderConfirmedEmails, sendOrderDeliveredEmails } from '@/lib/email-notifications'
 import { 
   getMinOrderQuantity, 
   setMinOrderQuantity, 
@@ -2163,6 +2163,16 @@ async function route(req, method) {
         })
       }
 
+      // Send Order Delivered Emails via Resend (Customer + Zonal Admin + Owner)
+      if (emailTargetStatus && emailTargetStatus.toLowerCase() === 'delivered') {
+        sendOrderDeliveredEmails(
+          { ...orderToUpdate, ...updatePayload, id: p[1] },
+          { supabaseClient: supabase }
+        ).catch(emailErr => {
+          console.error('[Resend Email Warning]: Order delivery emails failed:', emailErr?.message || emailErr)
+        })
+      }
+
 
 
       return json({ ok: true, status: updatePayload.status || orderToUpdate.status })
@@ -2882,6 +2892,30 @@ async function route(req, method) {
     return json(result.slice(0, 100))
   }
 
+  if (p[0] === 'admin' && p[1] === 'activity-logs' && method === 'PUT') {
+    if (!user || user.role !== 'admin') return err('Forbidden', 403)
+    const { action } = body || {}
+    if (action === 'mark_all_read') {
+      try {
+        await supabase.from('activity_logs').update({ is_read: true }).eq('is_read', false)
+      } catch (e) {}
+      try {
+        await supabase.from('settings').delete().eq('id', 'admin_activity_feed')
+      } catch (e) {}
+      return json({ ok: true })
+    }
+    if (action === 'clear_all') {
+      try {
+        await supabase.from('activity_logs').delete().neq('id', 'placeholder_only_does_not_exist')
+      } catch (e) {}
+      try {
+        await supabase.from('settings').delete().eq('id', 'admin_activity_feed')
+      } catch (e) {}
+      return json({ ok: true })
+    }
+    return err('Invalid action')
+  }
+
   if (p[0] === 'admin' && p[1] === 'activity-logs' && method === 'POST') {
     const { user_id, user_name, user_email, user_avatar, event_type, title, description, metadata } = body || {}
     const record = {
@@ -3131,6 +3165,42 @@ async function route(req, method) {
     const supabase = db()
     const user = await getUser(req)
     
+    // Fetch logged-in customer context for chatbot personalization
+    let customerContext = "User is a Guest (not logged in)."
+    if (user) {
+      try {
+        const { data: dbUser } = await supabase
+          .from('users')
+          .select('full_name, email, company_name, business_name, phone')
+          .eq('id', user.id)
+          .maybeSingle()
+          
+        const { data: recentOrders } = await supabase
+          .from('orders')
+          .select('order_number, total, status, placed_at')
+          .eq('user_id', user.id)
+          .order('placed_at', { ascending: false })
+          .limit(3)
+          
+        if (dbUser) {
+          customerContext = `Current User is Logged In:\n` +
+            `- Name: ${dbUser.full_name || 'N/A'}\n` +
+            `- Email: ${dbUser.email || 'N/A'}\n` +
+            `- Company: ${dbUser.company_name || dbUser.business_name || 'N/A'}\n` +
+            `- Phone: ${dbUser.phone || 'N/A'}\n`
+            
+          if (recentOrders && recentOrders.length > 0) {
+            customerContext += `Recent Orders:\n` +
+              recentOrders.map(o => `  * Order #${o.order_number} | Total: ₹${o.total.toLocaleString('en-IN')} | Status: ${o.status.toUpperCase()} | Placed: ${new Date(o.placed_at).toLocaleDateString('en-IN')}`).join('\n')
+          } else {
+            customerContext += `Recent Orders: None`
+          }
+        }
+      } catch (e) {
+        console.warn('Could not load user details for chatbot context:', e.message)
+      }
+    }
+    
     // Helper to log conversation in Supabase chat_logs
     const logChat = async (finalResponseText) => {
       try {
@@ -3329,6 +3399,9 @@ Brand details:
 - Payment: COD (Cash on Delivery) is standard. Net banking/Invoice credit available for registered bulk clients.
 - Custom Quote: Custom bulk quotes generated in 2 hours.
 
+CUSTOMER PROFILE & HISTORY (Personalize answers if they ask about their profile, orders, or name):
+${customerContext}
+
 Tone & Formatting: Professional, friendly, helpful, concise, corporate. Speak in clear English (or Hinglish if the user asks in Hindi).
 Always prefer concise, mobile-friendly markdown formatting (e.g. bold **text** for emphasis). Use short bullet points or numbered lists instead of wide markdown tables where possible, as tables are hard to read on narrow phone screens. Keep responses brief.
 
@@ -3336,7 +3409,7 @@ Current Conversation History:\n` +
           (history || []).map(h => `${h.sender === 'user' ? 'User' : 'Assistant'}: ${h.text}`).join('\n')
           
           const payload = {
-            model: "openrouter/free",
+            model: "google/gemini-2.5-flash",
             messages: [
               { role: "system", content: systemPrompt },
               { role: "user", content: message }
