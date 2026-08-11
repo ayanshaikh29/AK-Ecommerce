@@ -238,15 +238,15 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
       <section className="px-4 md:px-6 pb-24">
         <div className="max-w-7xl mx-auto mesh-hero radius-2xl p-10 md:p-16 relative overflow-hidden grain reveal-scale">
           <div className="max-w-2xl relative z-10">
-            <Badge className="mb-4 bg-accent/20 text-accent border-accent/40 backdrop-blur">Limited Time</Badge>
+            <Badge className="mb-4 bg-accent/20 text-accent border-accent/40 backdrop-blur">{siteContent.featured_banner_badge?.value || 'Limited Time'}</Badge>
             <h3 className="font-display text-4xl md:text-6xl font-extrabold text-primary-foreground mb-4 text-balance">{siteContent.featured_banner_title?.value || 'Bulk orders? Custom quotes in 2 hours.'}</h3>
             <p className="text-primary-foreground/80 text-lg mb-8">{siteContent.featured_banner_text?.value || 'Corporate purchase for 100+ units? WhatsApp us or use our contact form.'}</p>
             <div className="flex flex-wrap gap-3">
               <Link href="/contact">
-                <Button size="lg" className="rounded-full px-8 h-12 bg-accent text-accent-foreground hover:bg-accent/90 btn-shine ripple font-semibold shadow-glow">Request Bulk Quote <ArrowRight className="ml-2 w-4 h-4" /></Button>
+                <Button size="lg" className="rounded-full px-8 h-12 bg-accent text-accent-foreground hover:bg-accent/90 btn-shine ripple font-semibold shadow-glow">{siteContent.featured_banner_btn1?.value || 'Request Bulk Quote'} <ArrowRight className="ml-2 w-4 h-4" /></Button>
               </Link>
               <Link href="/products">
-                <Button size="lg" variant="outline" className="rounded-full px-8 h-12 border-white/30 text-white bg-transparent hover:bg-white/10 hover:text-white">View Catalog</Button>
+                <Button size="lg" variant="outline" className="rounded-full px-8 h-12 border-white/30 text-white bg-transparent hover:bg-white/10 hover:text-white">{siteContent.featured_banner_btn2?.value || 'View Catalog'}</Button>
               </Link>
             </div>
           </div>
@@ -606,6 +606,16 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
   const heroSubtitle = siteContent.hero_subtitle?.value || 'Office Stationery · Housekeeping · UPS Solutions'
   const heroImage = siteContent.hero_image?.value || '/category-stationery.jpg'
 
+  const DEFAULT_CLIENTS = [{name:'ICICI Lombard'},{name:'Equitas'},{name:'InCred'},{name:'JM Finance'},{name:'Axis Bank'},{name:'HDFC'},{name:'Bajaj Finserv'},{name:'Tata Capital'},{name:'Aditya Birla'}]
+  let clientsBase = DEFAULT_CLIENTS
+  if (siteContent.clients_list?.value) {
+    try { const parsed = JSON.parse(siteContent.clients_list.value); if (parsed.length) clientsBase = parsed } catch {}
+  }
+  if (clientsBase === DEFAULT_CLIENTS && initialClients && initialClients.length > 0) {
+    clientsBase = initialClients
+  }
+  const marqueeClients = [...clientsBase, ...clientsBase, ...clientsBase]
+
   return (
     <div>
       {/* ───── 1. HERO SECTION ───── */}
@@ -687,18 +697,18 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
       {/* ───── 3. CATEGORIES SECTION ───── */}
       <section className="max-w-7xl mx-auto px-4 md:px-6 py-24">
         <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="max-w-2xl mb-14">
-          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-4">— Our Categories</p>
+          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-4">— {siteContent.cat_eyebrow?.value || 'Our Categories'}</p>
           <h2 className="font-display text-4xl md:text-6xl font-extrabold text-foreground mb-4 text-balance">
-            Everything your <span className="gold-shine">business</span> needs
+            {siteContent.cat_heading?.value || 'Everything your'} <span className="gold-shine">{siteContent.cat_heading_accent?.value || 'business'}</span> needs
           </h2>
-          <p className="text-muted-foreground text-lg">Complete B2B supply solutions across three core verticals. One trusted partner.</p>
+          <p className="text-muted-foreground text-lg">{siteContent.cat_subtitle?.value || 'Complete B2B supply solutions across three core verticals. One trusted partner.'}</p>
         </motion.div>
 
         <div className="grid md:grid-cols-3 gap-6">
           {[
-            { name: 'Office Stationery', slug: 'office-stationery', img: '/category-stationery.jpg', desc: 'Pens, files, notebooks, printing supplies & desk accessories for corporates.' },
-            { name: 'Housekeeping', slug: 'housekeeping', img: '/category-housekeeping.jpg', desc: 'Cleaning chemicals, garbage bags, tissue rolls & janitorial essentials.' },
-            { name: 'UPS Solutions', slug: 'ups-solutions', img: '/category-ups.jpg', desc: 'Industrial UPS, backup batteries, surge protectors & power infrastructure.' }
+            { name: siteContent.cat_1_name?.value || 'Office Stationery', slug: siteContent.cat_1_slug?.value || 'office-stationery', img: siteContent.cat_1_image?.value || '/category-stationery.jpg', desc: siteContent.cat_1_desc?.value || 'Pens, files, notebooks, printing supplies & desk accessories for corporates.' },
+            { name: siteContent.cat_2_name?.value || 'Housekeeping', slug: siteContent.cat_2_slug?.value || 'housekeeping', img: siteContent.cat_2_image?.value || '/category-housekeeping.jpg', desc: siteContent.cat_2_desc?.value || 'Cleaning chemicals, garbage bags, tissue rolls & janitorial essentials.' },
+            { name: siteContent.cat_3_name?.value || 'UPS Solutions', slug: siteContent.cat_3_slug?.value || 'ups-solutions', img: siteContent.cat_3_image?.value || '/category-ups.jpg', desc: siteContent.cat_3_desc?.value || 'Industrial UPS, backup batteries, surge protectors & power infrastructure.' }
           ].map((cat, i) => (
             <motion.div key={i} initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.15, duration: 0.6 }}>
               <Link href={'/products?category=' + cat.slug} className="group relative block aspect-[4/5] radius-xl overflow-hidden shadow-soft hover:shadow-elevated transition-all duration-500">
@@ -709,11 +719,11 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
                   <h3 className="font-display text-3xl font-extrabold text-white mb-3">{cat.name}</h3>
                   <p className="text-sm text-white/70 mb-5">{cat.desc}</p>
                   <span className="inline-flex items-center gap-2 text-accent font-bold text-sm group-hover:gap-3 transition-all">
-                    Explore Collection <ArrowUpRight className="w-4 h-4 group-hover:rotate-45 transition-transform" />
+                    {siteContent.cat_card_link_text?.value || 'Explore Collection'} <ArrowUpRight className="w-4 h-4 group-hover:rotate-45 transition-transform" />
                   </span>
                 </div>
                 <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur border border-white/20 text-[10px] font-bold text-white uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                  View Products →
+                  {siteContent.cat_card_hover_label?.value || 'View Products →'}
                 </div>
               </Link>
             </motion.div>
@@ -725,14 +735,14 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
       <section className="py-24 mesh-dark text-white relative overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 md:px-6">
           <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-center mb-14">
-            <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-4">— Trusted Since 2020</p>
-            <h2 className="font-display text-4xl md:text-6xl font-extrabold">Our <span className="gold-shine">Valued</span> Clients</h2>
-            <p className="text-white/60 text-lg mt-4 max-w-xl mx-auto">Serving leading enterprises across finance, insurance & corporate sectors.</p>
+            <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-4">— {siteContent.clients_eyebrow?.value || 'Trusted Since 2020'}</p>
+            <h2 className="font-display text-4xl md:text-6xl font-extrabold" dangerouslySetInnerHTML={{ __html: siteContent.clients_heading?.value || 'Our <span class="gold-shine">Valued</span> Clients' }} />
+            <p className="text-white/60 text-lg mt-4 max-w-xl mx-auto">{siteContent.clients_subtitle?.value || 'Serving leading enterprises across finance, insurance & corporate sectors.'}</p>
           </motion.div>
 
           <div className="marquee-wrap overflow-hidden">
             <div className="flex whitespace-nowrap marquee">
-              {(initialClients && initialClients.length > 0 ? initialClients : ['ICICI Lombard', 'Equitas', 'InCred', 'JM Finance', 'Axis Bank', 'HDFC', 'Bajaj Finserv', 'Tata Capital', 'Aditya Birla']).flatMap(c => [c, c, c]).map((c, i) => (
+              {marqueeClients.map((c, i) => (
                 <div key={i} className="mx-4 inline-flex items-center gap-4 glass-dark radius-lg px-8 py-5 group hover:border-accent/30 transition-all duration-300">
                   <div className="w-11 h-11 gold-gradient rounded-xl flex items-center justify-center shrink-0 group-hover:rotate-6 group-hover:scale-110 transition-all duration-300">
                     <Building2 className="w-5 h-5 text-primary" />
@@ -748,9 +758,11 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
       {/* ───── 5. WHY CHOOSE US ───── */}
       <section className="max-w-7xl mx-auto px-4 md:px-6 py-24">
         <motion.div initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="max-w-2xl mb-14">
-          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-4">— Why AK Enterprises</p>
+          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-4">— {siteContent.why_eyebrow?.value || 'Why AK Enterprises'}</p>
           <h2 className="font-display text-4xl md:text-6xl font-extrabold text-foreground text-balance">
-            Built for <span className="gold-shine">Bulk Buyers</span>.<br />Trusted by Leaders.
+            {(siteContent.why_heading?.value || 'Built for Bulk Buyers. Trusted by Leaders.').split('\n').map((line, i, arr) => (
+              <React.Fragment key={i}>{line}{i < arr.length - 1 && <br />}</React.Fragment>
+            ))}
           </h2>
         </motion.div>
 
@@ -783,7 +795,7 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
           <div className="absolute -left-20 -top-20 w-60 h-60 rounded-full bg-white/[0.04] blur-3xl" />
 
           <div className="relative z-10 text-center max-w-2xl mx-auto">
-            <Badge className="mb-5 bg-accent/20 text-accent border-accent/40 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">Bulk Ordering</Badge>
+            <Badge className="mb-5 bg-accent/20 text-accent border-accent/40 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">{siteContent.featured_banner_badge?.value || 'Bulk Ordering'}</Badge>
             <h2 className="font-display text-4xl md:text-6xl font-extrabold text-primary-foreground mb-4 text-balance">
               {siteContent.featured_banner_title?.value || 'Bulk orders? Custom quotes in 2 hours.'}
             </h2>
@@ -793,12 +805,12 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
             <div className="flex flex-wrap justify-center gap-4">
               <Link href="/contact">
                 <Button size="lg" className="rounded-full px-10 h-14 bg-accent text-accent-foreground hover:bg-accent/90 btn-shine ripple font-bold text-base shadow-glow">
-                  Request Bulk Quote <ArrowRight className="ml-2 w-4 h-4" />
+                  {siteContent.featured_banner_btn1?.value || 'Request Bulk Quote'} <ArrowRight className="ml-2 w-4 h-4" />
                 </Button>
               </Link>
               <Link href="/products">
                 <Button size="lg" variant="outline" className="rounded-full px-10 h-14 border-white/30 text-white bg-transparent hover:bg-white/10 hover:text-white font-bold text-base">
-                  View Catalog
+                  {siteContent.featured_banner_btn2?.value || 'View Catalog'}
                 </Button>
               </Link>
             </div>

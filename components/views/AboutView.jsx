@@ -21,7 +21,7 @@ export function AboutView({ settings = {}, siteContent = {} }) {
   return (
     <div className="max-w-6xl mx-auto px-4 md:px-6 py-16">
       <div className="text-center mb-16 slide-up">
-        <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-3">— About Us</p>
+        <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-3">{siteContent.heading?.value || '— About Us'}</p>
         <h1 className="font-display text-5xl md:text-7xl font-extrabold mb-4 text-balance">{settings.brand_name || 'AK Enterprises'}</h1>
         {siteContent.about_body?.value ? (
           <div className="text-muted-foreground max-w-3xl mx-auto text-base leading-relaxed prose prose-sm dark:prose-invert mt-6 text-center" dangerouslySetInnerHTML={{ __html: siteContent.about_body.value }} />
@@ -36,7 +36,7 @@ export function AboutView({ settings = {}, siteContent = {} }) {
           <div className="w-14 h-14 gold-gradient rounded-2xl flex items-center justify-center mb-5 float">
             <Award className="w-6 h-6 text-primary" />
           </div>
-          <h3 className="font-display text-2xl font-extrabold mb-3">Our Mission</h3>
+          <h3 className="font-display text-2xl font-extrabold mb-3">{siteContent.mission_title?.value || 'Our Mission'}</h3>
           {siteContent.mission?.value ? (
             <div className="text-muted-foreground prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: siteContent.mission.value }} />
           ) : (
@@ -47,7 +47,7 @@ export function AboutView({ settings = {}, siteContent = {} }) {
           <div className="w-14 h-14 gold-gradient rounded-2xl flex items-center justify-center mb-5 float" style={{ animationDelay: '0.5s' }}>
             <TrendingUp className="w-6 h-6 text-primary" />
           </div>
-          <h3 className="font-display text-2xl font-extrabold mb-3">Our Vision</h3>
+          <h3 className="font-display text-2xl font-extrabold mb-3">{siteContent.vision_title?.value || 'Our Vision'}</h3>
           {siteContent.vision?.value ? (
             <div className="text-muted-foreground prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: siteContent.vision.value }} />
           ) : (
@@ -60,21 +60,21 @@ export function AboutView({ settings = {}, siteContent = {} }) {
         <div className="grid md:grid-cols-3 gap-6 text-center">
           <div>
             <p className="font-display text-6xl font-extrabold gold-shine">{siteContent.established_year?.value || settings.year_established || '2020'}</p>
-            <p className="text-primary-foreground/70 mt-2">Established</p>
+            <p className="text-primary-foreground/70 mt-2">{siteContent.established_label?.value || 'Established'}</p>
           </div>
           <div>
             <p className="font-display text-6xl font-extrabold gold-shine">{siteContent.team_members_count?.value || '7+'}</p>
-            <p className="text-primary-foreground/70 mt-2">Team Members</p>
+            <p className="text-primary-foreground/70 mt-2">{siteContent.team_label?.value || 'Team Members'}</p>
           </div>
           <div>
             <p className="font-display text-6xl font-extrabold gold-shine">{siteContent.happy_clients_count?.value || '500+'}</p>
-            <p className="text-primary-foreground/70 mt-2">Happy Clients</p>
+            <p className="text-primary-foreground/70 mt-2">{siteContent.clients_label?.value || 'Happy Clients'}</p>
           </div>
         </div>
       </div>
       <div className="text-center mt-12">
         <Button onClick={() => router.push('/contact')} size="lg" className="rounded-full btn-shine px-8">
-          Get in Touch <ArrowRight className="ml-1 w-4 h-4" />
+          {siteContent.cta_btn?.value || 'Get in Touch'} <ArrowRight className="ml-1 w-4 h-4" />
         </Button>
       </div>
     </div>

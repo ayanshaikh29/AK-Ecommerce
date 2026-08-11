@@ -28,6 +28,13 @@ export default async function HomePage() {
     images: p.product_images?.map(img => img.image_url) || []
   }))
 
+  // Debug: log CMS keys to verify data flow
+  const cmsKeys = Object.keys(siteContent || {})
+  console.log(`[HomePage] siteContent keys (${cmsKeys.length}):`, cmsKeys.slice(0, 10).join(', '), cmsKeys.length > 10 ? '...' : '')
+  if (siteContent?.hero_title) console.log('[HomePage] hero_title:', siteContent.hero_title.value)
+  if (siteContent?.cat_1_name) console.log('[HomePage] cat_1_name:', siteContent.cat_1_name.value)
+  if (siteContent?.clients_list) console.log('[HomePage] clients_list present:', !!siteContent.clients_list.value)
+
   return (
     <HomeView
       initialFeatured={mapProducts(featured)}

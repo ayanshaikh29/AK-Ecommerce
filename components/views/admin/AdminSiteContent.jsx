@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
 import { toast } from 'sonner'
-import { Save, Eye, Loader2, Globe, FileText, Phone, LayoutTemplate, Upload, Plus, Trash2, Building2 } from 'lucide-react'
+import { Save, Eye, Loader2, Globe, FileText, Phone, LayoutTemplate, Upload, Plus, Trash2, Building2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -135,6 +135,76 @@ function RichTextEditor({ value, onChange, placeholder }) {
   )
 }
 
+// ─── Clients List Editor (repeatable add/remove) ────────────────────────────
+function ClientsListEditor({ value, onChange }) {
+  let clients = []
+  try {
+    clients = value ? JSON.parse(value) : []
+  } catch { clients = [] }
+
+  const DEFAULT_CLIENTS = [
+    { name: 'ICICI Lombard', logo_url: '' },
+    { name: 'Equitas', logo_url: '' },
+    { name: 'InCred', logo_url: '' },
+    { name: 'JM Finance', logo_url: '' },
+    { name: 'Axis Bank', logo_url: '' },
+    { name: 'HDFC', logo_url: '' },
+    { name: 'Bajaj Finserv', logo_url: '' },
+    { name: 'Tata Capital', logo_url: '' },
+    { name: 'Aditya Birla', logo_url: '' }
+  ]
+
+  const list = clients.length > 0 ? clients : DEFAULT_CLIENTS
+
+  const update = (idx, field, val) => {
+    const next = [...list]
+    next[idx] = { ...next[idx], [field]: val }
+    onChange(JSON.stringify(next))
+  }
+  const remove = idx => {
+    const next = list.filter((_, i) => i !== idx)
+    onChange(JSON.stringify(next))
+  }
+  const add = () => {
+    onChange(JSON.stringify([...list, { name: '', logo_url: '' }]))
+  }
+  const move = (idx, dir) => {
+    const next = [...list]
+    const swap = idx + dir
+    if (swap < 0 || swap >= next.length) return
+    ;[next[idx], next[swap]] = [next[swap], next[idx]]
+    onChange(JSON.stringify(next))
+  }
+
+  return (
+    <div className="space-y-3">
+      {list.map((c, i) => (
+        <div key={i} className="flex items-center gap-3 p-3 bg-secondary/20 rounded-xl border">
+          <div className="flex flex-col gap-1">
+            <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="text-muted-foreground hover:text-foreground disabled:opacity-30 text-xs">▲</button>
+            <button type="button" onClick={() => move(i, 1)} disabled={i === list.length - 1} className="text-muted-foreground hover:text-foreground disabled:opacity-30 text-xs">▼</button>
+          </div>
+          <Input value={c.name} onChange={e => update(i, 'name', e.target.value)} placeholder="Client name" className="h-9 text-xs rounded-xl flex-1" />
+          <div className="w-20">
+            {c.logo_url ? (
+              <div className="relative w-full h-9 border rounded-lg overflow-hidden bg-secondary flex items-center justify-center p-1">
+                <img src={c.logo_url} alt={c.name} className="max-w-full max-h-full object-contain rounded" />
+                <button type="button" onClick={() => update(i, 'logo_url', '')} className="absolute -top-1 -right-1 bg-destructive/90 text-white rounded-full p-0.5 hover:bg-destructive transition cursor-pointer"><Plus className="w-2.5 h-2.5 rotate-45" /></button>
+              </div>
+            ) : (
+              <FileUploader accept="image/*" label="Logo" onUploaded={urls => update(i, 'logo_url', urls[0])} />
+            )}
+          </div>
+          <button type="button" onClick={() => remove(i)} className="text-destructive hover:text-destructive/80 p-1.5 rounded-lg hover:bg-destructive/10 transition cursor-pointer"><Trash2 className="w-4 h-4" /></button>
+        </div>
+      ))}
+      <button type="button" onClick={add} className="w-full border-2 border-dashed border-border rounded-xl p-3 hover:border-accent hover:bg-accent/5 transition text-xs font-bold text-muted-foreground hover:text-accent flex items-center justify-center gap-2 cursor-pointer">
+        <Plus className="w-4 h-4" /> Add Client
+      </button>
+    </div>
+  )
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 export function AdminSiteContent() {
   const [activePage, setActivePage] = useState('homepage')
@@ -142,6 +212,14 @@ export function AdminSiteContent() {
   const [saving, setSaving] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [content, setContent] = useState({})
+  const [isDirty, setIsDirty] = useState(false)
+
+  // ─── Unsaved changes warning ────────────────────────────────────────────
+  useEffect(() => {
+    const handler = e => { if (isDirty) { e.preventDefault(); e.returnValue = '' } }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
 
   // Fetch all site content
   useEffect(() => {
@@ -177,6 +255,7 @@ export function AdminSiteContent() {
         [section]: { value, type: contentType }
       }
     }))
+    setIsDirty(true)
   }, [])
 
   const getVal = (page, section, fallback = '') => content[page]?.[section]?.value || fallback
@@ -196,7 +275,26 @@ export function AdminSiteContent() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ rows })
       })
-      if (!res.ok) throw new Error('Failed to save')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || `Save failed (${res.status})`)
+      }
+
+      // Post-save verification: fetch back from server to confirm persistence
+      const verifyRes = await fetch('/api/admin/site-content', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (verifyRes.ok) {
+        const rows = await verifyRes.json()
+        const map = {}
+        for (const row of rows) {
+          if (!map[row.page]) map[row.page] = {}
+          map[row.page][row.section] = { value: row.content_value, type: row.content_type }
+        }
+        setContent(map)
+      }
+
+      setIsDirty(false)
       toast.success('Site content saved — changes are live!')
     } catch (e) {
       toast.error(e.message || 'Save failed')
@@ -209,6 +307,12 @@ export function AdminSiteContent() {
 
   return (
     <div className="max-w-4xl slide-up space-y-6 text-left">
+      {isDirty && (
+        <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 text-sm">
+          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+          <p className="text-amber-700 font-medium">You have unsaved changes. Click <strong>Save All</strong> to persist them.</p>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-3xl font-extrabold">Website Content</h1>
@@ -274,6 +378,11 @@ export function AdminSiteContent() {
           <h3 className="font-display font-extrabold text-lg pt-4 border-t">Featured CTA Banner</h3>
           <div><Label>Banner Title</Label><Input value={getVal('homepage', 'featured_banner_title', 'Bulk orders? Custom quotes in 2 hours.')} onChange={e => updateField('homepage', 'featured_banner_title', e.target.value)} className="h-10 rounded-xl" /></div>
           <div><Label>Banner Text</Label><Textarea value={getVal('homepage', 'featured_banner_text', 'Corporate purchase for 100+ units? WhatsApp us or use our contact form.')} onChange={e => updateField('homepage', 'featured_banner_text', e.target.value)} rows={2} className="rounded-xl" /></div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div><Label>Badge Text</Label><Input value={getVal('homepage', 'featured_banner_badge', 'BULK ORDERING')} onChange={e => updateField('homepage', 'featured_banner_badge', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Primary Button Label</Label><Input value={getVal('homepage', 'featured_banner_btn1', 'Request Bulk Quote')} onChange={e => updateField('homepage', 'featured_banner_btn1', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Secondary Button Label</Label><Input value={getVal('homepage', 'featured_banner_btn2', 'View Catalog')} onChange={e => updateField('homepage', 'featured_banner_btn2', e.target.value)} className="h-10 rounded-xl" /></div>
+          </div>
 
           <h3 className="font-display font-extrabold text-lg pt-4 border-t">Promotional Marquee Strip</h3>
           <div><Label>Marquee Text</Label><Input value={getVal('homepage', 'promo_strip', 'Free Pan-India Delivery on Bulk Orders')} onChange={e => updateField('homepage', 'promo_strip', e.target.value)} className="h-10 rounded-xl" /></div>
@@ -300,6 +409,56 @@ export function AdminSiteContent() {
               <div><Label>Title</Label><Input value={getVal('homepage', 'highlight_4_title', '2 Hour Quotes')} onChange={e => updateField('homepage', 'highlight_4_title', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
               <div><Label>Subtitle</Label><Input value={getVal('homepage', 'highlight_4_desc', 'Rapid response for bulk & corporate orders')} onChange={e => updateField('homepage', 'highlight_4_desc', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
             </div>
+          </div>
+
+          <h3 className="font-display font-extrabold text-lg pt-4 border-t">Categories Section</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><Label>Section Eyebrow</Label><Input value={getVal('homepage', 'cat_eyebrow', 'OUR CATEGORIES')} onChange={e => updateField('homepage', 'cat_eyebrow', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Section Heading (Line 1)</Label><Input value={getVal('homepage', 'cat_heading', 'Everything your')} onChange={e => updateField('homepage', 'cat_heading', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Section Heading (Line 2 — Accent)</Label><Input value={getVal('homepage', 'cat_heading_accent', 'business')} onChange={e => updateField('homepage', 'cat_heading_accent', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Section Subtitle</Label><Textarea value={getVal('homepage', 'cat_subtitle', 'Complete B2B supply solutions across three core verticals. One trusted partner.')} onChange={e => updateField('homepage', 'cat_subtitle', e.target.value)} rows={2} className="rounded-xl" /></div>
+          </div>
+          {[1, 2, 3].map(i => (
+            <div key={i} className="p-4 bg-secondary/20 rounded-xl border space-y-3">
+              <span className="text-[10px] font-extrabold uppercase text-muted-foreground font-mono">Category Card {i}</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Image</Label>
+                  {getVal('homepage', `cat_${i}_image`) ? (
+                    <div className="mt-2 relative w-full h-24 border rounded-xl overflow-hidden bg-secondary flex items-center justify-center p-2">
+                      <img src={getVal('homepage', `cat_${i}_image`)} alt={`Category ${i}`} className="max-w-full max-h-full object-cover rounded-lg" />
+                      <button type="button" onClick={() => updateField('homepage', `cat_${i}_image`, '', 'image')} className="absolute top-1.5 right-1.5 bg-destructive/90 text-white rounded-full p-1.5 hover:bg-destructive transition shadow-sm cursor-pointer"><Plus className="w-3.5 h-3.5 rotate-45" /></button>
+                    </div>
+                  ) : (
+                    <div className="mt-2"><FileUploader accept="image/*" label={`Upload Category ${i} Image`} onUploaded={urls => updateField('homepage', `cat_${i}_image`, urls[0], 'image')} /></div>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  <div><Label>Category Name</Label><Input value={getVal('homepage', `cat_${i}_name`, ['Office Stationery', 'Housekeeping', 'UPS Solutions'][i-1])} onChange={e => updateField('homepage', `cat_${i}_name`, e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+                  <div><Label>Description</Label><Textarea value={getVal('homepage', `cat_${i}_desc`, ['Pens, files, notebooks, printing supplies & desk accessories for corporates.', 'Cleaning chemicals, garbage bags, tissue rolls & janitorial essentials.', 'Industrial UPS, backup batteries, surge protectors & power infrastructure.'][i-1])} onChange={e => updateField('homepage', `cat_${i}_desc`, e.target.value)} rows={2} className="text-xs rounded-xl" /></div>
+                  <div><Label>Category Slug</Label><Input value={getVal('homepage', `cat_${i}_slug`, ['office-stationery', 'housekeeping', 'ups-solutions'][i-1])} onChange={e => updateField('homepage', `cat_${i}_slug`, e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><Label>Card Link Text (on hover)</Label><Input value={getVal('homepage', 'cat_card_link_text', 'Explore Collection')} onChange={e => updateField('homepage', 'cat_card_link_text', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+            <div><Label>Card Hover Label (top-right)</Label><Input value={getVal('homepage', 'cat_card_hover_label', 'View Products →')} onChange={e => updateField('homepage', 'cat_card_hover_label', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+          </div>
+
+          <h3 className="font-display font-extrabold text-lg pt-4 border-t">Our Clients Section</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><Label>Section Eyebrow</Label><Input value={getVal('homepage', 'clients_eyebrow', 'TRUSTED SINCE 2020')} onChange={e => updateField('homepage', 'clients_eyebrow', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Section Heading</Label><Input value={getVal('homepage', 'clients_heading', 'Our Valued Clients')} onChange={e => updateField('homepage', 'clients_heading', e.target.value)} className="h-10 rounded-xl" /></div>
+          </div>
+          <div><Label>Section Subtitle</Label><Textarea value={getVal('homepage', 'clients_subtitle', 'Serving leading enterprises across finance, insurance & corporate sectors.')} onChange={e => updateField('homepage', 'clients_subtitle', e.target.value)} rows={2} className="rounded-xl" /></div>
+          <ClientsListEditor value={getVal('homepage', 'clients_list')} onChange={v => updateField('homepage', 'clients_list', v, 'json')} />
+
+          <h3 className="font-display font-extrabold text-lg pt-4 border-t">Why Choose Us Section Heading</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><Label>Section Eyebrow</Label><Input value={getVal('homepage', 'why_eyebrow', 'WHY AK ENTERPRISES')} onChange={e => updateField('homepage', 'why_eyebrow', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Section Heading</Label><Input value={getVal('homepage', 'why_heading', 'Built for Bulk Buyers. Trusted by Leaders.')} onChange={e => updateField('homepage', 'why_heading', e.target.value)} className="h-10 rounded-xl" /></div>
           </div>
 
           <h3 className="font-display font-extrabold text-lg pt-4 border-t">Why Choose Us (6 value cards)</h3>
@@ -341,21 +500,34 @@ export function AdminSiteContent() {
       {/* About Tab */}
       {activePage === 'about' && (
         <Card className="radius-lg shadow-soft"><CardContent className="pt-6 space-y-5">
-          <h3 className="font-display font-extrabold text-lg">About Story</h3>
+          <h3 className="font-display font-extrabold text-lg">Page Heading</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><Label>Section Eyebrow</Label><Input value={getVal('about', 'heading', '— About Us')} onChange={e => updateField('about', 'heading', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>CTA Button Text</Label><Input value={getVal('about', 'cta_btn', 'Get in Touch')} onChange={e => updateField('about', 'cta_btn', e.target.value)} className="h-10 rounded-xl" /></div>
+          </div>
+
+          <h3 className="font-display font-extrabold text-lg pt-4 border-t">About Story</h3>
           <RichTextEditor value={getVal('about', 'about_body', '<p>Your trusted partner for office stationery, housekeeping solutions & UPS supply. Established in 2020, serving businesses pan-India from Pune.</p>')} onChange={v => updateField('about', 'about_body', v, 'richtext')} placeholder="Write about your company..." />
           
           <h3 className="font-display font-extrabold text-lg pt-4 border-t">Our Mission & Vision</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div><Label>Mission</Label><RichTextEditor value={getVal('about', 'mission', '<p>To provide high-quality products and dependable services that help businesses maintain efficient, clean, and productive workplaces.</p>')} onChange={v => updateField('about', 'mission', v, 'richtext')} placeholder="Describe your mission..." /></div>
-            <div><Label>Vision</Label><RichTextEditor value={getVal('about', 'vision', "<p>To become one of India's most trusted suppliers of office essentials and facility support products.</p>")} onChange={v => updateField('about', 'vision', v, 'richtext')} placeholder="Describe your vision..." /></div>
+            <div><Label>Mission Title</Label><Input value={getVal('about', 'mission_title', 'Our Mission')} onChange={e => updateField('about', 'mission_title', e.target.value)} className="h-9 text-xs rounded-xl mb-2" /><Label>Mission Content</Label><RichTextEditor value={getVal('about', 'mission', '<p>To provide high-quality products and dependable services that help businesses maintain efficient, clean, and productive workplaces.</p>')} onChange={v => updateField('about', 'mission', v, 'richtext')} placeholder="Describe your mission..." /></div>
+            <div><Label>Vision Title</Label><Input value={getVal('about', 'vision_title', 'Our Vision')} onChange={e => updateField('about', 'vision_title', e.target.value)} className="h-9 text-xs rounded-xl mb-2" /><Label>Vision Content</Label><RichTextEditor value={getVal('about', 'vision', "<p>To become one of India's most trusted suppliers of office essentials and facility support products.</p>")} onChange={v => updateField('about', 'vision', v, 'richtext')} placeholder="Describe your vision..." /></div>
           </div>
           
           <h3 className="font-display font-extrabold text-lg pt-4 border-t">Company Stats (KPI Cards)</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div><Label>Company Info Section Title</Label><Input value={getVal('about', 'company_info_title', 'Company Info')} onChange={e => updateField('about', 'company_info_title', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Section Title</Label><Input value={getVal('about', 'company_info_title', 'Company Info')} onChange={e => updateField('about', 'company_info_title', e.target.value)} className="h-10 rounded-xl" /></div>
             <div><Label>Established Year</Label><Input value={getVal('about', 'established_year', '2020')} onChange={e => updateField('about', 'established_year', e.target.value)} className="h-10 rounded-xl" /></div>
-            <div><Label>Team Members count</Label><Input value={getVal('about', 'team_members_count', '7+')} onChange={e => updateField('about', 'team_members_count', e.target.value)} className="h-10 rounded-xl" /></div>
-            <div><Label>Happy Clients count</Label><Input value={getVal('about', 'happy_clients_count', '500+')} onChange={e => updateField('about', 'happy_clients_count', e.target.value)} className="h-10 rounded-xl" /></div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div><Label>Established Label</Label><Input value={getVal('about', 'established_label', 'Established')} onChange={e => updateField('about', 'established_label', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+            <div><Label>Team Members Count</Label><Input value={getVal('about', 'team_members_count', '7+')} onChange={e => updateField('about', 'team_members_count', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+            <div><Label>Team Members Label</Label><Input value={getVal('about', 'team_label', 'Team Members')} onChange={e => updateField('about', 'team_label', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div><Label>Happy Clients Count</Label><Input value={getVal('about', 'happy_clients_count', '500+')} onChange={e => updateField('about', 'happy_clients_count', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+            <div><Label>Happy Clients Label</Label><Input value={getVal('about', 'clients_label', 'Happy Clients')} onChange={e => updateField('about', 'clients_label', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
           </div>
         </CardContent></Card>
       )}
@@ -427,6 +599,13 @@ export function AdminSiteContent() {
             </div>
           </div>
 
+          <h3 className="font-display font-extrabold text-lg pt-4 border-t">Product Showcase Section Labels</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div><Label>Showcase Badge Text</Label><Input value={getVal('store', 'showcase_badge', 'Product Showcase')} onChange={e => updateField('store', 'showcase_badge', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Featured Products Title</Label><Input value={getVal('store', 'featured_title', 'Featured Products')} onChange={e => updateField('store', 'featured_title', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Categories Section Title</Label><Input value={getVal('store', 'categories_title', 'Our Product Categories')} onChange={e => updateField('store', 'categories_title', e.target.value)} className="h-10 rounded-xl" /></div>
+          </div>
+
           <h3 className="font-display font-extrabold text-lg pt-4 border-t">View Complete B2B Catalog CTA</h3>
           <div className="space-y-4">
             <div>
@@ -446,6 +625,10 @@ export function AdminSiteContent() {
                 className="rounded-xl"
               />
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div><Label>Login Button Text</Label><Input value={getVal('store', 'login_btn', 'Login to B2B Portal')} onChange={e => updateField('store', 'login_btn', e.target.value)} className="h-10 rounded-xl" /></div>
+              <div><Label>WhatsApp Button Text</Label><Input value={getVal('store', 'whatsapp_btn', 'WhatsApp Procurement Desk')} onChange={e => updateField('store', 'whatsapp_btn', e.target.value)} className="h-10 rounded-xl" /></div>
+            </div>
           </div>
         </CardContent></Card>
       )}
@@ -462,6 +645,30 @@ export function AdminSiteContent() {
           </div>
           <div><Label>Address</Label><Textarea value={getVal('contact', 'address', 'Pune, Maharashtra')} onChange={e => updateField('contact', 'address', e.target.value)} rows={2} className="rounded-xl" /></div>
           <div><Label>Custom Text (shown below contact cards)</Label><Textarea value={getVal('contact', 'custom_text')} onChange={e => updateField('contact', 'custom_text', e.target.value)} rows={2} className="rounded-xl" placeholder="Any additional information for visitors..." /></div>
+
+          <h3 className="font-display font-extrabold text-lg pt-4 border-t">Page Heading & Form</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><Label>Section Eyebrow</Label><Input value={getVal('contact', 'heading', '— Get in Touch')} onChange={e => updateField('contact', 'heading', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Page Title</Label><Input value={getVal('contact', 'title', "Let's talk business")} onChange={e => updateField('contact', 'title', e.target.value)} className="h-10 rounded-xl" /></div>
+          </div>
+          <div><Label>Subtitle</Label><Input value={getVal('contact', 'subtitle', "Bulk orders, corporate quotes, product inquiries — we're here to help.")} onChange={e => updateField('contact', 'subtitle', e.target.value)} className="h-10 rounded-xl" /></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><Label>Form Title</Label><Input value={getVal('contact', 'form_title', 'Send a message')} onChange={e => updateField('contact', 'form_title', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Submit Button Text</Label><Input value={getVal('contact', 'submit_btn', 'Send Message')} onChange={e => updateField('contact', 'submit_btn', e.target.value)} className="h-10 rounded-xl" /></div>
+          </div>
+          <h3 className="font-display font-extrabold text-sm pt-3 border-t text-muted-foreground">Success Message</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><Label>Success Title</Label><Input value={getVal('contact', 'success_title', 'Thank you!')} onChange={e => updateField('contact', 'success_title', e.target.value)} className="h-10 rounded-xl" /></div>
+            <div><Label>Success Subtitle</Label><Input value={getVal('contact', 'success_subtitle', "We'll respond within 2 hours.")} onChange={e => updateField('contact', 'success_subtitle', e.target.value)} className="h-10 rounded-xl" /></div>
+          </div>
+          <h3 className="font-display font-extrabold text-sm pt-3 border-t text-muted-foreground">Form Field Labels</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div><Label>Name Label</Label><Input value={getVal('contact', 'label_name', 'Your Name')} onChange={e => updateField('contact', 'label_name', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+            <div><Label>Email Label</Label><Input value={getVal('contact', 'label_email', 'Email')} onChange={e => updateField('contact', 'label_email', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+            <div><Label>Phone Label</Label><Input value={getVal('contact', 'label_phone', 'Phone')} onChange={e => updateField('contact', 'label_phone', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+            <div><Label>Message Label</Label><Input value={getVal('contact', 'label_message', 'Message')} onChange={e => updateField('contact', 'label_message', e.target.value)} className="h-9 text-xs rounded-xl" /></div>
+          </div>
+          <div><Label>Message Placeholder</Label><Input value={getVal('contact', 'message_placeholder', 'Tell us about your requirement...')} onChange={e => updateField('contact', 'message_placeholder', e.target.value)} className="h-10 rounded-xl" /></div>
         </CardContent></Card>
       )}
 
@@ -505,13 +712,52 @@ export function AdminSiteContent() {
                     <div className="p-2 border rounded bg-white"><strong>{getVal('homepage', 'why_2_title', 'Wholesale Pricing')}</strong>: {getVal('homepage', 'why_2_desc')}</div>
                   </div>
                 </div>
+
+                <div className="pt-4 border-t">
+                  <h4 className="font-extrabold text-xs text-slate-400 uppercase mb-2">Categories</h4>
+                  <p className="text-xs mb-1"><strong>Eyebrow:</strong> {getVal('homepage', 'cat_eyebrow', 'OUR CATEGORIES')}</p>
+                  <p className="text-xs mb-1"><strong>Heading:</strong> {getVal('homepage', 'cat_heading', 'Everything your')} <span className="text-amber-600">{getVal('homepage', 'cat_heading_accent', 'business')}</span> needs</p>
+                  <p className="text-xs mb-1"><strong>Card Link Text:</strong> {getVal('homepage', 'cat_card_link_text', 'Explore Collection')}</p>
+                  <p className="text-xs mb-1"><strong>Card Hover Label:</strong> {getVal('homepage', 'cat_card_hover_label', 'View Products →')}</p>
+                  <div className="grid grid-cols-3 gap-2 text-xs mt-2">
+                    {[1,2,3].map(i => (
+                      <div key={i} className="p-2 border rounded bg-white">
+                        <strong>{getVal('homepage', `cat_${i}_name`, ['Office Stationery','Housekeeping','UPS Solutions'][i-1])}</strong>
+                        {getVal('homepage', `cat_${i}_image`) && <img src={getVal('homepage', `cat_${i}_image`)} alt="" className="w-full h-16 object-cover rounded mt-1" />}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t">
+                  <h4 className="font-extrabold text-xs text-slate-400 uppercase mb-2">Our Clients</h4>
+                  <p className="text-xs mb-1"><strong>Eyebrow:</strong> {getVal('homepage', 'clients_eyebrow', 'TRUSTED SINCE 2020')}</p>
+                  <p className="text-xs mb-1"><strong>Heading:</strong> {getVal('homepage', 'clients_heading', 'Our Valued Clients')}</p>
+                </div>
+
+                <div className="pt-4 border-t">
+                  <h4 className="font-extrabold text-xs text-slate-400 uppercase mb-2">CTA Banner</h4>
+                  <p className="text-xs"><strong>Badge:</strong> {getVal('homepage', 'featured_banner_badge', 'BULK ORDERING')}</p>
+                  <p className="text-xs"><strong>Btn1:</strong> {getVal('homepage', 'featured_banner_btn1', 'Request Bulk Quote')}</p>
+                  <p className="text-xs"><strong>Btn2:</strong> {getVal('homepage', 'featured_banner_btn2', 'View Catalog')}</p>
+                </div>
               </div>
             )}
             {activePage === 'about' && (
               <div className="space-y-6">
-                <div><h3 className="font-bold text-lg mb-2 text-slate-800">Mission</h3><div className="prose text-xs" dangerouslySetInnerHTML={{ __html: getVal('about', 'mission', '<p>Mission content...</p>') }} /></div>
-                <div><h3 className="font-bold text-lg mb-2 text-slate-800">Vision</h3><div className="prose text-xs" dangerouslySetInnerHTML={{ __html: getVal('about', 'vision', '<p>Vision content...</p>') }} /></div>
+                <p className="text-xs text-amber-600 font-bold">{getVal('about', 'heading', '— About Us')}</p>
+                <div><h3 className="font-bold text-lg mb-2 text-slate-800">{getVal('about', 'mission_title', 'Our Mission')}</h3><div className="prose text-xs" dangerouslySetInnerHTML={{ __html: getVal('about', 'mission', '<p>Mission content...</p>') }} /></div>
+                <div><h3 className="font-bold text-lg mb-2 text-slate-800">{getVal('about', 'vision_title', 'Our Vision')}</h3><div className="prose text-xs" dangerouslySetInnerHTML={{ __html: getVal('about', 'vision', '<p>Vision content...</p>') }} /></div>
                 <div><h3 className="font-bold text-lg mb-2 text-slate-800">About Story</h3><div className="prose text-xs" dangerouslySetInnerHTML={{ __html: getVal('about', 'about_body', '<p>About story...</p>') }} /></div>
+                <div className="pt-3 border-t">
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-2">Stats</p>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="p-2 border rounded bg-white text-center"><strong>{getVal('about', 'established_year', '2020')}</strong><br />{getVal('about', 'established_label', 'Established')}</div>
+                    <div className="p-2 border rounded bg-white text-center"><strong>{getVal('about', 'team_members_count', '7+')}</strong><br />{getVal('about', 'team_label', 'Team Members')}</div>
+                    <div className="p-2 border rounded bg-white text-center"><strong>{getVal('about', 'happy_clients_count', '500+')}</strong><br />{getVal('about', 'clients_label', 'Happy Clients')}</div>
+                  </div>
+                </div>
+                <Button className="rounded-full text-xs">{getVal('about', 'cta_btn', 'Get in Touch')}</Button>
               </div>
             )}
             {activePage === 'store' && (
@@ -520,15 +766,47 @@ export function AdminSiteContent() {
                   {getVal('store', 'title', 'Premium Corporate Supplies at Wholesale Prices')}
                 </h2>
                 <p className="text-slate-600">{getVal('store', 'subtitle', 'Browse our extensive catalog of quality office products.')}</p>
+                <div className="pt-3 border-t">
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-2">Public Store (Logged-Out)</p>
+                  <p className="text-xs"><strong>Title:</strong> {getVal('store', 'logged_out_title', 'AK Enterprises Product Portfolio')}</p>
+                  <p className="text-xs"><strong>Badge:</strong> {getVal('store', 'showcase_badge', 'Product Showcase')}</p>
+                  <p className="text-xs"><strong>Featured:</strong> {getVal('store', 'featured_title', 'Featured Products')}</p>
+                  <p className="text-xs"><strong>Categories:</strong> {getVal('store', 'categories_title', 'Our Product Categories')}</p>
+                </div>
+                <div className="pt-3 border-t">
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-2">CTA Buttons</p>
+                  <div className="flex gap-2">
+                    <Button className="rounded-full text-xs">{getVal('store', 'login_btn', 'Login to B2B Portal')}</Button>
+                    <Button variant="outline" className="rounded-full text-xs">{getVal('store', 'whatsapp_btn', 'WhatsApp Procurement Desk')}</Button>
+                  </div>
+                </div>
               </div>
             )}
             {activePage === 'contact' && (
               <div className="space-y-3">
-                <p><strong>Phone:</strong> {getVal('contact', 'phone')}</p>
-                <p><strong>Email:</strong> {getVal('contact', 'email')}</p>
-                <p><strong>Contact Person:</strong> {getVal('contact', 'contact_person')}</p>
-                <p><strong>Business Hours:</strong> {getVal('contact', 'business_hours')}</p>
-                <p><strong>Address:</strong> {getVal('contact', 'address')}</p>
+                <p className="text-xs text-amber-600 font-bold">{getVal('contact', 'heading', '— Get in Touch')}</p>
+                <h2 className="text-2xl font-extrabold text-slate-900">{getVal('contact', 'title', "Let's talk business")}</h2>
+                <p className="text-slate-600">{getVal('contact', 'subtitle', "Bulk orders, corporate quotes...")}</p>
+                <div className="pt-3 border-t space-y-1">
+                  <p><strong>Phone:</strong> {getVal('contact', 'phone')}</p>
+                  <p><strong>Email:</strong> {getVal('contact', 'email')}</p>
+                  <p><strong>Contact Person:</strong> {getVal('contact', 'contact_person')}</p>
+                  <p><strong>Business Hours:</strong> {getVal('contact', 'business_hours')}</p>
+                  <p><strong>Address:</strong> {getVal('contact', 'address')}</p>
+                </div>
+                <div className="pt-3 border-t">
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-2">Form Preview</p>
+                  <div className="p-3 border rounded bg-white space-y-2">
+                    <p className="text-sm font-bold">{getVal('contact', 'form_title', 'Send a message')}</p>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
+                      <div className="p-1.5 border rounded bg-slate-50">{getVal('contact', 'label_name', 'Your Name')}</div>
+                      <div className="p-1.5 border rounded bg-slate-50">{getVal('contact', 'label_email', 'Email')}</div>
+                      <div className="p-1.5 border rounded bg-slate-50">{getVal('contact', 'label_phone', 'Phone')}</div>
+                      <div className="p-1.5 border rounded bg-slate-50">{getVal('contact', 'label_message', 'Message')}</div>
+                    </div>
+                    <Button className="rounded-full text-xs w-full">{getVal('contact', 'submit_btn', 'Send Message')}</Button>
+                  </div>
+                </div>
                 {getVal('contact', 'custom_text') && <p className="mt-4 text-slate-500 italic">{getVal('contact', 'custom_text')}</p>}
               </div>
             )}

@@ -47,9 +47,9 @@ export function ContactView({ settings = {}, siteContent = {} }) {
   return (
     <div className="max-w-5xl mx-auto px-4 md:px-6 py-16">
       <div className="text-center mb-12 slide-up">
-        <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-3">— Get in Touch</p>
-        <h1 className="font-display text-5xl md:text-6xl font-extrabold mb-3 text-balance">Let's <span className="gold-shine">talk</span> business</h1>
-        <p className="text-muted-foreground text-lg">Bulk orders, corporate quotes, product inquiries — we're here to help.</p>
+        <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-3">{siteContent.heading?.value || '— Get in Touch'}</p>
+        <h1 className="font-display text-5xl md:text-6xl font-extrabold mb-3 text-balance">{siteContent.title?.value || "Let's talk business"}</h1>
+        <p className="text-muted-foreground text-lg">{siteContent.subtitle?.value || "Bulk orders, corporate quotes, product inquiries — we're here to help."}</p>
       </div>
       <div className="grid md:grid-cols-2 gap-8">
         <div className="space-y-4 slide-in-left">
@@ -72,35 +72,35 @@ export function ContactView({ settings = {}, siteContent = {} }) {
         </div>
         <Card className="radius-lg shadow-soft slide-in-right">
           <CardContent className="pt-6">
-            <h3 className="font-display font-extrabold text-2xl mb-5">Send a message</h3>
+            <h3 className="font-display font-extrabold text-2xl mb-5">{siteContent.form_title?.value || 'Send a message'}</h3>
             {done ? (
               <div className="text-center py-8 bounce-in">
                 <div className="w-16 h-16 gold-gradient rounded-full flex items-center justify-center mx-auto mb-3">
                   <CheckCircle2 className="w-8 h-8 text-primary" />
                 </div>
-                <p className="font-bold">Thank you!</p>
-                <p className="text-muted-foreground text-sm">We'll respond within 2 hours.</p>
+                <p className="font-bold">{siteContent.success_title?.value || 'Thank you!'}</p>
+                <p className="text-muted-foreground text-sm">{siteContent.success_subtitle?.value || "We'll respond within 2 hours."}</p>
               </div>
             ) : (
               <form onSubmit={submit} className="space-y-4">
                 <div>
-                  <Label>Your Name</Label>
+                  <Label>{siteContent.label_name?.value || 'Your Name'}</Label>
                   <Input required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} className="h-11 rounded-xl" />
                 </div>
                 <div>
-                  <Label>Email</Label>
+                  <Label>{siteContent.label_email?.value || 'Email'}</Label>
                   <Input required type="email" value={f.email} onChange={e => setF({ ...f, email: e.target.value })} className="h-11 rounded-xl" />
                 </div>
                 <div>
-                  <Label>Phone</Label>
+                  <Label>{siteContent.label_phone?.value || 'Phone'}</Label>
                   <Input value={f.phone} onChange={e => setF({ ...f, phone: e.target.value })} className="h-11 rounded-xl" />
                 </div>
                 <div>
-                  <Label>Message</Label>
-                  <Textarea rows={4} required value={f.message} onChange={e => setF({ ...f, message: e.target.value })} placeholder="Tell us about your requirement..." className="rounded-xl" />
+                  <Label>{siteContent.label_message?.value || 'Message'}</Label>
+                  <Textarea rows={4} required value={f.message} onChange={e => setF({ ...f, message: e.target.value })} placeholder={siteContent.message_placeholder?.value || "Tell us about your requirement..."} className="rounded-xl" />
                 </div>
                 <Button type="submit" disabled={loading} onClick={addRipple} className="w-full h-12 rounded-full btn-shine ripple font-semibold" size="lg">
-                  {loading ? <span className="btn-spinner mr-2"/> : 'Send Message'} {!loading && <ArrowRight className="ml-1 w-4 h-4" />}
+                  {loading ? <span className="btn-spinner mr-2"/> : (siteContent.submit_btn?.value || 'Send Message')} {!loading && <ArrowRight className="ml-1 w-4 h-4" />}
                 </Button>
               </form>
             )}

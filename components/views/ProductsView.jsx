@@ -543,7 +543,7 @@ function LoggedOutProductsInfoView({ cats, showcaseProducts = [], siteContent = 
       ) : (
         <div className="text-center max-w-3xl mx-auto mb-10 pt-4 slide-up">
           <Badge className="mb-4 bg-accent/20 text-accent border-accent/40 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">
-            Product Showcase
+            {siteContent.showcase_badge?.value || 'Product Showcase'}
           </Badge>
           <h1 className="font-display text-4xl md:text-6xl font-extrabold text-foreground mb-4">
             {loggedOutTitle}
@@ -557,7 +557,7 @@ function LoggedOutProductsInfoView({ cats, showcaseProducts = [], siteContent = 
       {/* Product Showcase Grid */}
       {showcaseProducts.length > 0 && (
         <div className="mb-14">
-          <h2 className="font-display text-2xl font-extrabold text-foreground mb-6">Featured Products</h2>
+          <h2 className="font-display text-2xl font-extrabold text-foreground mb-6">{siteContent.featured_title?.value || 'Featured Products'}</h2>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {showcaseProducts.map(p => (
               <div key={p.id} className="bg-card border border-border/60 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
@@ -579,7 +579,7 @@ function LoggedOutProductsInfoView({ cats, showcaseProducts = [], siteContent = 
 
       {/* Category Overview */}
       <div className="space-y-8 mb-14">
-        <h2 className="font-display text-2xl font-extrabold text-foreground">Our Product Categories</h2>
+        <h2 className="font-display text-2xl font-extrabold text-foreground">{siteContent.categories_title?.value || 'Our Product Categories'}</h2>
         <div className="grid md:grid-cols-3 gap-4">
           {[
             {
@@ -623,12 +623,12 @@ function LoggedOutProductsInfoView({ cats, showcaseProducts = [], siteContent = 
         <div className="flex flex-wrap justify-center gap-4">
           <Link href="/login">
             <Button size="lg" className="rounded-full px-8 bg-accent text-accent-foreground font-bold hover:bg-accent/90 text-sm">
-              Login to B2B Portal
+              {siteContent.login_btn?.value || 'Login to B2B Portal'}
             </Button>
           </Link>
           <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
             <Button size="lg" className="rounded-full px-8 border border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white font-bold transition-all shadow-soft backdrop-blur-xs text-sm">
-              <MessageCircle className="w-4 h-4 mr-2" /> WhatsApp Procurement Desk
+              <MessageCircle className="w-4 h-4 mr-2" /> {siteContent.whatsapp_btn?.value || 'WhatsApp Procurement Desk'}
             </Button>
           </a>
         </div>
