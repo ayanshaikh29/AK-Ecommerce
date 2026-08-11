@@ -5,7 +5,7 @@ const nextConfig = {
       { protocol: 'https', hostname: '**' },
     ],
   },
-  serverExternalPackages: ['xlsx'],
+  serverExternalPackages: ['xlsx', 'exceljs'],
   webpack(config, { dev }) {
     if (dev) {
       // Reduce CPU/memory from file watching
@@ -31,6 +31,7 @@ const nextConfig = {
           { key: "Access-Control-Allow-Origin", value: process.env.CORS_ORIGINS || "*" },
           { key: "Access-Control-Allow-Methods", value: "GET, POST, PUT, DELETE, OPTIONS" },
           { key: "Access-Control-Allow-Headers", value: "*" },
+          { key: "Access-Control-Expose-Headers", value: "Content-Disposition, Content-Length, Content-Type" },
         ],
       },
     ];

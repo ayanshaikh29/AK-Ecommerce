@@ -23,9 +23,13 @@ export function AboutView({ settings = {}, siteContent = {} }) {
       <div className="text-center mb-16 slide-up">
         <p className="text-xs font-semibold tracking-[0.2em] uppercase text-accent mb-3">— About Us</p>
         <h1 className="font-display text-5xl md:text-7xl font-extrabold mb-4 text-balance">{settings.brand_name || 'AK Enterprises'}</h1>
-        <p className="text-muted-foreground max-w-2xl mx-auto text-lg">
-          Your trusted partner for office stationery, housekeeping solutions & UPS supply. Established in {settings.year_established || '2020'}, serving businesses pan-India from Pune.
-        </p>
+        {siteContent.about_body?.value ? (
+          <div className="text-muted-foreground max-w-3xl mx-auto text-base leading-relaxed prose prose-sm dark:prose-invert mt-6 text-center" dangerouslySetInnerHTML={{ __html: siteContent.about_body.value }} />
+        ) : (
+          <p className="text-muted-foreground max-w-2xl mx-auto text-lg">
+            Your trusted partner for office stationery, housekeeping solutions & UPS supply. Established in {settings.year_established || '2020'}, serving businesses pan-India from Pune.
+          </p>
+        )}
       </div>
       <div className="grid md:grid-cols-2 gap-6 mb-16">
         <div className="p-8 radius-xl bg-card shadow-soft card-lift reveal">

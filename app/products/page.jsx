@@ -1,8 +1,9 @@
-import { getSupabase } from '@/lib/supabase'
+import { getSupabase, getSiteContent } from '@/lib/supabase'
 import { ProductsView } from '@/components/views/ProductsView'
 
 export default async function ProductsPage({ searchParams }) {
   const supabase = getSupabase()
+  const siteContent = await getSiteContent('store')
   
   // Await searchParams in Next.js 15
   const sp = (await searchParams) || {}
@@ -71,6 +72,7 @@ export default async function ProductsPage({ searchParams }) {
       initialMaxPrice={maxPrice}
       initialBrand={brand}
       initialRating={rating}
+      siteContent={siteContent}
     />
   )
 }

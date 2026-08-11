@@ -38,7 +38,7 @@ export function getCustomerGreetingName(user) {
   return ''
 }
 
-function ProductsWelcomeHeader({ user }) {
+function ProductsWelcomeHeader({ user, siteContent = {} }) {
   const [profileName, setProfileName] = useState(() => getCustomerGreetingName(user))
 
   useEffect(() => {
@@ -51,26 +51,16 @@ function ProductsWelcomeHeader({ user }) {
     }
   })
 
-  if (!user) {
-    return (
-      <div className="mb-8 pb-4 border-b border-border/40 slide-up">
-        <h1 className="font-display text-3xl md:text-5xl font-extrabold tracking-tight text-foreground flex items-center gap-2.5">
-          👋 Welcome
-        </h1>
-        <p className="text-sm md:text-base text-muted-foreground mt-2 font-medium">
-          Sign in to access your personalized catalog and pricing.
-        </p>
-      </div>
-    )
-  }
+  const welcomeTitle = siteContent.title?.value || (user ? `👋 Hello${profileName ? `, ${profileName}` : ''}` : '👋 Welcome')
+  const welcomeSubtitle = siteContent.subtitle?.value || (user ? 'Welcome back! Browse our latest products and exclusive wholesale offers.' : 'Sign in to access your personalized catalog and pricing.')
 
   return (
     <div className="mb-8 pb-4 border-b border-border/40 slide-up">
       <h1 className="font-display text-3xl md:text-5xl font-extrabold tracking-tight text-foreground flex items-center gap-2.5">
-        👋 Hello{profileName ? `, ${profileName}` : ''}
+        {welcomeTitle}
       </h1>
       <p className="text-sm md:text-base text-muted-foreground mt-2 font-medium">
-        Welcome back! Browse our latest products and exclusive wholesale offers.
+        {welcomeSubtitle}
       </p>
     </div>
   )
@@ -138,7 +128,7 @@ export function ProductsView(props) {
   )
 }
 
-function ProductsViewContent({ initialProducts = [], cats = [], initialCategory = '', initialSearch = '', initialSort = 'newest', initialMinPrice = 0, initialMaxPrice = 15000, initialBrand = '', initialRating = 0 }) {
+function ProductsViewContent({ initialProducts = [], cats = [], initialCategory = '', initialSearch = '', initialSort = 'newest', initialMinPrice = 0, initialMaxPrice = 15000, initialBrand = '', initialRating = 0, siteContent = {} }) {
   const { user } = useAppContext()
   const router = useRouter()
   const [sort, setSort] = useState(initialSort)
@@ -308,7 +298,7 @@ function ProductsViewContent({ initialProducts = [], cats = [], initialCategory 
 
   // 1. If Logged Out: Render Marketing Showcase with first 10 products
   if (!user) {
-    return <LoggedOutProductsInfoView cats={Array.isArray(cats) ? cats : []} showcaseProducts={Array.isArray(initialProducts) ? initialProducts.slice(0, 10) : []} />
+    return <LoggedOutProductsInfoView cats={Array.isArray(cats) ? cats : []} showcaseProducts={Array.isArray(initialProducts) ? initialProducts.slice(0, 10) : []} siteContent={siteContent} />
   }
 
   // 2. If Logged in Customer with No Catalog Access granted yet: Render WhatsApp CTA Screen
@@ -451,7 +441,7 @@ function ProductsViewContent({ initialProducts = [], cats = [], initialCategory 
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-6 py-8">
       {/* Personalized Welcome Header */}
-      <ProductsWelcomeHeader user={user} />
+      <ProductsWelcomeHeader user={user} siteContent={siteContent} />
 
       <div className="flex flex-wrap items-center justify-between gap-4 mb-8 slide-up">
         <div>
@@ -524,27 +514,45 @@ function ProductsViewContent({ initialProducts = [], cats = [], initialCategory 
   )
 }
 
-function LoggedOutProductsInfoView({ cats, showcaseProducts = [] }) {
+function LoggedOutProductsInfoView({ cats, showcaseProducts = [], siteContent = {} }) {
   const whatsappUrl = `https://wa.me/918308860894?text=${encodeURIComponent('Hello AK Enterprises, I am visiting your site and would like to request catalog access & wholesale pricing.')}`
+
+  const loggedOutTitle = siteContent.logged_out_title?.value || 'AK Enterprises Product Portfolio'
+  const loggedOutSubtitle = siteContent.logged_out_subtitle?.value || 'AK Enterprises is a private B2B supplier. Browse a selection of our products below. To view full catalog with SKUs, inventory, and customer-specific wholesale pricing, please log into your corporate portal.'
+  const showcaseBanner = siteContent.showcase_banner?.value
+  const ctaTitle = siteContent.cta_title?.value || 'View Complete B2B Catalog'
+  const ctaSubtitle = siteContent.cta_subtitle?.value || 'Log in to access the full product catalog with real-time inventory, customer-specific pricing, and place orders directly.'
 
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-6 py-8 text-left">
-      <ProductsWelcomeHeader user={null} />
+      <ProductsWelcomeHeader user={null} siteContent={siteContent} />
 
-      {/* Hero Section */}
-      <div className="text-center max-w-3xl mx-auto mb-10 pt-4 slide-up">
-        <Badge className="mb-4 bg-accent/20 text-accent border-accent/40 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">
-          Product Showcase
-        </Badge>
-        <h1 className="font-display text-4xl md:text-6xl font-extrabold text-foreground mb-4">
-          AK Enterprises Product Portfolio
-        </h1>
-        <p className="text-muted-foreground text-base leading-relaxed">
-          AK Enterprises is a private B2B supplier. Browse a selection of our products below.
-          To view full catalog with SKUs, inventory, and customer-specific wholesale pricing,
-          please log into your corporate portal.
-        </p>
-      </div>
+      {/* Hero Showcase Banner / Header */}
+      {showcaseBanner ? (
+        <div className="w-full h-48 md:h-64 rounded-3xl overflow-hidden mb-10 relative shadow-md">
+          <img src={showcaseBanner} alt="Showcase Banner" className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent flex flex-col justify-end p-6 md:p-8">
+            <h1 className="font-display text-3xl md:text-5xl font-extrabold text-white mb-2">
+              {loggedOutTitle}
+            </h1>
+            <p className="text-white/80 text-sm md:text-base max-w-3xl line-clamp-2">
+              {loggedOutSubtitle}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="text-center max-w-3xl mx-auto mb-10 pt-4 slide-up">
+          <Badge className="mb-4 bg-accent/20 text-accent border-accent/40 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">
+            Product Showcase
+          </Badge>
+          <h1 className="font-display text-4xl md:text-6xl font-extrabold text-foreground mb-4">
+            {loggedOutTitle}
+          </h1>
+          <p className="text-muted-foreground text-base leading-relaxed">
+            {loggedOutSubtitle}
+          </p>
+        </div>
+      )}
 
       {/* Product Showcase Grid */}
       {showcaseProducts.length > 0 && (
@@ -608,9 +616,9 @@ function LoggedOutProductsInfoView({ cats, showcaseProducts = [] }) {
 
       {/* View Complete B2B Catalog CTA */}
       <div className="mesh-hero rounded-3xl p-10 text-center text-primary-foreground">
-        <h2 className="font-display text-3xl font-extrabold mb-3">View Complete B2B Catalog</h2>
+        <h2 className="font-display text-3xl font-extrabold mb-3">{ctaTitle}</h2>
         <p className="text-primary-foreground/80 text-sm max-w-xl mx-auto mb-6">
-          Log in to access the full product catalog with real-time inventory, customer-specific pricing, and place orders directly.
+          {ctaSubtitle}
         </p>
         <div className="flex flex-wrap justify-center gap-4">
           <Link href="/login">

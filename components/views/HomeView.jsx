@@ -663,10 +663,10 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
         <div className="max-w-7xl mx-auto px-4 md:px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              [Truck, 'Pan India Delivery', 'Same-day dispatch across Maharashtra'],
-              [Award, 'Premium Quality', 'Only verified & trusted brands'],
-              [Shield, 'GST Invoice', '100% B2B tax compliance on every order'],
-              [Zap, '2 Hour Quotes', 'Rapid response for bulk & corporate orders']
+              [Truck, siteContent.highlight_1_title?.value || 'Pan India Delivery', siteContent.highlight_1_desc?.value || 'Same-day dispatch across Maharashtra'],
+              [Award, siteContent.highlight_2_title?.value || 'Premium Quality', siteContent.highlight_2_desc?.value || 'Only verified & trusted brands'],
+              [Shield, siteContent.highlight_3_title?.value || 'GST Invoice', siteContent.highlight_3_desc?.value || '100% B2B tax compliance on every order'],
+              [Zap, siteContent.highlight_4_title?.value || '2 Hour Quotes', siteContent.highlight_4_desc?.value || 'Rapid response for bulk & corporate orders']
             ].map(([I, t, d], i) => (
               <motion.div key={i} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.1, duration: 0.5 }}>
                 <div className="flex items-center gap-4 px-5 py-5 rounded-2xl bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.07] hover:border-accent/20 transition-all duration-300 group">
@@ -756,10 +756,10 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
 
         <div className="grid md:grid-cols-3 gap-6">
           {[
-            [Award, 'Premium Quality', 'Only trusted brands & genuine products — verified by our procurement team.'],
-            [TrendingUp, 'Wholesale Pricing', 'Best B2B rates with custom corporate rate cards & volume-based discounts.'],
-            [Truck, 'Timely Delivery', 'Same-day dispatch in Maharashtra, next-day pan-India logistics network.'],
-            [Shield, 'Dedicated Support', 'Personal account manager assigned to every corporate & bulk buyer.'],
+            [Award, siteContent.why_1_title?.value || 'Premium Quality', siteContent.why_1_desc?.value || 'Only trusted brands & genuine products — verified by our procurement team.'],
+            [TrendingUp, siteContent.why_2_title?.value || 'Wholesale Pricing', siteContent.why_2_desc?.value || 'Best B2B rates with custom corporate rate cards & volume-based discounts.'],
+            [Truck, siteContent.why_3_title?.value || 'Timely Delivery', siteContent.why_3_desc?.value || 'Same-day dispatch in Maharashtra, next-day pan-India logistics network.'],
+            [Shield, siteContent.why_4_title?.value || 'Dedicated Support', siteContent.why_4_desc?.value || 'Personal account manager assigned to every corporate & bulk buyer.'],
             [Building2, siteContent.stats_b2b_years?.value || '5+ Years B2B', siteContent.stats_b2b_desc?.value || 'Trusted partner for finance, insurance, IT & manufacturing since 2020.'],
             [Sparkles, siteContent.stats_products_count?.value || '300+ Products', siteContent.stats_products_desc?.value || 'Wide catalog spanning office stationery, housekeeping & UPS solutions.']
           ].map(([I, t, d], i) => (
@@ -785,11 +785,10 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
           <div className="relative z-10 text-center max-w-2xl mx-auto">
             <Badge className="mb-5 bg-accent/20 text-accent border-accent/40 px-4 py-1.5 text-xs font-bold uppercase tracking-widest">Bulk Ordering</Badge>
             <h2 className="font-display text-4xl md:text-6xl font-extrabold text-primary-foreground mb-4 text-balance">
-              Bulk Orders?<br />
-              <span className="gold-shine">Custom Quotes in 2 Hours.</span>
+              {siteContent.featured_banner_title?.value || 'Bulk orders? Custom quotes in 2 hours.'}
             </h2>
             <p className="text-primary-foreground/80 text-lg mb-8 max-w-lg mx-auto">
-              Corporate purchase orders for 100+ units. Get dedicated pricing & priority dispatch.
+              {siteContent.featured_banner_text?.value || 'Corporate purchase orders for 100+ units. Get dedicated pricing & priority dispatch.'}
             </p>
             <div className="flex flex-wrap justify-center gap-4">
               <Link href="/contact">

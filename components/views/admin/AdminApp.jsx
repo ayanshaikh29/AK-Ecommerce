@@ -8,7 +8,7 @@ import {
   Users, Settings, LogOut, Package, TrendingUp, AlertTriangle,
   Trash2, Video, FileText, Building2, Bell, BellRing, Menu, X, MessageSquare,
   Loader2, ShieldCheck, Truck, CheckCircle2, XCircle, Activity, Search,
-  ShieldAlert, RefreshCw, Clock
+  ShieldAlert, RefreshCw, Clock, ChevronDown, ChevronUp
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 import { Button } from '@/components/ui/button'
@@ -24,10 +24,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { useAppContext } from '@/components/providers/AppProvider'
 import { getStatusLabel, getStatusShortLabel } from '@/lib/status-labels'
 
+import { ReportsView } from './ReportsView'
 import { CustomerPricingManager } from './CustomerPricingManager'
 import { InventoryManager } from './InventoryManager'
 import { VendorManager } from './VendorManager'
-import { BillingManager } from './BillingManager'
 import { AdminSiteContent } from './AdminSiteContent'
 import { AdminHeaderNotifications } from './AdminHeaderNotifications'
 import { AdminToastFeed } from './AdminToastFeed'
@@ -441,7 +441,6 @@ export function AdminApp() {
                 ['orders','Orders',ClipboardList],
                 ['inventory','Stock Inventory',Package],
                 ['vendors','Zonal Admins',Truck],
-                ['billing','Billing & Invoices',FileText],
                 ['products','Products',Grid3x3],
                 ['product-new','Add Product',Plus],
                 ['reports','Sales Reports',TrendingUp],
@@ -500,7 +499,6 @@ export function AdminApp() {
                 ['orders','Orders',ClipboardList],
                 ['inventory','Stock Inventory',Package],
                 ['vendors','Zonal Admins',Truck],
-                ['billing','Billing & Invoices',FileText],
                 ['products','Products',Grid3x3],
                 ['product-new','Add Product',Plus],
                 ['reports','Sales Reports',TrendingUp],
@@ -574,8 +572,7 @@ export function AdminApp() {
             {section === 'orders' && (id ? <AdminOrderDetail orderId={id}/> : <AdminOrders refreshTrigger={refreshTrigger} router={router}/>)}
             {section === 'inventory' && <InventoryManager />}
             {section === 'vendors' && <VendorManager />}
-            {section === 'billing' && <BillingManager />}
-            {section === 'reports' && <AdminReports/>}
+            {section === 'reports' && <ReportsView/>}
             {['settings', 'faqs', 'chat-logs', 'customers', 'product-qa', 'clients', 'banners', 'site-content'].includes(section) && (
               <AdminSettingsSection
                 setSettings={setSettings}
@@ -665,6 +662,8 @@ function AdminAddProductSection({ router, defaultTab = 'single' }) {
     setActiveTab(defaultTab)
   }, [defaultTab])
 
+  const [showCats, setShowCats] = useState(false)
+
   return (
     <div className="w-full max-w-5xl mx-auto space-y-6 slide-up text-left">
       {/* Header and Tab Toggle */}
@@ -674,29 +673,40 @@ function AdminAddProductSection({ router, defaultTab = 'single' }) {
           <p className="text-xs text-muted-foreground mt-1">Add individual products manually or import bulk items using a CSV file.</p>
         </div>
 
-        <div className="flex bg-secondary p-1 rounded-2xl border shrink-0">
-          <button
-            onClick={() => setActiveTab('single')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-              activeTab === 'single'
-                ? 'gold-gradient text-primary shadow-soft'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Plus className="w-4 h-4" /> Add Single Product
-          </button>
-          <button
-            onClick={() => setActiveTab('csv')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-              activeTab === 'csv'
-                ? 'gold-gradient text-primary shadow-soft'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Upload className="w-4 h-4" /> Bulk Import via CSV
-          </button>
+        <div className="flex items-center gap-2.5">
+          <Button type="button" onClick={() => setShowCats(!showCats)} variant="outline" className="rounded-xl border-border/80 text-foreground font-bold text-xs shadow-soft h-10 px-4 flex items-center">
+            <Grid3x3 className="w-4 h-4 mr-1.5"/> Categories {showCats ? <ChevronUp className="w-3.5 h-3.5 ml-1"/> : <ChevronDown className="w-3.5 h-3.5 ml-1"/>}
+          </Button>
+          <div className="flex bg-secondary p-1 rounded-2xl border shrink-0">
+            <button
+              onClick={() => setActiveTab('single')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                activeTab === 'single'
+                  ? 'gold-gradient text-primary shadow-soft'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Plus className="w-4 h-4" /> Add Single Product
+            </button>
+            <button
+              onClick={() => setActiveTab('csv')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                activeTab === 'csv'
+                  ? 'gold-gradient text-primary shadow-soft'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Upload className="w-4 h-4" /> Bulk Import via CSV
+            </button>
+          </div>
         </div>
       </div>
+
+      {showCats && (
+        <div className="animate-in slide-in-from-top duration-300">
+          <AdminCategories />
+        </div>
+      )}
 
       {/* Tab Content */}
       {activeTab === 'single' ? (
@@ -717,6 +727,7 @@ function AdminSettingsSection({ setSettings, defaultTab = 'site' }) {
 
   const settingsTabs = [
     { id: 'site', label: 'Site Settings', icon: Settings },
+    { id: 'categories', label: 'Categories', icon: Grid3x3 },
     { id: 'site-content', label: 'Site Content', icon: LayoutTemplate },
     { id: 'banners', label: 'Hero Banners', icon: ImageIcon },
     { id: 'faqs', label: 'FAQ Manager', icon: FileText },
@@ -760,6 +771,7 @@ function AdminSettingsSection({ setSettings, defaultTab = 'site' }) {
       {/* Settings Active Tab Component */}
       <div>
         {activeTab === 'site' && <AdminSettings setSettings={setSettings} />}
+        {activeTab === 'categories' && <AdminCategories />}
         {activeTab === 'site-content' && <AdminSiteContent />}
         {activeTab === 'banners' && <AdminBanners />}
         {activeTab === 'faqs' && <AdminFAQs />}
@@ -1212,6 +1224,7 @@ function AdminDashboard({ refreshTrigger }) {
 function AdminProducts({ router }) {
   const [list, setList] = useState(null)
   const [q, setQ] = useState('')
+  const [selected, setSelected] = useState([])
   const load = () => {
     fetch('/api/products', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
       .then(r => r.json())
@@ -1227,8 +1240,11 @@ function AdminProducts({ router }) {
   const del = async id => { 
     if (!confirm('Delete product?')) return; 
     try { 
-      await fetch('/api/products/' + id, { method: 'DELETE', headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      const res = await fetch('/api/products/' + id, { method: 'DELETE', headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to delete product')
       toast.success('Deleted')
+      setSelected(prev => prev.filter(item => item !== id))
       load() 
     } catch (e) { toast.error(e.message) } 
   }
@@ -1246,6 +1262,36 @@ function AdminProducts({ router }) {
     return (Array.isArray(list) ? list : []).filter(p => !p.hsn_code || !p.hsn_code.trim()).length
   }, [list])
 
+  const handleBulkDelete = async () => {
+    if (!confirm(`Are you sure you want to delete ${selected.length} product(s)? This cannot be undone.`)) return
+    try {
+      const res = await fetch('/api/products/bulk', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ ids: selected })
+      })
+      const data = await res.json()
+      if (res.ok) {
+        if (data.skipped && data.skipped.length > 0) {
+          toast.warning(`Deleted products. Skipped ${data.skipped.length} product(s) in active orders: ${data.skipped.join(', ')}`)
+        } else {
+          toast.success('Selected products deleted successfully')
+        }
+        setSelected([])
+        load()
+      } else {
+        toast.error(data.error || 'Failed to delete products')
+      }
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  const [showCats, setShowCats] = useState(false)
+
   return (
     <div className="slide-up text-left">
       <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
@@ -1256,19 +1302,20 @@ function AdminProducts({ router }) {
           <p className="text-xs text-muted-foreground mt-1">Manage catalog items, pricing, inventory stock, and visibility status.</p>
         </div>
         <div className="flex gap-2.5">
-          <QuickAddCategory 
-            onCategoryAdded={() => toast.success('Category added!')}
-            trigger={
-              <Button type="button" className="rounded-xl bg-secondary hover:bg-secondary/80 border border-border/80 text-foreground font-bold text-xs shadow-soft h-10 px-4 flex items-center">
-                <Plus className="w-4 h-4 mr-1.5"/> Add Category
-              </Button>
-            }
-          />
+          <Button type="button" onClick={() => setShowCats(!showCats)} variant="outline" className="rounded-xl border-border/80 text-foreground font-bold text-xs shadow-soft h-10 px-4 flex items-center">
+            <Grid3x3 className="w-4 h-4 mr-1.5"/> Manage Categories {showCats ? <ChevronUp className="w-3.5 h-3.5 ml-1"/> : <ChevronDown className="w-3.5 h-3.5 ml-1"/>}
+          </Button>
           <Button onClick={() => router.push('/admin/product-new')} className="rounded-xl gold-gradient text-primary font-bold text-xs shadow-soft h-10 px-4 flex items-center">
             <Plus className="w-4 h-4 mr-1.5"/> Add Product
           </Button>
         </div>
       </div>
+
+      {showCats && (
+        <div className="mb-6 animate-in slide-in-from-top duration-300">
+          <AdminCategories />
+        </div>
+      )}
 
       {missingHsnCount > 0 && (
         <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-700 dark:text-red-300 text-xs font-semibold flex items-center gap-3">
@@ -1282,6 +1329,17 @@ function AdminProducts({ router }) {
         </div>
       )}
 
+      {selected.length > 0 && (
+        <div className="mb-6 p-4 bg-secondary/80 border rounded-2xl flex items-center justify-between animate-in slide-in-from-top duration-200">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-foreground">{selected.length} product(s) selected</span>
+          </div>
+          <Button onClick={handleBulkDelete} size="sm" variant="destructive" className="rounded-xl text-xs font-bold shadow-soft">
+            <Trash2 className="w-3.5 h-3.5 mr-1.5"/> Delete Selected ({selected.length})
+          </Button>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 mb-6">
         <Input placeholder="Search products by name..." value={q} onChange={e => setQ(e.target.value)} className="max-w-sm h-10 rounded-xl text-xs bg-card"/>
       </div>
@@ -1291,6 +1349,17 @@ function AdminProducts({ router }) {
           <table className="w-full text-xs text-left min-w-[800px]">
             <thead className="bg-secondary/60 text-muted-foreground uppercase font-bold text-[10px] tracking-wider border-b">
               <tr>
+                <th className="p-3.5 w-10">
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && selected.length === filtered.length}
+                    onChange={e => {
+                      if (e.target.checked) setSelected(filtered.map(p => p.id))
+                      else setSelected([])
+                    }}
+                    className="w-4 h-4 rounded border-border"
+                  />
+                </th>
                 <th className="p-3.5">Product</th>
                 <th className="p-3.5">HSN</th>
                 <th className="p-3.5">Price</th>
@@ -1302,12 +1371,23 @@ function AdminProducts({ router }) {
             </thead>
             <tbody className="divide-y divide-border">
               {!list ? (
-                <tr><td colSpan="7" className="p-12 text-center text-muted-foreground">Loading products...</td></tr>
+                <tr><td colSpan="8" className="p-12 text-center text-muted-foreground">Loading products...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan="7" className="p-12 text-center text-muted-foreground">No products found.</td></tr>
+                <tr><td colSpan="8" className="p-12 text-center text-muted-foreground">No products found.</td></tr>
               ) : (
                 filtered.map(p => (
                   <tr key={p.id} className="hover:bg-secondary/30 transition">
+                    <td className="p-3.5 w-10">
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(p.id)}
+                        onChange={e => {
+                          if (e.target.checked) setSelected([...selected, p.id])
+                          else setSelected(selected.filter(id => id !== p.id))
+                        }}
+                        className="w-4 h-4 rounded border-border"
+                      />
+                    </td>
                     <td className="p-3.5">
                       <div className="flex items-center gap-3">
                         <img
@@ -1483,7 +1563,8 @@ function AdminProductForm({ router, editId }) {
       let res
       if (editId) res = await fetch('/api/products/' + editId, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(body) })
       else res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(body) })
-      if (!res.ok) throw new Error('Save failed')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Save failed')
       toast.success(editId ? 'Updated' : 'Created')
       router.push('/admin/products') 
     } catch (e) { toast.error(e.message) }
@@ -1824,43 +1905,50 @@ function AdminOrders({ refreshTrigger, router }) {
   // not just the current paginated page.
   const kpi = summary || { revenue: 0, avgOrderValue: 0, delivered: 0, cancelled: 0 }
 
-  const exportData = (format) => {
-    if (orders.length === 0) {
-      toast.error('No orders available to export')
-      return
-    }
+  const [exportingExcel, setExportingExcel] = useState(false)
 
-    if (format === 'csv') {
-      const headers = ['Order ID', 'Invoice Number', 'Date', 'Customer Name', 'Customer Email', 'Phone', 'Shipping City', 'State', 'Zonal Admin Assigned', 'Payment Method', 'Payment Status', 'Grand Total', 'Status']
-      const rows = orders.map(o => [
-        o.order_number,
-        `INV-${o.order_number}`,
-        new Date(o.placed_at).toLocaleDateString('en-IN'),
-        o.address?.full_name || 'N/A',
-        o.user_email || 'Guest',
-        o.address?.phone || '',
-        o.address?.city || '',
-        o.address?.state || '',
-        o.vendor_name || 'Unassigned',
-        o.payment_method || 'COD',
-        o.payment_status || 'Pending',
-        o.total || 0,
-        o.status || 'pending'
-      ])
+  const exportExcel = async () => {
+    setExportingExcel(true)
+    try {
+      const q = new URLSearchParams()
+      q.set('range', range)
+      if (status !== 'all') q.set('status', status)
+      if (search) q.set('search', search)
+      if (range === 'custom') {
+        if (customStartDate) q.set('start_date', customStartDate)
+        if (customEndDate) q.set('end_date', customEndDate)
+      }
+      const token = localStorage.getItem('token')
+      const res = await fetch(`/api/reports/orders/export?${q.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Failed to export')
+      }
 
-      const csvContent = "data:text/csv;charset=utf-8," 
-        + [headers, ...rows].map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(",")).join("\n")
-      
-      const encodedUri = encodeURI(csvContent)
-      const link = document.createElement("a")
-      link.setAttribute("href", encodedUri)
-      link.setAttribute("download", `orders_export_${range}.csv`)
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      toast.success('CSV export completed successfully!')
-    } else {
-      toast.info(`${format.toUpperCase()} export is processing. Use CSV for instant spreadsheet files.`)
+      // Extract filename from Content-Disposition header
+      let downloadName = `AK_Enterprises_Order_Report_${range}.xlsx`
+      const disposition = res.headers.get('content-disposition')
+      if (disposition) {
+        const match = disposition.match(/filename="?([^";\n]+)"?/)
+        if (match) downloadName = match[1]
+      }
+
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = downloadName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('Excel report exported successfully!')
+    } catch (e) {
+      toast.error(e.message || 'Export failed')
+    } finally {
+      setExportingExcel(false)
     }
   }
 
@@ -1876,11 +1964,8 @@ function AdminOrders({ refreshTrigger, router }) {
           <p className="text-sm text-muted-foreground">Manage and filter historical sales, delivery timelines, and zonal admin dispatches.</p>
         </div>
         <div className="flex flex-wrap gap-2 shrink-0">
-          <Button onClick={() => exportData('csv')} size="sm" className="rounded-xl flex items-center gap-1.5 font-bold">
-            Export CSV
-          </Button>
-          <Button onClick={() => exportData('excel')} size="sm" variant="outline" className="rounded-xl flex items-center gap-1.5 font-bold">
-            Export Excel
+          <Button onClick={exportExcel} size="sm" className="rounded-xl flex items-center gap-1.5 font-bold" disabled={exportingExcel}>
+            {exportingExcel ? <><RefreshCw className="w-3.5 h-3.5 animate-spin mr-1"/>Generating...</> : 'Export Excel'}
           </Button>
         </div>
       </div>
@@ -2339,6 +2424,169 @@ function AdminClients() {
   )
 }
 
+function AdminCategories() {
+  const [list, setList] = useState(null)
+  const [editing, setEditing] = useState(null)
+  
+  const load = () => fetch('/api/categories').then(r => r.json()).then(setList)
+  useEffect(() => { load() }, [])
+
+  const empty = { name: '', slug: '', description: '', min_order_value: '' }
+
+  const save = async e => {
+    e.preventDefault()
+    try {
+      const body = {
+        ...editing,
+        slug: editing.slug || editing.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
+      }
+      if (editing.id) {
+        await fetch('/api/categories/' + editing.id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+          body: JSON.stringify(body)
+        })
+      } else {
+        await fetch('/api/categories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+          body: JSON.stringify(body)
+        })
+      }
+      toast.success('Saved successfully')
+      setEditing(null)
+      load()
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  const del = async id => {
+    if (!confirm('Are you sure you want to delete this category?')) return
+    try {
+      const res = await fetch('/api/categories/' + id, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to delete')
+      toast.success('Category deleted')
+      load()
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  return (
+    <div className="slide-up">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="font-display text-4xl font-extrabold">Product Categories</h1>
+        <Button onClick={() => setEditing({ ...empty })} className="rounded-xl gold-gradient text-primary font-bold shadow-soft">
+          <Plus className="w-4 h-4 mr-1.5" /> Add Category
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground mb-6">Create, edit, and delete product categories for wholesale rate cards and dynamic browsing verticals.</p>
+      
+      <div className="grid md:grid-cols-3 gap-4">
+        {!list ? (
+          Array(3).fill(0).map((_, i) => <div key={i} className="h-28 skeleton rounded-xl" />)
+        ) : list.length === 0 ? (
+          <div className="col-span-3 text-center py-12 text-sm text-muted-foreground">No categories found. Click Add Category to create one.</div>
+        ) : (
+          list.map(c => (
+            <Card key={c.id} className="radius-lg shadow-soft hover:shadow-elevated transition-all">
+              <CardContent className="pt-6 flex flex-col justify-between h-full">
+                <div>
+                  <div className="flex items-start justify-between">
+                    <h3 className="font-display font-extrabold text-base text-foreground leading-snug">{c.name}</h3>
+                    {c.min_order_value && (
+                      <Badge variant="outline" className="text-[10px] font-bold border-amber-300 text-amber-700 bg-amber-50">
+                        Min: ₹{c.min_order_value}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground font-mono uppercase mt-1">/{c.slug}</p>
+                  <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{c.description || 'No description provided.'}</p>
+                </div>
+                <div className="flex justify-end gap-1.5 pt-4 mt-auto border-t border-border/40">
+                  <Button size="sm" variant="outline" onClick={() => setEditing(c)} className="rounded-xl text-xs h-8">
+                    Edit
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => del(c.id)} className="rounded-xl text-xs h-8 text-destructive hover:bg-destructive/10">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+
+      <Dialog open={!!editing} onOpenChange={() => setEditing(null)}>
+        <DialogContent className="max-w-md radius-xl bg-white border border-[#ECECEC] shadow-2xl p-0 overflow-hidden text-left">
+          <DialogHeader className="px-6 pt-6 pb-2 border-b shrink-0">
+            <DialogTitle className="font-display font-black text-lg text-slate-800">{editing?.id ? 'Edit' : 'Add'} Category</DialogTitle>
+          </DialogHeader>
+          {editing && (
+            <form onSubmit={save} className="flex flex-col flex-1 overflow-hidden">
+              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-h-[60vh]">
+                <div>
+                  <Label>Category Name *</Label>
+                  <Input
+                    required
+                    value={editing.name}
+                    onChange={e => {
+                      const val = e.target.value
+                      const generatedSlug = val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
+                      setEditing({ ...editing, name: val, slug: editing.id ? editing.slug : generatedSlug })
+                    }}
+                    placeholder="e.g. Office Supplies"
+                    className="h-11 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <Label>Category Slug *</Label>
+                  <Input
+                    required
+                    value={editing.slug}
+                    onChange={e => setEditing({ ...editing, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '') })}
+                    placeholder="e.g. office-supplies"
+                    className="h-11 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <Label>Minimum Order Value (₹, optional)</Label>
+                  <Input
+                    type="number"
+                    value={editing.min_order_value || ''}
+                    onChange={e => setEditing({ ...editing, min_order_value: e.target.value === '' ? '' : Number(e.target.value) })}
+                    placeholder="e.g. 5000"
+                    className="h-11 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <Label>Description</Label>
+                  <Textarea
+                    value={editing.description || ''}
+                    onChange={e => setEditing({ ...editing, description: e.target.value })}
+                    placeholder="Describe this product vertical..."
+                    rows={3}
+                    className="rounded-xl"
+                  />
+                </div>
+              </div>
+              <div className="px-6 py-4 border-t bg-secondary/20 flex gap-2 shrink-0">
+                <Button type="submit" className="flex-1 rounded-full gold-gradient text-primary font-bold">Save</Button>
+                <Button type="button" variant="outline" onClick={() => setEditing(null)} className="rounded-full flex-1">Cancel</Button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
 function QuickAddCategory({ cats, onCategoryAdded, trigger }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -2429,123 +2677,6 @@ function QuickAddCategory({ cats, onCategoryAdded, trigger }) {
   )
 }
 
-function AdminCategories() {
-  const [list, setList] = useState(null)
-  const [editing, setEditing] = useState(null)
-  const load = () => fetch('/api/categories').then(r=>r.json()).then(setList)
-  useEffect(() => { load() }, [])
-  const empty = { name: '', min_order_value: '' }
-  
-  const save = async e => {
-    e.preventDefault();
-    try {
-      const body = {
-        name: editing.name,
-        min_order_value: editing.min_order_value !== '' && editing.min_order_value !== null ? +editing.min_order_value : null
-      }
-      let res
-      if (editing.id) {
-        res = await fetch('/api/categories/' + editing.id, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
-          body: JSON.stringify(body)
-        })
-      } else {
-        res = await fetch('/api/categories', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
-          body: JSON.stringify(body)
-        })
-      }
-      if (!res.ok) throw new Error('Failed to save category')
-      toast.success('Category saved successfully')
-      setEditing(null)
-      load()
-    } catch (e) {
-      toast.error(e.message)
-    }
-  }
-
-  const del = async id => {
-    if (!confirm('Are you sure you want to delete this category? All products under this category might lose their connection.')) return
-    try {
-      const res = await fetch('/api/categories/' + id, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      })
-      if (!res.ok) throw new Error('Delete failed')
-      toast.success('Category deleted')
-      load()
-    } catch (e) {
-      toast.error(e.message)
-    }
-  }
-
-  return (
-    <div className="slide-up text-left">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div>
-          <h1 className="font-display text-3xl font-extrabold text-foreground">Product Categories</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage product categories and set category-specific Minimum Order Values (MOV) for orders.</p>
-        </div>
-        <Button onClick={() => setEditing({ ...empty })} className="rounded-full btn-shine shrink-0">
-          <Plus className="w-4 h-4 mr-1"/>Add Category
-        </Button>
-      </div>
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {!list ? Array(3).fill(0).map((_, i) => <div key={i} className="h-24 skeleton"/>) : list.map(c => (
-          <Card key={c.id} className="radius-lg shadow-soft card-lift">
-            <CardContent className="pt-6 flex items-center justify-between">
-              <div>
-                <p className="font-semibold text-base">{c.name}</p>
-                <p className="text-xs text-muted-foreground mt-0.5 font-mono">Slug: {c.slug}</p>
-                {c.min_order_value ? (
-                  <Badge variant="default" className="text-xs mt-2 bg-emerald-600 hover:bg-emerald-700">
-                    Min order: {formatINR(c.min_order_value)}
-                  </Badge>
-                ) : (
-                  <Badge variant="secondary" className="text-xs mt-2 text-muted-foreground">
-                    No minimum value
-                  </Badge>
-                )}
-              </div>
-              <div className="space-x-1 flex shrink-0">
-                <Button size="sm" variant="outline" onClick={() => setEditing(c)} className="rounded-full">Edit</Button>
-                <Button size="sm" variant="ghost" onClick={() => del(c.id)} className="rounded-full">
-                  <Trash2 className="w-4 h-4 text-destructive"/>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-      <Dialog open={!!editing} onOpenChange={() => setEditing(null)}>
-        <DialogContent className="max-w-md radius-lg flex flex-col p-6 text-left">
-          <DialogHeader>
-            <DialogTitle className="font-display text-lg font-bold">{editing?.id ? 'Edit' : 'Add'} Category</DialogTitle>
-          </DialogHeader>
-          {editing && (
-            <form onSubmit={save} className="space-y-4 mt-4">
-              <div>
-                <Label>Category Name *</Label>
-                <Input required value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. Office Stationery"/>
-              </div>
-              <div>
-                <Label>Minimum Order Value (₹, optional)</Label>
-                <Input type="number" value={editing.min_order_value || ''} onChange={e => setEditing({ ...editing, min_order_value: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. 500 (blank for no min value)"/>
-              </div>
-              <div className="flex gap-2 pt-4">
-                <Button type="submit" className="flex-1 rounded-full">Save</Button>
-                <Button type="button" variant="outline" onClick={() => setEditing(null)} className="rounded-full">Cancel</Button>
-              </div>
-            </form>
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
-  )
-}
-
 function AdminSettings({ setSettings }) {
   const [f, setF] = useState(null); const [loading, setLoading] = useState(false)
   useEffect(() => { fetch('/api/settings').then(r=>r.json()).then(d => setF({ ...d, marquee_messages: (d.marquee_messages || []).join('\n') })) }, [])
@@ -2592,6 +2723,29 @@ function AdminSettings({ setSettings }) {
             <div><Label>Company GSTIN</Label><Input value={f.company_gstin || ''} onChange={e => setF({ ...f, company_gstin: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. 27AAAAA0000A1Z5"/></div>
             <div><Label>Company PAN</Label><Input value={f.company_pan || ''} onChange={e => setF({ ...f, company_pan: e.target.value })} className="h-11 rounded-xl" placeholder="e.g. AAAAA0000A"/></div>
             <div className="col-span-2"><Label>Registered Business Address (for Invoice header)</Label><Textarea value={f.company_address || ''} onChange={e => setF({ ...f, company_address: e.target.value })} rows={3} className="rounded-xl" placeholder="Full Registered Address..."/></div>
+            <div className="col-span-2">
+              <Label>Company Stamp/Signature Image (Transparent PNG recommended)</Label>
+              {f.company_stamp_url ? (
+                <div className="mt-2 relative w-48 h-32 border rounded-xl overflow-hidden bg-secondary flex items-center justify-center p-2">
+                  <img src={f.company_stamp_url} alt="Stamp / Signature" className="max-w-full max-h-full object-contain" />
+                  <button
+                    type="button"
+                    onClick={() => setF({ ...f, company_stamp_url: '' })}
+                    className="absolute top-1.5 right-1.5 bg-destructive/90 text-white rounded-full p-1.5 hover:bg-destructive transition shadow-sm"
+                  >
+                    <Plus className="w-3.5 h-3.5 rotate-45" />
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-2">
+                  <FileUploader
+                    accept="image/*"
+                    label="Upload Stamp / Signature Image"
+                    onUploaded={urls => setF({ ...f, company_stamp_url: urls[0] })}
+                  />
+                </div>
+              )}
+            </div>
           </div>
         </CardContent></Card>
 
@@ -2805,49 +2959,6 @@ function AdminReports() {
   const [loading, setLoading] = useState(true)
   const [monthlyTrends, setMonthlyTrends] = useState([])
   const [trendsLoading, setTrendsLoading] = useState(true)
-  const [reportRange, setReportRange] = useState('all')
-  const [customStartDate, setCustomStartDate] = useState('')
-  const [customEndDate, setCustomEndDate] = useState('')
-  const [exportingPdf, setExportingPdf] = useState(false)
-  const [exportingExcel, setExportingExcel] = useState(false)
-
-  const buildReportUrl = (type) => {
-    const q = new URLSearchParams({ type, range: reportRange })
-    if (reportRange === 'custom') {
-      if (dates.start) q.set('start_date', new Date(dates.start).toISOString())
-      if (dates.end) q.set('end_date', new Date(dates.end).toISOString())
-    }
-    return `/api/admin/reports/export?${q.toString()}`
-  }
-
-  const handleExport = async (type) => {
-    const setExporting = type === 'pdf' ? setExportingPdf : setExportingExcel
-    setExporting(true)
-    try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(buildReportUrl(type), {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}))
-        throw new Error(errData.error || 'Failed to export')
-      }
-      const blob = await res.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = type === 'excel' ? 'AK_Enterprises_Sales_Report.xlsx' : 'AK_Enterprises_Sales_Report.pdf'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
-      toast.success(`Report exported as ${type.toUpperCase()}`)
-    } catch (e) {
-      toast.error(e.message || 'Export failed')
-    } finally {
-      setExporting(false)
-    }
-  }
 
   const fetchMonthlyTrends = async () => {
     setTrendsLoading(true)
@@ -2886,42 +2997,6 @@ function AdminReports() {
     fetchMonthlyTrends()
   }, [])
 
-  const exportCSV = () => {
-    if (!data) return
-    const rows = [
-      ['Report Metric', 'Value'],
-      ['Total Sales Revenue', `Rs. ${data.totalRevenue}`],
-      ['Total Orders Placed', data.ordersCount],
-      [],
-      ['Category Breakdown', 'Revenue (Rs.)']
-    ]
-    Object.entries(data.categoryRevenue || {}).forEach(([cat, rev]) => {
-      rows.push([cat, rev])
-    })
-    rows.push([], ['Top Selling Products', 'Quantity'])
-    data.topSelling?.forEach(p => {
-      rows.push([p.name, p.quantity])
-    })
-
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + rows.map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(",")).join("\n")
-    
-    const encodedUri = encodeURI(csvContent)
-    const link = document.createElement("a")
-    link.setAttribute("href", encodedUri)
-    link.setAttribute("download", `sales_report_${dates.start || 'all'}_to_${dates.end || 'all'}.csv`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
-
-  const triggerBulkInvoice = () => {
-    const q = new URLSearchParams()
-    if (dates.start) q.set('start_date', new Date(dates.start).toISOString())
-    if (dates.end) q.set('end_date', new Date(dates.end).toISOString())
-    window.open(`/api/admin/invoices-export?${q.toString()}&token=${localStorage.getItem('token')}`)
-  }
-
   const salesArray = data ? Object.entries(data.dailySales || {}).sort((a,b) => new Date(a[0]) - new Date(b[0])) : []
   const maxSale = salesArray.length > 0 ? Math.max(...salesArray.map(s => s[1])) : 1
 
@@ -2932,48 +3007,18 @@ function AdminReports() {
           <h1 className="font-display text-4xl font-extrabold">Sales Reports</h1>
           <p className="text-sm text-muted-foreground">Monitor performance, track orders, and export data for accounting.</p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={() => handleExport('pdf')} disabled={!data || exportingPdf} className="rounded-full text-xs font-bold">
-            {exportingPdf ? <><RefreshCw className="w-3.5 h-3.5 animate-spin mr-1"/>Generating...</> : <><FileText className="w-3.5 h-3.5 mr-1"/>Export PDF</>}
-          </Button>
-          <Button onClick={() => handleExport('excel')} disabled={!data || exportingExcel} variant="outline" className="rounded-full text-xs font-bold">
-            {exportingExcel ? <><RefreshCw className="w-3.5 h-3.5 animate-spin mr-1"/>Generating...</> : <><FileText className="w-3.5 h-3.5 mr-1"/>Export Excel</>}
-          </Button>
-          <Button onClick={triggerBulkInvoice} disabled={!data} variant="outline" className="rounded-full text-xs">Bulk Invoices ZIP</Button>
-        </div>
       </div>
 
       <Card className="radius-lg shadow-soft">
         <CardContent className="p-4 flex flex-wrap gap-4 items-end">
           <div>
-            <Label className="text-xs">Date Range</Label>
-            <select
-              value={reportRange}
-              onChange={e => setReportRange(e.target.value)}
-              className="h-10 rounded-xl text-xs bg-card border border-border px-3 font-semibold text-foreground"
-            >
-              <option value="this-month">This Month</option>
-              <option value="last-month">Last Month</option>
-              <option value="last-30-days">Last 30 Days</option>
-              <option value="last-90-days">Last 90 Days</option>
-              <option value="last-6-months">Last 6 Months</option>
-              <option value="last-12-months">Last 1 Year</option>
-              <option value="all">All Time</option>
-              <option value="custom">Custom Range</option>
-            </select>
+            <Label className="text-xs">Start Date</Label>
+            <Input type="date" value={dates.start} onChange={e => setDates({ ...dates, start: e.target.value })} className="h-10 rounded-xl"/>
           </div>
-          {reportRange === 'custom' && (
-            <>
-              <div>
-                <Label className="text-xs">Start Date</Label>
-                <Input type="date" value={dates.start} onChange={e => setDates({ ...dates, start: e.target.value })} className="h-10 rounded-xl"/>
-              </div>
-              <div>
-                <Label className="text-xs">End Date</Label>
-                <Input type="date" value={dates.end} onChange={e => setDates({ ...dates, end: e.target.value })} className="h-10 rounded-xl"/>
-              </div>
-            </>
-          )}
+          <div>
+            <Label className="text-xs">End Date</Label>
+            <Input type="date" value={dates.end} onChange={e => setDates({ ...dates, end: e.target.value })} className="h-10 rounded-xl"/>
+          </div>
           <Button onClick={fetchReports} className="rounded-xl h-10 px-6">Apply Filters</Button>
         </CardContent>
       </Card>

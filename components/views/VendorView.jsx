@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAppContext } from '@/components/providers/AppProvider'
 import { getStatusLabel } from '@/lib/status-labels'
 import { useRealtimeOrders } from '@/lib/hooks/useRealtime'
+import { ReportsView } from './admin/ReportsView'
 
 const formatINR = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 
@@ -37,7 +38,7 @@ export function VendorView() {
   const { user, setUser } = useAppContext()
   const router = useRouter()
 
-  const [activeTab, setActiveTab] = useState('new-orders') // 'new-orders' | 'orders' | 'performance'
+  const [activeTab, setActiveTab] = useState('new-orders') // 'new-orders' | 'orders'
   const [orders, setOrders] = useState([])
   const [inventory, setInventory] = useState([])
   const [loadingOrders, setLoadingOrders] = useState(true)
@@ -55,14 +56,6 @@ export function VendorView() {
 
   // Selected Order for detail view page render (inline replacement mode)
   const [selectedOrderId, setSelectedOrderId] = useState(null)
-  const [exportingReport, setExportingReport] = useState(false)
-
-  // Reports state
-  const [reportRange, setReportRange] = useState('last-6-months')
-  const [customStartDate, setCustomStartDate] = useState('')
-  const [customEndDate, setCustomEndDate] = useState('')
-  const [exportingPdf, setExportingPdf] = useState(false)
-  const [exportingExcel, setExportingExcel] = useState(false)
 
   // 1. Fetch Vendor Orders
   const fetchVendorOrders = useCallback(async () => {
@@ -154,51 +147,6 @@ export function VendorView() {
     fetchInventory()
     fetchVendorStats()
   }, [authReady, user, fetchVendorOrders, fetchInventory, fetchVendorStats])
-
-
-
-  const buildReportUrl = (type) => {
-    const q = new URLSearchParams({ type, range: reportRange })
-    if (reportRange === 'custom') {
-      if (customStartDate) q.set('start_date', customStartDate)
-      if (customEndDate) q.set('end_date', customEndDate)
-    }
-    return `/api/vendor/reports/export?${q.toString()}`
-  }
-
-  const handleExportReport = async (type = 'pdf') => {
-    const setExporting = type === 'pdf' ? setExportingPdf : setExportingExcel
-    setExporting(true)
-    try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(buildReportUrl(type), {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}))
-        throw new Error(errorData.error || 'Failed to export report')
-      }
-
-      const blob = await res.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      const vendorNameClean = (user?.full_name || 'Zonal_Admin').replace(/\s+/g, '_')
-      a.download = type === 'excel'
-        ? `Zonal_Admin_Report_${vendorNameClean}.xlsx`
-        : `Zonal_Admin_Report_${vendorNameClean}.pdf`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
-
-      toast.success(`Report exported as ${type.toUpperCase()} successfully.`)
-    } catch (err) {
-      toast.error(err.message || 'Report export failed.')
-    } finally {
-      setExporting(false)
-    }
-  }
 
   const handleDownloadChallan = async (orderId, orderNum) => {
     try {
@@ -778,8 +726,8 @@ export function VendorView() {
             Order History
           </button>
           <button
-            onClick={() => { setActiveTab('performance'); setStatusFilter('all') }}
-            className={`flex-1 py-2 px-3 rounded-full font-bold text-xs transition ${activeTab === 'performance' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+            onClick={() => setActiveTab('reports')}
+            className={`flex-1 py-2 px-3 rounded-full font-bold text-xs transition ${activeTab === 'reports' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
           >
             Reports
           </button>
@@ -977,104 +925,9 @@ export function VendorView() {
           </div>
         )}
 
-
-
-        {/* Performance & Reports Tab */}
-        {activeTab === 'performance' && (
-          <div className="space-y-6 slide-up">
-            <div className="bg-white p-6 border border-[#ECECEC] rounded-3xl shadow-xs">
-              <h2 className="font-display font-black text-sm text-slate-800">Performance Analytics &amp; Reports</h2>
-              <p className="text-[10px] text-slate-400 mt-0.5">Generate logistics summaries and download official fulfillment data sheets.</p>
-            </div>
-
-            {/* Date Range Selector */}
-            <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs p-5">
-              <div className="flex flex-wrap items-end gap-4">
-                <div className="flex-1 min-w-[200px]">
-                  <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1.5 block">Date Range</label>
-                  <select
-                    value={reportRange}
-                    onChange={e => setReportRange(e.target.value)}
-                    className="w-full h-10 rounded-xl text-xs bg-slate-50 border border-slate-200 px-3 font-semibold text-slate-800 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition"
-                  >
-                    <option value="this-month">This Month</option>
-                    <option value="last-month">Last Month</option>
-                    <option value="last-3-months">Last 3 Months</option>
-                    <option value="last-6-months">Last 6 Months</option>
-                    <option value="last-12-months">Last 1 Year</option>
-                    <option value="all">All Time</option>
-                    <option value="custom">Custom Range</option>
-                  </select>
-                </div>
-                {reportRange === 'custom' && (
-                  <>
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1.5 block">From</label>
-                      <input type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} className="h-10 rounded-xl text-xs bg-slate-50 border border-slate-200 px-3 font-semibold" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1.5 block">To</label>
-                      <input type="date" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} className="h-10 rounded-xl text-xs bg-slate-50 border border-slate-200 px-3 font-semibold" />
-                    </div>
-                  </>
-                )}
-              </div>
-            </Card>
-
-            {/* Export Buttons */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs p-6 space-y-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center shrink-0">
-                    <FileText className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-slate-800">Export as PDF</h3>
-                    <p className="text-[10.5px] text-slate-400 mt-0.5">Formatted summary report with KPIs and tables.</p>
-                  </div>
-                </div>
-                <div className="border-t border-slate-100 pt-4">
-                  <Button
-                    onClick={() => handleExportReport('pdf')}
-                    disabled={exportingPdf}
-                    className="w-full rounded-full text-xs font-bold px-5 bg-slate-950 text-white hover:bg-slate-800 h-10 shadow-xs flex items-center justify-center gap-1.5"
-                  >
-                    {exportingPdf ? (
-                      <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</>
-                    ) : (
-                      <><FileText className="w-3.5 h-3.5" /> Download PDF</>
-                    )}
-                  </Button>
-                </div>
-              </Card>
-
-              <Card className="bg-white border border-[#ECECEC] rounded-2xl shadow-xs p-6 space-y-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
-                    <FileText className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-sm text-slate-800">Export as Excel</h3>
-                    <p className="text-[10.5px] text-slate-400 mt-0.5">Multi-sheet workbook with Summary + Detailed Orders.</p>
-                  </div>
-                </div>
-                <div className="border-t border-slate-100 pt-4">
-                  <Button
-                    onClick={() => handleExportReport('excel')}
-                    disabled={exportingExcel}
-                    variant="outline"
-                    className="w-full rounded-full text-xs font-bold px-5 h-10 shadow-xs flex items-center justify-center gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                  >
-                    {exportingExcel ? (
-                      <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Generating...</>
-                    ) : (
-                      <><FileText className="w-3.5 h-3.5" /> Download Excel</>
-                    )}
-                  </Button>
-                </div>
-              </Card>
-            </div>
-          </div>
+        {/* ======================== REPORTS TAB (zone-scoped) ======================== */}
+        {activeTab === 'reports' && (
+          <ReportsView />
         )}
 
       </main>

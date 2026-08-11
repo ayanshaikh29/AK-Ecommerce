@@ -113,7 +113,7 @@ export default async function RootLayout({ children }) {
       <head>
         <link rel="preconnect" href="https://api.fontshare.com" />
         <link rel="preload" as="style" href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&f[]=general-sans@600,500,400&display=swap" />
-        <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&f[]=general-sans@600,500,400&display=swap" rel="stylesheet" media="print" onLoad="this.media='all'" />
+        <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&f[]=general-sans@600,500,400&display=swap" rel="stylesheet" />
         <noscript><link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&f[]=general-sans@600,500,400&display=swap" /></noscript>
         <script
           type="application/ld+json"

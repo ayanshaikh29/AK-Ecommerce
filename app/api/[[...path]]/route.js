@@ -394,6 +394,64 @@ async function route(req, method) {
     })
   }
 
+  if (p[0] === 'test-excel' && method === 'GET') {
+    const { generateFullReport } = await import('@/lib/report-generator')
+    const dummyOrders = [
+      {
+        id: 'ord_1',
+        order_number: 'AKTEST1001',
+        status: 'delivered',
+        total: 1500,
+        subtotal: 1400,
+        discount: 0,
+        gst_amount: 100,
+        shipping_fee: 0,
+        placed_at: new Date().toISOString(),
+        vendor_name: 'Zonal Admin Pune',
+        assigned_vendor_id: 'v_1',
+        vendor_email: 'pune@ak.com',
+        user_id: 'usr_1',
+        user_email: 'customer@client.com',
+        addresses: {
+          full_name: 'Ayan Shaikh',
+          business_name: 'Ayan Corp',
+          phone: '9876543210',
+          gst: '27AAAAA1111A1Z1',
+          line1: '123 Main St',
+          line2: 'Suite 4',
+          city: 'Pune',
+          district: 'Pune',
+          state: 'Maharashtra',
+          pincode: '411001',
+          country: 'India'
+        },
+        order_items: [
+          {
+            id: 'item_1',
+            product_name_snapshot: 'Test Product 1',
+            quantity: 2,
+            price_snapshot: 700,
+            products: {
+              hsn_code: '84713010',
+              gst_percent: 18,
+              categories: {
+                name: 'Electronics'
+              }
+            }
+          }
+        ]
+      }
+    ]
+    const xlsxBuffer = generateFullReport(dummyOrders, { role: 'admin' })
+    return new NextResponse(xlsxBuffer, {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="test_output.xlsx"',
+        'Content-Length': String(xlsxBuffer.length)
+      }
+    })
+  }
+
   // ── Client Error Logger ─────────────────────────────────────────────────────
   // POST /api/log-client-error  — logs browser/React crashes from any client
   // GET  /api/log-client-error  — admin-only: returns recent 50 errors
@@ -700,9 +758,45 @@ async function route(req, method) {
     return json({ has_access: visibleMap.size > 0, visible_count: visibleMap.size })
   }
 
-  if (p[0] === 'categories' && method === 'GET') {
-    const { data: cats } = await supabase.from('categories').select('*')
-    return json(cats || [], 200, 300)
+  if (p[0] === 'categories') {
+    if (method === 'GET') {
+      const { data: cats } = await supabase.from('categories').select('*').order('name', { ascending: true })
+      return json(cats || [], 200, 300)
+    }
+    if (method === 'POST') {
+      if (!user || user.role !== 'admin') return err('Forbidden', 403)
+      const { name, min_order_value, description } = body
+      if (!name) return err('Name is required')
+      const slug = body.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
+      const id = uuidv4()
+      const doc = { id, name, slug, min_order_value: min_order_value !== undefined ? (min_order_value === '' ? null : Number(min_order_value)) : null, description: description || '', created_at: new Date().toISOString() }
+      const { error } = await supabase.from('categories').insert(doc)
+      if (error) return err(error.message, 500)
+      return json(doc)
+    }
+    if (method === 'PUT' && p[1]) {
+      if (!user || user.role !== 'admin') return err('Forbidden', 403)
+      const { name, slug, min_order_value, description } = body
+      const updateData = {}
+      if (name) updateData.name = name
+      if (slug) updateData.slug = slug
+      updateData.min_order_value = min_order_value !== undefined ? (min_order_value === '' ? null : Number(min_order_value)) : null
+      if (description !== undefined) updateData.description = description
+      
+      const { error } = await supabase.from('categories').update(updateData).eq('id', p[1])
+      if (error) return err(error.message, 500)
+      return json({ ok: true })
+    }
+    if (method === 'DELETE' && p[1]) {
+      if (!user || user.role !== 'admin') return err('Forbidden', 403)
+      const { data: prods } = await supabase.from('products').select('id').eq('category_id', p[1]).limit(1)
+      if (prods && prods.length > 0) {
+        return err('Cannot delete category: products are currently assigned to it. Re-assign or delete those products first.', 400)
+      }
+      const { error } = await supabase.from('categories').delete().eq('id', p[1])
+      if (error) return err(error.message, 500)
+      return json({ ok: true })
+    }
   }
 
   if (p[0] === 'products') {
@@ -727,7 +821,10 @@ async function route(req, method) {
         }
       }
 
-      let query = supabase.from('products').select('*, product_images(image_url)').eq('is_active', true)
+      let query = supabase.from('products').select('*, product_images(image_url)')
+      if (user.role !== 'admin') {
+        query = query.eq('is_active', true)
+      }
       
       const category = url.searchParams.get('category')
       const search = url.searchParams.get('search')
@@ -752,7 +849,6 @@ async function route(req, method) {
       if (featured) query = query.eq('is_featured', true)
       if (minPrice) query = query.gte('price', +minPrice)
       if (maxPrice) query = query.lte('price', +maxPrice)
-      if (brand) query = query.eq('brand', brand)
       if (rating) query = query.gte('rating_avg', +rating)
       
       if (sort === 'price-asc') query = query.order('price', { ascending: true })
@@ -761,7 +857,7 @@ async function route(req, method) {
       else query = query.order('created_at', { ascending: false })
       
       const { data: list } = await query
-       const listMapped = (list || []).map(p => {
+       let listMapped = (list || []).map(p => {
         const withMeta = extractMetadata(p)
         const customPrice = customerPricingMap ? customerPricingMap.get(p.id) : withMeta.price
         const rawImgs = (withMeta.product_images || []).map(img => img.image_url).filter(Boolean)
@@ -779,6 +875,9 @@ async function route(req, method) {
           image_url: finalImgs[0]
         }
       })
+      if (brand) {
+        listMapped = listMapped.filter(p => (p.brand || '').toLowerCase() === brand.toLowerCase())
+      }
       return json({ catalog_locked: false, products: listMapped }, 200)
     }
     if (method === 'GET' && p[1]) {
@@ -849,10 +948,15 @@ async function route(req, method) {
         rating_avg: 0, 
         rating_count: 0 
       }
-      await supabase.from('products').insert(doc)
+      const { error: insErr } = await supabase.from('products').insert(doc)
+      if (insErr) {
+        console.error('[POST /api/products Error]:', insErr)
+        return err(insErr.message || 'Failed to insert product into database', 500)
+      }
       if (body.images?.length > 0) {
         const imgDocs = body.images.map((url, idx) => ({ id: uuidv4(), product_id: pId, image_url: url, sort_order: idx, created_at: now }))
-        await supabase.from('product_images').insert(imgDocs)
+        const { error: imgErr } = await supabase.from('product_images').insert(imgDocs)
+        if (imgErr) console.error('[POST /api/products Image Insert Error]:', imgErr)
       }
       return json({ ...extractMetadata(doc), images: body.images || [] })
     }
@@ -886,7 +990,11 @@ async function route(req, method) {
       Object.keys(upd).forEach(k => upd[k] === undefined && delete upd[k])
       if (merged.mrp && merged.price) upd.discount_percent = Math.round((1-merged.price/merged.mrp)*100)
       
-      await supabase.from('products').update(upd).eq('id', p[1])
+      const { error: updErr } = await supabase.from('products').update(upd).eq('id', p[1])
+      if (updErr) {
+        console.error('[PUT /api/products Error]:', updErr)
+        return err(updErr.message || 'Failed to update product in database', 500)
+      }
       if (body.images) {
         await supabase.from('product_images').delete().eq('product_id', p[1])
         if (body.images.length > 0) {
@@ -895,6 +1003,76 @@ async function route(req, method) {
         }
       }
       return json({ ok: true })
+    }
+    if (method === 'DELETE' && p[1] && p[1] !== 'bulk') {
+      if (!user || user.role !== 'admin') return err('Forbidden', 403)
+      const productId = p[1]
+      const { data: activeOrders } = await supabase
+        .from('orders')
+        .select('id, order_number, order_items(product_id)')
+        .not('status', 'in', '("delivered","cancelled","rejected","admin_rejected","vendor_rejected")')
+
+      const activeProductIds = new Set()
+      if (Array.isArray(activeOrders)) {
+        activeOrders.forEach(o => {
+          if (Array.isArray(o.order_items)) {
+            o.order_items.forEach(it => {
+              if (it.product_id) activeProductIds.add(it.product_id)
+            })
+          }
+        })
+      }
+
+      if (activeProductIds.has(productId)) {
+        return err('Cannot delete product: it is part of an active order that is currently being processed.', 400)
+      }
+
+      const { error: delErr } = await supabase.from('products').delete().eq('id', productId)
+      if (delErr) return err(delErr.message, 500)
+      return json({ ok: true })
+    }
+    if (method === 'DELETE' && p[1] === 'bulk') {
+      if (!user || user.role !== 'admin') return err('Forbidden', 403)
+      const ids = body.ids || []
+      if (!Array.isArray(ids) || ids.length === 0) return err('IDs array required')
+
+      const { data: activeOrders } = await supabase
+        .from('orders')
+        .select('id, order_number, order_items(product_id, product_name_snapshot)')
+        .not('status', 'in', '("delivered","cancelled","rejected","admin_rejected","vendor_rejected")')
+
+      const activeProductIds = new Set()
+      const activeProductIdToName = new Map()
+      if (Array.isArray(activeOrders)) {
+        activeOrders.forEach(o => {
+          if (Array.isArray(o.order_items)) {
+            o.order_items.forEach(it => {
+              if (it.product_id) {
+                activeProductIds.add(it.product_id)
+                activeProductIdToName.set(it.product_id, it.product_name_snapshot || 'Product')
+              }
+            })
+          }
+        })
+      }
+
+      const toDelete = []
+      const skipped = []
+
+      ids.forEach(id => {
+        if (activeProductIds.has(id)) {
+          skipped.push(activeProductIdToName.get(id) || id)
+        } else {
+          toDelete.push(id)
+        }
+      })
+
+      if (toDelete.length > 0) {
+        await supabase.from('product_images').delete().in('product_id', toDelete)
+        await supabase.from('products').delete().in('id', toDelete)
+      }
+
+      return json({ ok: true, deletedCount: toDelete.length, skipped })
     }
     if (method === 'DELETE' && p[1]) {
       if (!user || user.role !== 'admin') return err('Forbidden', 403)
@@ -4134,99 +4312,6 @@ Current Conversation History:\n` +
     })
   }
 
-  // ==================== VENDOR REPORTS — DATA ====================
-  if (p[0] === 'vendor' && p[1] === 'reports' && !p[2] && method === 'GET') {
-    if (!user) return err('Unauthorized', 401)
-    const vendor = await getVendorByUserId(user.id, user.email)
-    if (!vendor) return err('Zonal Admin not found', 404)
-    try {
-      const { buildReportData, resolveDateRange } = await import('@/lib/report-generator')
-      const rangeKey = url.searchParams.get('range') || 'last-6-months'
-      const customStart = url.searchParams.get('start_date')
-      const customEnd = url.searchParams.get('end_date')
-      const { start, end } = resolveDateRange(rangeKey, customStart, customEnd)
-
-      let query = supabase
-        .from('orders')
-        .select('id, order_number, status, total, placed_at, vendor_name, addresses(full_name), order_items(id, product_name_snapshot, quantity, price_snapshot)')
-        .eq('assigned_vendor_id', vendor.id)
-      if (start) query = query.gte('placed_at', start.toISOString())
-      if (end) query = query.lte('placed_at', end.toISOString())
-      query = query.order('placed_at', { ascending: false })
-
-      const { data: dbOrders, error } = await query
-      if (error) return err('Failed to fetch report data: ' + error.message, 500)
-
-      const reportData = buildReportData(dbOrders || [], {
-        role: 'vendor',
-        reportTitle: 'Zonal Admin Report',
-        entityName: vendor.name || 'Zonal Admin',
-        range: { start, end }
-      })
-      return json(reportData)
-    } catch (e) {
-      console.error('[Vendor Reports Data Error]:', e)
-      return err('Failed to build report: ' + e.message, 500)
-    }
-  }
-
-  // ==================== VENDOR REPORTS — EXPORT (PDF / Excel) ====================
-  if (p[0] === 'vendor' && p[1] === 'reports' && p[2] === 'export' && method === 'GET') {
-    if (!user) return err('Unauthorized', 401)
-    const vendor = await getVendorByUserId(user.id, user.email)
-    if (!vendor) return err('Zonal Admin not found', 404)
-    try {
-      const { buildReportData, generateReportPDF, generateReportExcel, resolveDateRange } = await import('@/lib/report-generator')
-      const exportType = url.searchParams.get('type') || 'pdf'
-      const rangeKey = url.searchParams.get('range') || 'last-6-months'
-      const customStart = url.searchParams.get('start_date')
-      const customEnd = url.searchParams.get('end_date')
-      const { start, end } = resolveDateRange(rangeKey, customStart, customEnd)
-
-      let query = supabase
-        .from('orders')
-        .select('id, order_number, status, total, placed_at, vendor_name, addresses(full_name), order_items(id, product_name_snapshot, quantity, price_snapshot)')
-        .eq('assigned_vendor_id', vendor.id)
-      if (start) query = query.gte('placed_at', start.toISOString())
-      if (end) query = query.lte('placed_at', end.toISOString())
-      query = query.order('placed_at', { ascending: false })
-
-      const { data: dbOrders, error } = await query
-      if (error) return err('Failed to fetch orders: ' + error.message, 500)
-
-      const reportData = buildReportData(dbOrders || [], {
-        role: 'vendor',
-        reportTitle: 'Zonal Admin Report',
-        entityName: vendor.name || 'Zonal Admin',
-        range: { start, end }
-      })
-
-      const vendorNameClean = (vendor.name || 'Zonal_Admin').replace(/\s+/g, '_')
-
-      if (exportType === 'excel') {
-        const buffer = generateReportExcel(reportData)
-        return new NextResponse(buffer, {
-          headers: {
-            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Content-Disposition': `attachment; filename="Zonal_Admin_Report_${vendorNameClean}.xlsx"`
-          }
-        })
-      }
-
-      // Default: PDF
-      const pdfBuffer = generateReportPDF(reportData)
-      return new NextResponse(pdfBuffer, {
-        headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="Zonal_Admin_Report_${vendorNameClean}.pdf"`
-        }
-      })
-    } catch (e) {
-      console.error('[Vendor Export Error]:', e)
-      return err('Report export failed: ' + e.message, 500)
-    }
-  }
-
   // ==================== VENDOR INVENTORY (READ-ONLY) ====================
   if (p[0] === 'vendor' && p[1] === 'inventory' && method === 'GET') {
     if (!user || (user.role !== 'vendor' && user.role !== 'admin')) {
@@ -4252,138 +4337,6 @@ Current Conversation History:\n` +
     }))
 
     return json(mappedProducts)
-  }
-
-  // ==================== ADMIN BILLING ====================
-  if (p[0] === 'admin' && p[1] === 'billing') {
-    if (!user || user.role !== 'admin') return err('Forbidden', 403)
-
-    if (method === 'GET') {
-      const customerId = url.searchParams.get('customer_id')
-      const statusFilter = url.searchParams.get('status')
-      const start = url.searchParams.get('start_date')
-      const end = url.searchParams.get('end_date')
-      const search = url.searchParams.get('search') || ''
-
-      // Fetch orders with user details including GSTIN
-      let query = supabase
-        .from('orders')
-        .select(`
-          id,
-          order_number,
-          user_id,
-          total,
-          status,
-          payment_method,
-          payment_status,
-          placed_at,
-          created_at,
-          addresses(full_name, city),
-          order_items(*)
-        `)
-        .in('status', ['pending_vendor_acceptance', 'accepted', 'processing', 'shipped', 'delivered', 'completed'])
-
-      if (customerId && customerId !== 'all') query = query.eq('user_id', customerId)
-      if (start) query = query.gte('placed_at', start)
-      if (end) query = query.lte('placed_at', end + 'T23:59:59')
-
-      const { data: orders } = await query.order('placed_at', { ascending: false })
-
-      // Fetch all users for customer info
-      const { data: usersList } = await supabase.from('users').select('id, email, full_name, gst_number')
-      const userMap = new Map((usersList || []).map(u => [u.id, u]))
-
-      // Calculate summary
-      let totalBilled = 0
-      let totalReceived = 0
-      let totalPending = 0
-
-      const rows = (orders || []).map(o => {
-        const customer = userMap.get(o.user_id) || {}
-
-        // Determine payment status - check both 'paid', 'Received', and delivered COD
-        let isPaid = false
-        const payStatus = o.payment_status?.toLowerCase() || ''
-        if (payStatus === 'paid' || payStatus === 'received' || payStatus === 'paid cod') {
-          isPaid = true
-        } else if (payStatus === 'pending' || payStatus === 'cod' || !payStatus) {
-          // COD orders: if delivered, consider received
-          if (o.status === 'delivered' || o.status === 'completed') {
-            isPaid = true
-          }
-        }
-
-        if (!isPaid) {
-          totalPending += o.total || 0
-        } else {
-          totalReceived += o.total || 0
-        }
-        totalBilled += o.total || 0
-
-        // Build row with correct field names for frontend
-        return {
-          id: o.id,
-          order_id: o.id,
-          invoice_number: 'INV-' + o.order_number,
-          created_at: o.placed_at || o.created_at,
-          placed_at: o.placed_at || o.created_at,
-          customer_id: o.user_id,
-          customer_name: customer?.full_name || o.addresses?.full_name || 'Customer',
-          customer_email: customer?.email || '',
-          gstin: customer?.gst_number || '',
-          total_amount: o.total || 0,
-          total: o.total || 0,
-          status: o.status,
-          payment_method: o.payment_method || 'COD',
-          payment_status: isPaid ? 'paid' : 'pending',
-          items: o.order_items || []
-        }
-      })
-
-      // Apply status filter
-      let filteredRows = rows
-      if (statusFilter && statusFilter !== 'all') {
-        filteredRows = rows.filter(r => r.payment_status === statusFilter)
-      }
-
-      // Apply search filter
-      if (search) {
-        const searchLower = search.toLowerCase()
-        filteredRows = filteredRows.filter(r =>
-          r.invoice_number?.toLowerCase().includes(searchLower) ||
-          r.customer_name?.toLowerCase().includes(searchLower) ||
-          r.customer_email?.toLowerCase().includes(searchLower) ||
-          r.order_number?.toLowerCase().includes(searchLower)
-        )
-      }
-
-      // Recalculate summary based on filtered data
-      totalBilled = 0
-      totalReceived = 0
-      totalPending = 0
-      filteredRows.forEach(r => {
-        totalBilled += r.total_amount || 0
-        if (r.payment_status === 'paid') {
-          totalReceived += r.total_amount || 0
-        } else {
-          totalPending += r.total_amount || 0
-        }
-      })
-
-      return json({
-        invoices: filteredRows,
-        summary: {
-          total_billed: totalBilled,
-          total_received: totalReceived,
-          total_pending: totalPending
-        },
-        all_customers: (usersList || []).map(u => ({
-          id: u.id,
-          email: u.email,
-          full_name: u.full_name
-        }))
-      })
-    }
   }
 
   // ==================== ADMIN SITE SETTINGS / MOQ ====================
@@ -4457,59 +4410,6 @@ Current Conversation History:\n` +
     })
   }
 
-  // ==================== ADMIN REPORTS — EXPORT (PDF / Excel) ====================
-  if (p[0] === 'admin' && p[1] === 'reports' && p[2] === 'export' && method === 'GET') {
-    if (!user || user.role !== 'admin') return err('Forbidden', 403)
-    try {
-      const { buildReportData, generateReportPDF, generateReportExcel, resolveDateRange } = await import('@/lib/report-generator')
-      const exportType = url.searchParams.get('type') || 'pdf'
-      const rangeKey = url.searchParams.get('range') || 'last-6-months'
-      const customStart = url.searchParams.get('start_date')
-      const customEnd = url.searchParams.get('end_date')
-      const { start, end } = resolveDateRange(rangeKey, customStart, customEnd)
-
-      const supabase = db()
-      let query = supabase
-        .from('orders')
-        .select('*, addresses(full_name), order_items(id, product_name_snapshot, quantity, price_snapshot, products(hsn_code))')
-      if (start) query = query.gte('placed_at', start.toISOString())
-      if (end) query = query.lte('placed_at', end.toISOString())
-      query = query.order('placed_at', { ascending: false })
-
-      const { data: dbOrders, error } = await query
-      if (error) return err('Failed to fetch orders: ' + error.message, 500)
-
-      const reportData = buildReportData(dbOrders || [], {
-        role: 'admin',
-        reportTitle: 'AK Enterprises — Sales Report',
-        entityName: 'All Orders',
-        range: { start, end }
-      })
-
-      if (exportType === 'excel') {
-        const buffer = generateReportExcel(reportData)
-        return new NextResponse(buffer, {
-          headers: {
-            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Content-Disposition': 'attachment; filename="AK_Enterprises_Sales_Report.xlsx"'
-          }
-        })
-      }
-
-      // Default: PDF
-      const pdfBuffer = generateReportPDF(reportData)
-      return new NextResponse(pdfBuffer, {
-        headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': 'attachment; filename="AK_Enterprises_Sales_Report.pdf"'
-        }
-      })
-    } catch (e) {
-      console.error('[Admin Reports Export Error]:', e)
-      return err('Report export failed: ' + e.message, 500)
-    }
-  }
-
   // ==================== ADMIN MONTHLY TRENDS ====================
   if (p[0] === 'admin' && p[1] === 'monthly-trends' && method === 'GET') {
     if (!user || user.role !== 'admin') return err('Forbidden', 403)
@@ -4580,105 +4480,6 @@ Current Conversation History:\n` +
     }
     
     return json(Object.values(customerMap))
-  }
-
-  // ==================== ADMIN BULK INVOICES ZIP EXPORT ====================
-  if (p[0] === 'admin' && p[1] === 'invoices-export' && method === 'GET') {
-    if (!user || user.role !== 'admin') return err('Forbidden', 403)
-    const supabase = db()
-    const start = url.searchParams.get('start_date')
-    const end = url.searchParams.get('end_date')
-    
-    let q = supabase.from('orders').select('*, address:addresses(*), order_items(*)')
-    if (start) q = q.gte('placed_at', start)
-    if (end) q = q.lte('placed_at', end)
-    
-    const { data: orders, error } = await q
-    if (error) return err('Failed to fetch invoices: ' + error.message, 500)
-    if (!orders || orders.length === 0) return err('No orders found in date range', 404)
-    
-    const JSZip = require('jszip')
-    const zip = new JSZip()
-    
-    for (const ord of orders) {
-      const tax = Math.round(ord.total * 0.18)
-      const base = ord.total - tax
-      
-      const invoiceHtml = `<!DOCTYPE html>
-  <html>
-  <head>
-    <meta charset="utf-8">
-    <title>Invoice #${ord.order_number}</title>
-    <style>
-      body { font-family: sans-serif; padding: 30px; color: #333; }
-      .header { border-bottom: 2px solid #800020; padding-bottom: 20px; margin-bottom: 20px; }
-      .title { font-size: 24px; font-weight: bold; color: #800020; }
-      .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
-      table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-      th, td { padding: 10px; border-bottom: 1px solid #ddd; text-align: left; }
-      th { background: #f9f9f9; }
-      .total-section { text-align: right; font-size: 16px; font-weight: bold; }
-    </style>
-  </head>
-  <body>
-    <div class="header">
-      <span class="title">AK ENTERPRISES</span><br>
-      <span>Trusted Corporate B2B Supplier, Pune</span><br>
-      <span>GSTIN: 27AAFFA1411D1Z1 (Placeholder)</span>
-    </div>
-    <div class="meta-grid">
-      <div>
-        <strong>Invoice To:</strong><br>
-        ${ord.address?.full_name || 'Customer'}<br>
-        ${ord.address?.line1 || ''}, ${ord.address?.city || ''}<br>
-        Phone: ${ord.address?.phone || ''}
-      </div>
-      <div style="text-align: right;">
-        <strong>Invoice Details:</strong><br>
-        Invoice #: ${ord.order_number}<br>
-        Date: ${new Date(ord.placed_at).toLocaleDateString()}<br>
-        Payment: ${ord.payment_method}
-      </div>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Item Description</th>
-          <th>Qty</th>
-          <th>Unit Price</th>
-          <th>Total (₹)</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${(ord.order_items || []).map(it => `
-          <tr>
-            <td>${it.product_name_snapshot || 'Product'}</td>
-            <td>${it.quantity}</td>
-            <td>₹${it.price_snapshot || 0}</td>
-            <td>₹${(it.quantity * (it.price_snapshot || 0)).toLocaleString()}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
-    <div class="total-section">
-      <p>Base Amount: ₹${base.toLocaleString()}</p>
-      <p>GST (18%): ₹${tax.toLocaleString()}</p>
-      <p style="font-size: 20px; color: #800020;">Grand Total: ₹${ord.total.toLocaleString()}</p>
-    </div>
-  </body>
-  </html>`
-      zip.file(`invoice_${ord.order_number}.html`, invoiceHtml)
-    }
-    
-    const content = await zip.generateAsync({ type: 'nodebuffer' })
-    
-    return new NextResponse(content, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="invoices_${start || 'all'}_to_${end || 'all'}.zip"`
-      }
-    })
   }
 
   // ==================== REFERRAL STATS ====================
