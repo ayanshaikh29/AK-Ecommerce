@@ -300,7 +300,17 @@ async function ensureSeed() {
       { name: 'UPS Solutions', slug: 'ups-solutions', description: 'UPS systems, batteries & power backup accessories', image_url: '/category-ups.jpg', icon: 'BatteryCharging', min_order_value: null },
       { name: 'Grocery', slug: 'grocery', description: 'Daily groceries, pantry supplies & office kitchen essentials', image_url: '/category-grocery.jpg', icon: 'ShoppingBasket', min_order_value: null },
     ].map(c => ({ id: uuidv4(), ...c, created_at: now }))
-    await supabase.from('categories').insert(cats)
+    
+    let { error } = await supabase.from('categories').insert(cats)
+    if (error && (error.message.includes("column") || error.code === '42703')) {
+      const fallbackCats = cats.map(c => {
+        const copy = { ...c }
+        delete copy.description
+        delete copy.icon
+        return copy
+      })
+      await supabase.from('categories').insert(fallbackCats)
+    }
   } else {
     // Ensure min_order_value values are synced on existing categories
     await supabase.from('categories').update({ min_order_value: 5000 }).eq('slug', 'housekeeping')
@@ -310,7 +320,7 @@ async function ensureSeed() {
     // Ensure Grocery category exists
     const hasGrocery = existingCats.some(c => c.slug === 'grocery')
     if (!hasGrocery) {
-      await supabase.from('categories').insert({
+      const groceryDoc = {
         id: uuidv4(),
         name: 'Grocery',
         slug: 'grocery',
@@ -319,7 +329,14 @@ async function ensureSeed() {
         icon: 'ShoppingBasket',
         min_order_value: null,
         created_at: now
-      })
+      }
+      let { error } = await supabase.from('categories').insert(groceryDoc)
+      if (error && (error.message.includes("column") || error.code === '42703')) {
+        const fallbackGrocery = { ...groceryDoc }
+        delete fallbackGrocery.description
+        delete fallbackGrocery.icon
+        await supabase.from('categories').insert(fallbackGrocery)
+      }
     }
   }
 
@@ -765,7 +782,7 @@ async function route(req, method) {
   if (p[0] === 'categories') {
     if (method === 'GET') {
       const { data: cats } = await supabase.from('categories').select('*').order('name', { ascending: true })
-      return json(cats || [], 200, 300)
+      return json(cats || [], 200)
     }
     if (method === 'POST') {
       if (!user || user.role !== 'admin') return err('Forbidden', 403)
@@ -774,7 +791,14 @@ async function route(req, method) {
       const slug = body.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
       const id = uuidv4()
       const doc = { id, name, slug, min_order_value: min_order_value !== undefined ? (min_order_value === '' ? null : Number(min_order_value)) : null, description: description || '', created_at: new Date().toISOString() }
-      const { error } = await supabase.from('categories').insert(doc)
+      
+      let { error } = await supabase.from('categories').insert(doc)
+      if (error && (error.message.includes("column \"description\"") || error.message.includes("description") || error.code === '42703')) {
+        const fallbackDoc = { ...doc }
+        delete fallbackDoc.description
+        const { error: retryErr } = await supabase.from('categories').insert(fallbackDoc)
+        error = retryErr
+      }
       if (error) return err(error.message, 500)
       return json(doc)
     }
@@ -787,7 +811,13 @@ async function route(req, method) {
       updateData.min_order_value = min_order_value !== undefined ? (min_order_value === '' ? null : Number(min_order_value)) : null
       if (description !== undefined) updateData.description = description
       
-      const { error } = await supabase.from('categories').update(updateData).eq('id', p[1])
+      let { error } = await supabase.from('categories').update(updateData).eq('id', p[1])
+      if (error && (error.message.includes("column \"description\"") || error.message.includes("description") || error.code === '42703')) {
+        const fallbackUpdate = { ...updateData }
+        delete fallbackUpdate.description
+        const { error: retryErr } = await supabase.from('categories').update(fallbackUpdate).eq('id', p[1])
+        error = retryErr
+      }
       if (error) return err(error.message, 500)
       return json({ ok: true })
     }
@@ -3163,7 +3193,7 @@ async function route(req, method) {
   if (p[0] === 'settings') {
     if (method === 'GET') {
       const { data: s } = await supabase.from('settings').select('*').eq('id', 'main').maybeSingle()
-      return json(s || {}, 200, 300)
+      return json(s || {}, 200)
     }
     if (method === 'PUT') {
       if (!user || user.role !== 'admin') return err('Forbidden', 403)
@@ -3181,7 +3211,7 @@ async function route(req, method) {
       .eq('id', 'main')
       .maybeSingle()
 
-    if (error) return json([], 200, 300)
+    if (error) return json([], 200)
 
     let cms = {}
     if (data && data.b2b_customer_logins) {
@@ -3206,7 +3236,7 @@ async function route(req, method) {
         }
       }
     }
-    return json(rows, 200, 300)
+    return json(rows, 200)
   }
 
   // ==================== ADMIN SITE CONTENT — MANAGEMENT ====================
@@ -3289,7 +3319,7 @@ async function route(req, method) {
   if (p[0] === 'banners') {
     if (method === 'GET') {
       const { data: list } = await supabase.from('banners').select('*').eq('is_active', true).order('sort_order', { ascending: true })
-      return json(list || [], 200, 300)
+      return json(list || [], 200)
     }
     if (method === 'POST') {
       if (!user || user.role !== 'admin') return err('Forbidden', 403)
@@ -3312,7 +3342,7 @@ async function route(req, method) {
   if (p[0] === 'clients') {
     if (method === 'GET') {
       const { data: list } = await supabase.from('clients').select('*').eq('is_active', true).order('sort_order', { ascending: true })
-      return json(list || [], 200, 300)
+      return json(list || [], 200)
     }
     if (method === 'POST') {
       if (!user || user.role !== 'admin') return err('Forbidden', 403)
@@ -4451,26 +4481,47 @@ Current Conversation History:\n` +
   if (p[0] === 'admin' && p[1] === 'customers' && method === 'GET') {
     if (!user || user.role !== 'admin') return err('Forbidden', 403)
     const supabase = db()
+    const q = url.searchParams.get('q') || ''
     
-    const { data: usersList } = await supabase.from('users').select('id, email, full_name, phone, role, created_at')
-    const { data: ordersList } = await supabase.from('orders').select('user_id, total, status, placed_at')
+    let query = supabase.from('users').select('id, email, full_name, phone, role, created_at, gst_number, company_name').eq('role', 'customer')
+    if (q) {
+      let filterStr = `full_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%,company_name.ilike.%${q}%,gst_number.ilike.%${q}%`
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(q)
+      if (isUuid) {
+        filterStr += `,id.eq.${q}`
+      }
+      query = query.or(filterStr)
+    }
+    
+    const { data: usersList } = await query
+    
+    const userIds = (usersList || []).map(u => u.id)
+    let ordersList = []
+    if (userIds.length > 0) {
+      const { data } = await supabase
+        .from('orders')
+        .select('user_id, total, status, placed_at')
+        .in('user_id', userIds)
+      ordersList = data || []
+    }
     
     const customerMap = {}
     for (const u of (usersList || [])) {
-      if (u.role !== 'customer') continue
       customerMap[u.id] = {
         id: u.id,
         email: u.email,
         full_name: u.full_name,
         phone: u.phone,
         created_at: u.created_at,
+        gst_number: u.gst_number,
+        company_name: u.company_name,
         ordersCount: 0,
         totalSpent: 0,
         lastOrderDate: null
       }
     }
     
-    for (const ord of (ordersList || [])) {
+    for (const ord of ordersList) {
       const cust = customerMap[ord.user_id]
       if (cust) {
         if (ord.status !== 'cancelled') {
@@ -4935,6 +4986,263 @@ Current Conversation History:\n` +
       return json({ ok: true, message: `Successfully updated ${updatedCount} orders`, updatedCount })
     } catch (e) {
       console.error('[Admin Bulk Resync Unexpected]:', e)
+      return err('Internal error: ' + e.message, 500)
+    }
+  }
+
+  if (p[0] === 'admin' && p[1] === 'factory-reset' && method === 'POST') {
+    if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
+    try {
+      const { confirmText, includeProductsCategories, password } = body || {}
+      if (confirmText !== 'DELETE ALL DATA') {
+        return err('Invalid confirmation text. Must type exactly "DELETE ALL DATA"', 400)
+      }
+      
+      const supabase = db()
+      const { data: adminRecord } = await supabase.from('users').select('id, email, password').eq('id', user.id).maybeSingle()
+      if (!adminRecord || adminRecord.password !== hashPw(password)) {
+        return err('Re-authentication failed. Incorrect password.', 401)
+      }
+
+      const auditLogText = `[FACTORY RESET] Timestamp: ${new Date().toISOString()} | Admin: ${adminRecord.email} | Mode: ${includeProductsCategories ? 'Mode 2 (Includes Catalog)' : 'Mode 1 (Transactional Only)'}`
+      console.log(auditLogText)
+
+      // 1. Gather row counts before delete
+      const tablesList = [
+        'order_items', 'orders', 'return_requests', 'invoice_generation_logs',
+        'wishlist_items', 'reviews', 'product_qa', 'customer_product_pricing',
+        'customer_logins', 'addresses', 'notifications', 'activity_logs',
+        'chat_logs', 'client_errors', 'bulk_enquiries', 'catalog_access_requests',
+        'catalog_requests', 'inquiries', 'product_requests', 'newsletter',
+        'vendors', 'clients'
+      ]
+      
+      const summary = {}
+      for (const table of tablesList) {
+        try {
+          const { count } = await supabase.from(table).select('*', { count: 'exact', head: true })
+          summary[table] = count || 0
+        } catch {
+          summary[table] = 0
+        }
+      }
+      
+      try {
+        const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).not('id', 'eq', user.id)
+        summary['profiles'] = count || 0
+      } catch { summary['profiles'] = 0 }
+      try {
+        const { count } = await supabase.from('users').select('*', { count: 'exact', head: true }).not('role', 'in', '("admin","owner")')
+        summary['users'] = count || 0
+      } catch { summary['users'] = 0 }
+
+      if (includeProductsCategories) {
+        try {
+          const { count: pic } = await supabase.from('product_images').select('*', { count: 'exact', head: true })
+          summary['product_images'] = pic || 0
+        } catch { summary['product_images'] = 0 }
+        try {
+          const { count: pc } = await supabase.from('products').select('*', { count: 'exact', head: true })
+          summary['products'] = pc || 0
+        } catch { summary['products'] = 0 }
+        try {
+          const { count: cc } = await supabase.from('categories').select('*', { count: 'exact', head: true })
+          summary['categories'] = cc || 0
+        } catch { summary['categories'] = 0 }
+      }
+
+      // Helper to safely delete all rows
+      async function clearTable(table) {
+        let res = await supabase.from(table).delete().neq('id', '00000000-0000-0000-0000-000000000000')
+        if (res.error && (res.error.message.includes('column "id" does not exist') || res.error.code === '42703')) {
+          res = await supabase.from(table).delete().neq('email', 'never_match_this_val')
+          if (res.error && (res.error.message.includes('column "email" does not exist') || res.error.code === '42703')) {
+            res = await supabase.from(table).delete().gt('created_at', '1970-01-01T00:00:00Z')
+          }
+        }
+        if (res.error) {
+          // Skip tables that don't exist (not an error - they just haven't been created yet)
+          if (res.error.message.includes('Could not find the table') || res.error.code === '42P01') {
+            console.log(`[Factory Reset] Skipping table ${table}: table does not exist yet`)
+            return
+          }
+          console.error(`[Factory Reset] Error deleting all rows from ${table}:`, res.error.message)
+        }
+      }
+
+      // 2. Perform deletes sequentially (child first)
+      for (const table of tablesList) {
+        await clearTable(table)
+      }
+
+      // Profiles (excluding current admin)
+      try {
+        await supabase.from('profiles').delete().not('id', 'eq', user.id)
+      } catch (e) {
+        console.error('[Factory Reset] Error deleting profiles:', e)
+      }
+
+      // Users (excluding admins/owners)
+      try {
+        await supabase.from('users').delete().not('role', 'in', '("admin","owner")')
+      } catch (e) {
+        console.error('[Factory Reset] Error deleting users:', e)
+      }
+
+      // 3. Clear Products/Categories (Mode 2)
+      if (includeProductsCategories) {
+        await clearTable('product_images')
+        await clearTable('products')
+        await clearTable('categories')
+        
+        // Remove storage files in product-images bucket
+        try {
+          const { data: files } = await supabase.storage.from('product-images').list()
+          if (files && files.length > 0) {
+            const paths = files.map(f => f.name)
+            await supabase.storage.from('product-images').remove(paths)
+          }
+        } catch (e) {
+          console.error('[Factory Reset] Error cleaning storage bucket:', e)
+        }
+      }
+
+      return json({ ok: true, message: 'Website reset successfully', summary })
+    } catch (e) {
+      console.error('[Admin Factory Reset Unexpected]:', e)
+      return err('Internal error: ' + e.message, 500)
+    }
+  }
+
+  if (p[0] === 'admin' && p[1] === 'restore-backup' && method === 'POST') {
+    if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
+    try {
+      const { backupData, password } = body || {}
+      if (!backupData || typeof backupData !== 'object') {
+        return err('Invalid backup data. Upload a valid backup JSON file.', 400)
+      }
+      
+      const supabase = db()
+      // Re-authenticate admin
+      const { data: adminRecord } = await supabase.from('users').select('id, email, password').eq('id', user.id).maybeSingle()
+      if (!adminRecord || adminRecord.password !== hashPw(password)) {
+        return err('Re-authentication failed. Incorrect password.', 401)
+      }
+
+      console.log(`[RESTORE BACKUP] Timestamp: ${new Date().toISOString()} | Admin: ${adminRecord.email}`)
+
+      const results = {}
+
+      // Helper: upsert rows into a table, skipping failures
+      async function restoreTable(tableName, rows, idKey = 'id') {
+        if (!rows || !Array.isArray(rows) || rows.length === 0) {
+          results[tableName] = { restored: 0, skipped: 0 }
+          return
+        }
+        let restored = 0
+        let skipped = 0
+        for (const row of rows) {
+          try {
+            // Clean row — remove any undefined values
+            const cleanRow = {}
+            for (const [k, v] of Object.entries(row)) {
+              if (v !== undefined) cleanRow[k] = v
+            }
+            const { error } = await supabase.from(tableName).upsert(cleanRow, { onConflict: idKey, ignoreDuplicates: true })
+            if (error) {
+              console.error(`[Restore] ${tableName} skip row:`, error.message)
+              skipped++
+            } else {
+              restored++
+            }
+          } catch {
+            skipped++
+          }
+        }
+        results[tableName] = { restored, skipped }
+      }
+
+      // Restore in parent-first order (reverse of deletion order)
+      // 1. Users & Profiles first (parents)
+      if (backupData.customers) {
+        // Customers go into users table as role='customer'
+        const userRows = backupData.customers.map(c => ({
+          id: c.id,
+          email: c.email,
+          full_name: c.full_name || c.name || '',
+          phone: c.phone || '',
+          role: c.role || 'customer',
+          password: c.password || '',
+          gst_number: c.gst_number || null,
+          company_name: c.company_name || null,
+          is_active: c.is_active !== false,
+          created_at: c.created_at || new Date().toISOString(),
+        }))
+        // Filter out admin/owner rows to not overwrite
+        const safeRows = userRows.filter(r => r.role !== 'admin' && r.role !== 'owner')
+        await restoreTable('users', safeRows)
+        
+        // Also restore profiles
+        const profileRows = safeRows.map(c => ({
+          id: c.id,
+          full_name: c.full_name || c.name || '',
+          email: c.email,
+          phone: c.phone || '',
+          company_name: c.company_name || null,
+          gst_number: c.gst_number || null,
+          address: c.address || null,
+          city: c.city || null,
+          state: c.state || null,
+          pincode: c.pincode || null,
+        }))
+        await restoreTable('profiles', profileRows)
+      }
+
+      // 2. Vendors
+      if (backupData.vendors) {
+        await restoreTable('vendors', backupData.vendors)
+      }
+
+      // 3. Categories (before products)
+      if (backupData.categories) {
+        await restoreTable('categories', backupData.categories)
+      }
+
+      // 4. Products
+      if (backupData.products) {
+        await restoreTable('products', backupData.products)
+      }
+
+      // 5. Orders (parent before order_items)
+      if (backupData.orders) {
+        // Separate order items if embedded
+        const orderRows = backupData.orders.map(o => {
+          const { items, order_items, ...orderData } = o
+          return orderData
+        })
+        await restoreTable('orders', orderRows)
+
+        // Restore order items if they're embedded in orders
+        const allItems = []
+        for (const o of backupData.orders) {
+          const items = o.items || o.order_items || []
+          for (const item of items) {
+            allItems.push({ ...item, order_id: item.order_id || o.id })
+          }
+        }
+        if (allItems.length > 0) {
+          await restoreTable('order_items', allItems)
+        }
+      }
+
+      return json({ 
+        ok: true, 
+        message: 'Backup restored successfully', 
+        results,
+        restored_at: new Date().toISOString()
+      })
+    } catch (e) {
+      console.error('[Admin Restore Backup Unexpected]:', e)
       return err('Internal error: ' + e.message, 500)
     }
   }

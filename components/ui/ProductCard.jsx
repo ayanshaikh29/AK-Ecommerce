@@ -256,11 +256,6 @@ export function ProductCard({ product }) {
             <span className="font-display font-extrabold text-base text-foreground">
               {formatINR(product.price)}
             </span>
-            {product.mrp > product.price && (
-              <span className="text-xs text-muted-foreground line-through">
-                {formatINR(product.mrp)}
-              </span>
-            )}
           </div>
         </Link>
         <div className="mt-3.5 pt-1.5 border-t border-border/40">

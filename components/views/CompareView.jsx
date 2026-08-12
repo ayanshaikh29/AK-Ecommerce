@@ -98,9 +98,6 @@ export function CompareView() {
               {list.map(p => (
                 <td key={p.id} className="p-4 text-center border-l">
                   <span className="font-extrabold text-primary text-sm md:text-base">₹{p.price.toLocaleString('en-IN')}</span>
-                  {p.mrp > p.price && (
-                    <span className="text-xs text-muted-foreground line-through block">₹{p.mrp.toLocaleString('en-IN')}</span>
-                  )}
                 </td>
               ))}
             </tr>

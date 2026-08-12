@@ -15,13 +15,10 @@ const dbPassword = process.argv[2] || process.env.SUPABASE_DB_PASSWORD;
 
 if (!dbPassword) {
   console.error('Error: Please provide the database password as an argument or set SUPABASE_DB_PASSWORD in your .env file.');
-  console.error('Usage: node scripts/run-migration.js <password>');
+  console.error('Usage: node scripts/run-missing-tables.js <password>');
   process.exit(1);
 }
 
-// Supabase host typically resolves to aws-0-[region].pooler.supabase.com or similar.
-// We can also try the project ref pooler address directly.
-const host = 'aws-0-ap-south-1.pooler.supabase.com'; // Adjust if region is different, or try connection string
 const connectionString = `postgresql://postgres:${encodeURIComponent(dbPassword)}@db.xgxqremmwxnwplhpvtux.supabase.co:5432/postgres`;
 
 console.log('Connecting to database...');
@@ -35,28 +32,22 @@ async function run() {
     await client.connect();
     console.log('Connected successfully!');
     
-    // Run missing tables migration first
     console.log('Running migration for missing tables...');
-    const missingTablesPath = path.join(__dirname, '..', 'schema-missing-tables.sql');
-    const missingTablesSql = fs.readFileSync(missingTablesPath, 'utf8');
-    await client.query(missingTablesSql);
-    console.log('Missing tables migration ran successfully!');
-
-    console.log('Running migration from schema-profile-fields.sql...');
-    const sqlPath = path.join(__dirname, '..', 'schema-profile-fields.sql');
+    const sqlPath = path.join(__dirname, '..', 'schema-missing-tables.sql');
     const sql = fs.readFileSync(sqlPath, 'utf8');
     await client.query(sql);
-    console.log('Migration ran successfully!');
+    console.log('Migration completed successfully!');
     
-    // Check columns on users table
+    // Verify tables exist
     const checkSql = `
-      SELECT column_name, data_type 
-      FROM information_schema.columns 
-      WHERE table_name = 'users';
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name IN ('return_requests', 'bulk_enquiries', 'activity_logs', 'chat_logs', 'product_qa', 'catalog_access_requests', 'product_requests')
+      ORDER BY table_name;
     `;
     const res = await client.query(checkSql);
-    const cols = res.rows.map(r => r.column_name);
-    console.log('Verification: columns currently on users table:', cols);
+    console.log('Verified tables created:', res.rows.map(r => r.table_name).join(', '));
   } catch (err) {
     console.error('Migration failed:', err.message);
   } finally {

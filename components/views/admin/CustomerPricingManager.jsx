@@ -37,6 +37,9 @@ export function CustomerPricingManager() {
   const [activeTab, setActiveTab] = useState('pricing') // 'pricing' | 'requests' | 'logins'
   const [customers, setCustomers] = useState([])
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [searchingCustomers, setSearchingCustomers] = useState(false)
+  const [customerSearchResults, setCustomerSearchResults] = useState([])
   const [customerData, setCustomerData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -178,12 +181,33 @@ export function CustomerPricingManager() {
       .then(res => res.ok ? res.json() : [])
       .then(data => {
         setCustomers(data || [])
-        if (data && data.length > 0 && !selectedCustomerId) {
-          setSelectedCustomerId(data[0].id)
-        }
       })
       .catch(err => console.error('Error fetching customers:', err))
-  }, [selectedCustomerId])
+  }, [])
+
+  const fetchCustomerSearchResults = useCallback((queryStr) => {
+    setSearchingCustomers(true)
+    fetch(`/api/admin/customers?q=${encodeURIComponent(queryStr)}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    })
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        setCustomerSearchResults(data || [])
+      })
+      .catch(err => console.error('Error searching customers:', err))
+      .finally(() => setSearchingCustomers(false))
+  }, [])
+
+  useEffect(() => {
+    if (!customerSearch.trim()) {
+      setCustomerSearchResults([])
+      return
+    }
+    const delayDebounce = setTimeout(() => {
+      fetchCustomerSearchResults(customerSearch)
+    }, 400)
+    return () => clearTimeout(delayDebounce)
+  }, [customerSearch, fetchCustomerSearchResults])
 
   useRealtimeCustomers(fetchCustomerList)
 
@@ -586,7 +610,7 @@ export function CustomerPricingManager() {
     }
   }
 
-  const selectedCustomerObj = customers.find(c => c.id === selectedCustomerId)
+  const selectedCustomerObj = customers.find(c => c.id === selectedCustomerId) || customerSearchResults.find(c => c.id === selectedCustomerId)
 
   const productsList = customerData?.products || []
   const categoriesList = Array.from(new Set(productsList.map(p => p.category_name))).filter(Boolean)
@@ -911,35 +935,123 @@ export function CustomerPricingManager() {
           }`}
         >
           <CardContent className="p-6 space-y-4">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div className="flex-1 w-full md:max-w-md">
-                <label className="text-xs font-bold text-foreground mb-1.5 block">Select B2B Customer Account</label>
-                <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
-                  <SelectTrigger className="h-11 rounded-xl bg-background border font-semibold">
-                    <SelectValue placeholder="Choose client..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {customers.map(c => (
-                      <SelectItem key={c.id} value={c.id} className="text-xs">
-                        <span className="font-bold">{c.full_name || 'Customer'}</span>
-                        <span className="text-muted-foreground ml-2">({c.email})</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {selectedCustomerObj && (
-                <div className="flex items-center gap-3 bg-secondary/50 p-3 rounded-xl border w-full md:w-auto">
-                  <div>
-                    <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Selected Client</p>
-                    <p className="text-sm font-bold text-foreground">{selectedCustomerObj.full_name}</p>
-                    <p className="text-xs font-mono text-muted-foreground">{selectedCustomerObj.email}</p>
+            <div className="flex flex-col gap-4">
+              {!selectedCustomerId ? (
+                <div className="w-full">
+                  <label className="text-xs font-bold text-foreground mb-1.5 block">Search and select a B2B customer</label>
+                  <div className="relative">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Search by Name, Email, Phone, Company, GSTIN or ID..."
+                      value={customerSearch}
+                      onChange={e => setCustomerSearch(e.target.value)}
+                      className="pl-10 h-11 rounded-xl bg-background border font-medium text-sm"
+                    />
                   </div>
-                  <div className="ml-auto md:ml-4 text-right">
-                    <Badge className="bg-emerald-500/20 text-emerald-600 font-extrabold px-2.5 py-1 text-xs">
+                  
+                  {customerSearch.trim() === '' ? (
+                    customers.length > 0 && (
+                      <div className="mt-2 border rounded-xl bg-popover max-h-60 overflow-y-auto divide-y shadow-md">
+                        <p className="p-2 text-[10px] uppercase font-bold text-muted-foreground bg-secondary/20 px-3">Available B2B Customers</p>
+                        {customers.slice(0, 8).map(c => (
+                          <div
+                            key={c.id}
+                            onClick={() => {
+                              setSelectedCustomerId(c.id)
+                            }}
+                            className="p-3 hover:bg-accent hover:text-accent-foreground cursor-pointer transition text-xs flex justify-between items-center"
+                          >
+                            <div>
+                              <p className="font-bold text-sm">{c.full_name || 'No Name'}</p>
+                              <p className="text-muted-foreground font-mono">{c.email}</p>
+                              {c.company_name && <p className="text-[10px] text-muted-foreground">Company: {c.company_name}</p>}
+                            </div>
+                            <div className="text-right">
+                              {c.phone && <p className="text-muted-foreground">{c.phone}</p>}
+                              {c.gst_number && <p className="text-[10px] bg-amber-500/10 text-amber-600 px-1.5 py-0.5 rounded font-mono font-bold mt-1 inline-block">GSTIN: {c.gst_number}</p>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  ) : (
+                    <div className="mt-2 border rounded-xl bg-popover max-h-60 overflow-y-auto divide-y shadow-md">
+                      {searchingCustomers ? (
+                        <div className="p-3 text-xs text-muted-foreground text-center">Searching customers...</div>
+                      ) : customerSearchResults.length === 0 ? (
+                        <div className="p-3 text-xs text-muted-foreground text-center">No customers found</div>
+                      ) : (
+                        customerSearchResults.map(c => (
+                          <div
+                            key={c.id}
+                            onClick={() => {
+                              setSelectedCustomerId(c.id)
+                              setCustomerSearch('')
+                              setCustomerSearchResults([])
+                            }}
+                            className="p-3 hover:bg-accent hover:text-accent-foreground cursor-pointer transition text-xs flex justify-between items-center"
+                          >
+                            <div>
+                              <p className="font-bold text-sm">{c.full_name || 'No Name'}</p>
+                              <p className="text-muted-foreground font-mono">{c.email}</p>
+                              {c.company_name && <p className="text-[10px] text-muted-foreground">Company: {c.company_name}</p>}
+                            </div>
+                            <div className="text-right">
+                              {c.phone && <p className="text-muted-foreground">{c.phone}</p>}
+                              {c.gst_number && <p className="text-[10px] bg-amber-500/10 text-amber-600 px-1.5 py-0.5 rounded font-mono font-bold mt-1 inline-block">GSTIN: {c.gst_number}</p>}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-secondary/30 p-4 rounded-xl border">
+                  <div className="flex-1">
+                    <p className="text-[10px] uppercase font-bold text-amber-500 tracking-wider">Selected B2B Customer</p>
+                    <h3 className="text-lg font-bold text-foreground mt-0.5">{selectedCustomerObj?.full_name || 'No Name'}</h3>
+                    <p className="text-xs font-mono text-muted-foreground">{selectedCustomerObj?.email}</p>
+                    {(selectedCustomerObj?.company_name || selectedCustomerObj?.gst_number || selectedCustomerObj?.phone) && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {selectedCustomerObj?.company_name && (
+                          <Badge variant="outline" className="bg-background text-xs font-semibold px-2 py-0.5">
+                            Company: {selectedCustomerObj.company_name}
+                          </Badge>
+                        )}
+                        {selectedCustomerObj?.gst_number && (
+                          <Badge variant="outline" className="bg-background text-xs font-mono font-bold px-2 py-0.5 border-amber-500/50 text-amber-600">
+                            GSTIN: {selectedCustomerObj.gst_number}
+                          </Badge>
+                        )}
+                        {selectedCustomerObj?.phone && (
+                          <Badge variant="outline" className="bg-background text-xs font-semibold px-2 py-0.5">
+                            Phone: {selectedCustomerObj.phone}
+                          </Badge>
+                        )}
+                        <Badge variant="outline" className="bg-background text-xs font-mono px-2 py-0.5">
+                          ID: {selectedCustomerObj?.id}
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center gap-3 w-full md:w-auto mt-2 md:mt-0">
+                    <Badge className="bg-emerald-500/20 text-emerald-600 font-extrabold px-3 py-1.5 text-xs whitespace-nowrap">
                       Visible Products: {customerData?.assigned_count || 0} / {productsList.length}
                     </Badge>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => {
+                        setSelectedCustomerId('')
+                        setCustomerData(null)
+                      }}
+                      className="rounded-xl border-destructive/30 text-destructive hover:bg-destructive/5 hover:text-destructive h-9"
+                    >
+                      Change Customer
+                    </Button>
                   </div>
                 </div>
               )}

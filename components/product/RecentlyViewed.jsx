@@ -39,9 +39,6 @@ export function RecentlyViewed() {
                   <h4 className="font-bold text-xs md:text-sm truncate text-foreground group-hover:text-primary transition">{p.name}</h4>
                   <div className="flex items-center gap-2 mt-2">
                     <span className="font-extrabold text-primary text-xs md:text-sm">₹{p.price.toLocaleString('en-IN')}</span>
-                    {p.mrp > p.price && (
-                      <span className="text-[10px] md:text-[11px] text-muted-foreground line-through">₹{p.mrp.toLocaleString('en-IN')}</span>
-                    )}
                   </div>
                 </CardContent>
               </Card>

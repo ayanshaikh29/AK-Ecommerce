@@ -196,12 +196,16 @@ export function HomeView({ initialFeatured, initialCats, initialTrending, initia
               <h2 className="font-display text-4xl md:text-6xl font-extrabold">Our <span className="gold-shine">valued</span> clients</h2>
             </div>
             <div className="marquee-wrap overflow-hidden">
-              <div className="flex whitespace-nowrap marquee">
-                {[...initialClients, ...initialClients, ...initialClients].map((c, i) => (
+              <div className="flex whitespace-nowrap w-max marquee">
+                {[...initialClients, ...initialClients].map((c, i) => (
                   <div key={i} className="mx-4 inline-flex items-center gap-4 glass-dark radius-lg px-8 py-6">
-                    <div className="w-12 h-12 gold-gradient rounded-xl flex items-center justify-center shrink-0">
-                      <Building2 className="w-6 h-6 text-primary" />
-                    </div>
+                    {c.logo_url ? (
+                      <img src={c.logo_url} alt={c.name} className="h-10 max-w-[120px] object-contain" />
+                    ) : (
+                      <div className="w-12 h-12 gold-gradient rounded-xl flex items-center justify-center shrink-0">
+                        <Building2 className="w-6 h-6 text-primary" />
+                      </div>
+                    )}
                     <span className="font-display font-extrabold text-xl">{c.name}</span>
                   </div>
                 ))}
@@ -414,7 +418,7 @@ function FeaturedSection({ products, router }) {
               <div className="absolute bottom-0 left-0 right-0 p-8 text-white">
                 <p className="text-accent text-xs uppercase tracking-widest mb-2 font-semibold">Featured</p>
                 <h3 className="font-display text-3xl md:text-4xl font-extrabold mb-3 text-balance">{hero.name}</h3>
-                <div className="flex items-baseline gap-3 mb-4"><span className="text-2xl font-bold">{formatINR(hero.price)}</span>{hero.mrp > hero.price && <span className="text-sm text-white/60 line-through">{formatINR(hero.mrp)}</span>}</div>
+                <div className="flex items-baseline gap-3 mb-4"><span className="text-2xl font-bold">{formatINR(hero.price)}</span></div>
                 <span className="inline-flex items-center gap-2 text-accent font-semibold group-hover:gap-3 transition-all">Shop now <ArrowUpRight className="w-4 h-4 group-hover:rotate-45 transition-transform" /></span>
               </div>
             </Link>
@@ -614,7 +618,7 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
   if (clientsBase === DEFAULT_CLIENTS && initialClients && initialClients.length > 0) {
     clientsBase = initialClients
   }
-  const marqueeClients = [...clientsBase, ...clientsBase, ...clientsBase]
+  const marqueeClients = [...clientsBase, ...clientsBase]
 
   return (
     <div>
@@ -741,15 +745,23 @@ function LoggedOutHomeView({ initialClients, siteContent = {} }) {
           </motion.div>
 
           <div className="marquee-wrap overflow-hidden">
-            <div className="flex whitespace-nowrap marquee">
-              {marqueeClients.map((c, i) => (
-                <div key={i} className="mx-4 inline-flex items-center gap-4 glass-dark radius-lg px-8 py-5 group hover:border-accent/30 transition-all duration-300">
-                  <div className="w-11 h-11 gold-gradient rounded-xl flex items-center justify-center shrink-0 group-hover:rotate-6 group-hover:scale-110 transition-all duration-300">
-                    <Building2 className="w-5 h-5 text-primary" />
+            <div className="flex whitespace-nowrap w-max marquee">
+              {marqueeClients.map((c, i) => {
+                const name = typeof c === 'string' ? c : c?.name || ''
+                const logoUrl = typeof c === 'string' ? null : c?.logo_url
+                return (
+                  <div key={i} className="mx-4 inline-flex items-center gap-4 glass-dark radius-lg px-8 py-5 group hover:border-accent/30 transition-all duration-300">
+                    {logoUrl ? (
+                      <img src={logoUrl} alt={name} className="h-9 max-w-[130px] object-contain opacity-80 group-hover:opacity-100 transition-all duration-300" />
+                    ) : (
+                      <div className="w-11 h-11 gold-gradient rounded-xl flex items-center justify-center shrink-0 group-hover:rotate-6 group-hover:scale-110 transition-all duration-300">
+                        <Building2 className="w-5 h-5 text-primary" />
+                      </div>
+                    )}
+                    <span className="font-display font-extrabold text-xl text-white/90 group-hover:text-accent transition-colors">{name}</span>
                   </div>
-                  <span className="font-display font-extrabold text-xl text-white/90 group-hover:text-accent transition-colors">{typeof c === 'string' ? c : c.name}</span>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         </div>

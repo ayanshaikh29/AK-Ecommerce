@@ -1,6 +1,8 @@
 import { getSupabase, getSiteContent } from '@/lib/supabase'
 import { ProductsView } from '@/components/views/ProductsView'
 
+export const dynamic = 'force-dynamic'
+
 export default async function ProductsPage({ searchParams }) {
   const supabase = getSupabase()
   const siteContent = await getSiteContent('store')

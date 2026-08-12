@@ -410,7 +410,10 @@ export function AdminApp() {
     localStorage.removeItem('token')
     localStorage.removeItem('user')
     document.cookie = 'user_role=; path=/; max-age=0'
-    router.push('/login')
+    document.cookie = 'auth_token=; path=/; max-age=0'
+    document.cookie = 'sb-access-token=; path=/; max-age=0'
+    document.cookie = 'sb-refresh-token=; path=/; max-age=0'
+    window.location.href = '/login'
   }
 
   return (
@@ -736,6 +739,7 @@ function AdminSettingsSection({ setSettings, defaultTab = 'site' }) {
     { id: 'product-qa', label: 'Product Q&A', icon: MessageSquare },
     { id: 'clients', label: 'Client Logos', icon: Building2 },
     { id: 'error-logs', label: 'System Health', icon: ShieldAlert },
+    { id: 'danger-zone', label: 'Danger Zone', icon: AlertTriangle },
   ]
 
   return (
@@ -780,6 +784,7 @@ function AdminSettingsSection({ setSettings, defaultTab = 'site' }) {
         {activeTab === 'product-qa' && <AdminQA />}
         {activeTab === 'clients' && <AdminClients />}
         {activeTab === 'error-logs' && <AdminErrorLogs />}
+        {activeTab === 'danger-zone' && <AdminDangerZone />}
       </div>
     </div>
   )
@@ -911,6 +916,469 @@ function AdminErrorLogs() {
       <p className="text-[10px] text-muted-foreground border-t border-border/40 pt-4">
         ℹ️ Showing the most recent 50 errors. Run the <code className="font-mono bg-secondary px-1 rounded">schema-client-errors.sql</code> migration in Supabase to enable logging. Errors older than 90 days can be purged manually.
       </p>
+    </div>
+  )
+}
+
+// ── Admin Danger Zone — Factory Reset / Fresh Delivery Mode ───────────────────
+function AdminDangerZone() {
+  const router = useRouter()
+  const [includeProducts, setIncludeProducts] = useState(false)
+  const [showModal, setShowModal] = useState(false)
+  const [confirmText, setConfirmText] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [restoreFile, setRestoreFile] = useState(null)
+  const [restorePreview, setRestorePreview] = useState(null)
+  const [showRestoreModal, setShowRestoreModal] = useState(false)
+  const [restorePassword, setRestorePassword] = useState('')
+  const [restoring, setRestoring] = useState(false)
+  const [restoreResults, setRestoreResults] = useState(null)
+  const fileInputRef = useRef(null)
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.name.endsWith('.json')) {
+      toast.error('Please upload a .json backup file')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result)
+        if (!data.exported_at) {
+          toast.error('Invalid backup file. Missing exported_at timestamp.')
+          return
+        }
+        setRestoreFile(data)
+        setRestorePreview({
+          exported_at: data.exported_at,
+          orders: Array.isArray(data.orders) ? data.orders.length : 0,
+          customers: Array.isArray(data.customers) ? data.customers.length : 0,
+          vendors: Array.isArray(data.vendors) ? data.vendors.length : 0,
+          products: Array.isArray(data.products) ? data.products.length : 0,
+          categories: Array.isArray(data.categories) ? data.categories.length : 0,
+        })
+        setShowRestoreModal(true)
+        setRestorePassword('')
+        setRestoreResults(null)
+      } catch {
+        toast.error('Failed to parse backup file. Invalid JSON.')
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = '' // reset input
+  }
+
+  const handleRestore = async () => {
+    if (!restorePassword) {
+      toast.error('Enter your admin password to re-authenticate')
+      return
+    }
+    if (!restoreFile) return
+    setRestoring(true)
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/admin/restore-backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ backupData: restoreFile, password: restorePassword })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Restore failed')
+      setRestoreResults(data.results)
+      toast.success('Backup restored successfully!')
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setRestoring(false)
+    }
+  }
+
+  const handleExportData = async () => {
+    setExporting(true)
+    try {
+      const token = localStorage.getItem('token')
+      const headers = { Authorization: `Bearer ${token}` }
+      
+      // Fetch orders
+      const ordersRes = await fetch('/api/orders?limit=10000', { headers })
+      const ordersData = await ordersRes.json()
+      
+      // Fetch customers
+      const customersRes = await fetch('/api/admin/customers', { headers })
+      const customersData = await customersRes.json()
+      
+      // Fetch vendors
+      const vendorsRes = await fetch('/api/admin/vendors', { headers })
+      const vendorsData = await vendorsRes.json()
+      
+      const exportObj = {
+        exported_at: new Date().toISOString(),
+        orders: ordersData?.orders || ordersData || [],
+        customers: customersData?.customers || customersData || [],
+        vendors: vendorsData?.vendors || vendorsData || [],
+      }
+      
+      // If products checkbox is on, also export products
+      if (includeProducts) {
+        const productsRes = await fetch('/api/products', { headers })
+        const productsData = await productsRes.json()
+        exportObj.products = productsData?.products || productsData || []
+        
+        const catsRes = await fetch('/api/categories', { headers })
+        const catsData = await catsRes.json()
+        exportObj.categories = catsData?.categories || catsData || []
+      }
+      
+      const blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `ak-enterprises-backup-${new Date().toISOString().split('T')[0]}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('Backup downloaded successfully!')
+    } catch (e) {
+      toast.error('Export failed: ' + e.message)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleFactoryReset = async () => {
+    if (confirmText !== 'DELETE ALL DATA') {
+      toast.error('Type exactly "DELETE ALL DATA" to confirm')
+      return
+    }
+    if (!password) {
+      toast.error('Enter your admin password to re-authenticate')
+      return
+    }
+    setLoading(true)
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/admin/factory-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ confirmText, includeProductsCategories: includeProducts, password })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Reset failed')
+      
+      toast.success('Website reset successfully! Logging out...')
+      setShowModal(false)
+      
+      // Logout and redirect
+      setTimeout(() => {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+        document.cookie = 'user_role=; path=/; max-age=0'
+        document.cookie = 'auth_token=; path=/; max-age=0'
+        document.cookie = 'sb-access-token=; path=/; max-age=0'
+        document.cookie = 'sb-refresh-token=; path=/; max-age=0'
+        window.location.href = '/login'
+      }, 1500)
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+          <AlertTriangle className="w-5 h-5 text-red-500" />
+        </div>
+        <div>
+          <h2 className="font-display font-extrabold text-lg text-foreground">Danger Zone — Factory Reset</h2>
+          <p className="text-xs text-muted-foreground">Irreversible actions. Proceed with extreme caution.</p>
+        </div>
+      </div>
+
+      {/* Warning Card */}
+      <div className={`border-2 rounded-2xl p-6 transition-all duration-300 ${
+        includeProducts 
+          ? 'border-red-500/60 bg-red-500/5' 
+          : 'border-amber-500/40 bg-amber-500/5'
+      }`}>
+        <div className="flex items-start gap-3 mb-4">
+          <AlertTriangle className={`w-6 h-6 shrink-0 mt-0.5 ${includeProducts ? 'text-red-500' : 'text-amber-500'}`} />
+          <div>
+            {!includeProducts ? (
+              <p className="text-sm text-foreground leading-relaxed">
+                <strong>⚠️ Warning:</strong> This action will <span className="font-extrabold text-red-600">PERMANENTLY</span> delete 
+                all customers, vendors, orders, and their entire history. Products and categories will remain safe 
+                (unless the checkbox below is enabled). 
+                <span className="font-extrabold text-red-600"> This cannot be undone.</span>
+              </p>
+            ) : (
+              <p className="text-sm text-red-600 font-bold leading-relaxed">
+                ⚠️ <span className="underline">EXTREME WARNING:</span> This will also permanently 
+                delete the entire product catalog — including all product images from storage. 
+                Only use this when a new catalog is ready for upload. 
+                <span className="font-extrabold"> THIS CANNOT BE UNDONE!</span>
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Checkbox */}
+        <label className="flex items-center gap-3 cursor-pointer p-3 rounded-xl border border-border/40 bg-card hover:bg-secondary/40 transition mt-4">
+          <input
+            type="checkbox"
+            checked={includeProducts}
+            onChange={() => setIncludeProducts(!includeProducts)}
+            className="w-5 h-5 rounded accent-red-600"
+          />
+          <div>
+            <span className="font-bold text-sm text-foreground">Also delete Products & Categories</span>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Full catalog wipe — only check this when a fresh catalog is ready for upload
+            </p>
+          </div>
+        </label>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        {/* Export Backup */}
+        <Button
+          onClick={handleExportData}
+          variant="outline"
+          disabled={exporting}
+          className="rounded-xl gap-2 border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10"
+        >
+          {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+          {exporting ? 'Exporting...' : 'Export Data Backup (JSON)'}
+        </Button>
+
+        {/* Reset Button */}
+        <Button
+          onClick={() => { setShowModal(true); setConfirmText(''); setPassword('') }}
+          className="rounded-xl gap-2 bg-red-600 hover:bg-red-700 text-white font-bold"
+        >
+          <Trash2 className="w-4 h-4" />
+          Reset Website Data
+        </Button>
+      </div>
+
+      {/* Safety Note */}
+      <p className="text-[10px] text-muted-foreground border-t border-border/40 pt-4">
+        💡 <strong>Tip:</strong> Always download the "Export Data Backup" first before resetting. Data cannot be recovered after reset.
+      </p>
+
+      {/* Restore from Backup Section */}
+      <div className="border-2 border-emerald-500/30 rounded-2xl p-6 bg-emerald-500/5">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+            <RefreshCw className="w-5 h-5 text-emerald-500" />
+          </div>
+          <div>
+            <h3 className="font-display font-extrabold text-base text-foreground">Restore from Backup</h3>
+            <p className="text-xs text-muted-foreground">Upload a previously exported JSON backup file to restore data.</p>
+          </div>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          onChange={handleFileUpload}
+          className="hidden"
+        />
+        <Button
+          onClick={() => fileInputRef.current?.click()}
+          variant="outline"
+          className="rounded-xl gap-2 border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10"
+        >
+          <Upload className="w-4 h-4" />
+          Upload Backup File (.json)
+        </Button>
+      </div>
+
+      {/* Restore Confirmation Modal */}
+      <Dialog open={showRestoreModal} onOpenChange={setShowRestoreModal}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-600 font-display">
+              <RefreshCw className="w-5 h-5" />
+              Restore from Backup
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5 py-2">
+            {/* Preview */}
+            {restorePreview && (
+              <div className="rounded-xl p-4 bg-emerald-500/10 border border-emerald-500/30 text-sm space-y-2">
+                <p className="font-bold text-foreground">Backup Summary:</p>
+                <p className="text-xs text-muted-foreground">Exported on: {new Date(restorePreview.exported_at).toLocaleString('en-IN')}</p>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div className="bg-card rounded-lg p-2 text-center border">
+                    <p className="font-extrabold text-lg text-foreground">{restorePreview.orders}</p>
+                    <p className="text-[10px] text-muted-foreground">Orders</p>
+                  </div>
+                  <div className="bg-card rounded-lg p-2 text-center border">
+                    <p className="font-extrabold text-lg text-foreground">{restorePreview.customers}</p>
+                    <p className="text-[10px] text-muted-foreground">Customers</p>
+                  </div>
+                  <div className="bg-card rounded-lg p-2 text-center border">
+                    <p className="font-extrabold text-lg text-foreground">{restorePreview.vendors}</p>
+                    <p className="text-[10px] text-muted-foreground">Vendors</p>
+                  </div>
+                  <div className="bg-card rounded-lg p-2 text-center border">
+                    <p className="font-extrabold text-lg text-foreground">{restorePreview.products + restorePreview.categories}</p>
+                    <p className="text-[10px] text-muted-foreground">Products + Categories</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Restore Results */}
+            {restoreResults && (
+              <div className="rounded-xl p-4 bg-emerald-500/10 border border-emerald-500/30 text-sm space-y-1">
+                <p className="font-bold text-emerald-600 flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Restore Complete!</p>
+                {Object.entries(restoreResults).map(([table, { restored, skipped }]) => (
+                  <p key={table} className="text-xs text-muted-foreground">
+                    <span className="font-mono font-bold">{table}</span>: {restored} restored{skipped > 0 ? `, ${skipped} skipped` : ''}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* Password Re-auth */}
+            {!restoreResults && (
+              <div>
+                <Label className="text-sm font-bold">Admin Password (Re-authentication)</Label>
+                <Input
+                  type="password"
+                  placeholder="Enter your admin password"
+                  value={restorePassword}
+                  onChange={e => setRestorePassword(e.target.value)}
+                  className="mt-1.5 rounded-xl"
+                />
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => { setShowRestoreModal(false); setRestoreResults(null) }}
+                className="flex-1 rounded-xl"
+                disabled={restoring}
+              >
+                {restoreResults ? 'Close' : 'Cancel'}
+              </Button>
+              {!restoreResults && (
+                <Button
+                  onClick={handleRestore}
+                  disabled={!restorePassword || restoring}
+                  className="flex-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2"
+                >
+                  {restoring ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Restoring...</>
+                  ) : (
+                    <><RefreshCw className="w-4 h-4" /> Restore Data</>
+                  )}
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmation Modal */}
+      <Dialog open={showModal} onOpenChange={setShowModal}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600 font-display">
+              <AlertTriangle className="w-5 h-5" />
+              Confirm Factory Reset
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5 py-2">
+            {/* Mode Summary */}
+            <div className={`rounded-xl p-4 text-sm space-y-1 ${
+              includeProducts ? 'bg-red-500/10 border border-red-500/30' : 'bg-amber-500/10 border border-amber-500/30'
+            }`}>
+              <p className="font-bold text-foreground">The following data will be deleted:</p>
+              <ul className="text-xs text-muted-foreground list-disc ml-4 space-y-0.5">
+                <li>All orders & order items</li>
+                <li>All customers, profiles & addresses</li>
+                <li>All vendors / zonal admins</li>
+                <li>All reviews, Q&A, wishlists</li>
+                <li>All chat logs, notifications, activity logs</li>
+                <li>All enquiries, newsletter subscriptions</li>
+                {includeProducts && (
+                  <>
+                    <li className="text-red-600 font-bold">All products & product images</li>
+                    <li className="text-red-600 font-bold">All categories</li>
+                    <li className="text-red-600 font-bold">Product images storage bucket (files)</li>
+                  </>
+                )}
+              </ul>
+              <p className="font-bold text-foreground mt-2">The following will be preserved (NOT deleted):</p>
+              <ul className="text-xs text-muted-foreground list-disc ml-4 space-y-0.5">
+                <li>Banners, FAQs, Site Settings, CMS Content</li>
+                <li>Your admin account</li>
+                {!includeProducts && <li>All products & categories</li>}
+              </ul>
+            </div>
+
+            {/* Password Re-auth */}
+            <div>
+              <Label className="text-sm font-bold">Admin Password (Re-authentication)</Label>
+              <Input
+                type="password"
+                placeholder="Enter your admin password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className="mt-1.5 rounded-xl"
+              />
+            </div>
+
+            {/* Confirm Text */}
+            <div>
+              <Label className="text-sm font-bold">Type <code className="bg-red-500/10 text-red-600 px-1.5 py-0.5 rounded font-mono text-xs">DELETE ALL DATA</code> to confirm</Label>
+              <Input
+                type="text"
+                placeholder='Type "DELETE ALL DATA" here'
+                value={confirmText}
+                onChange={e => setConfirmText(e.target.value)}
+                className={`mt-1.5 rounded-xl font-mono ${confirmText === 'DELETE ALL DATA' ? 'border-red-500 ring-1 ring-red-500' : ''}`}
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowModal(false)}
+                className="flex-1 rounded-xl"
+                disabled={loading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleFactoryReset}
+                disabled={confirmText !== 'DELETE ALL DATA' || !password || loading}
+                className="flex-1 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold gap-2"
+              >
+                {loading ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Resetting...</>
+                ) : (
+                  <><Trash2 className="w-4 h-4" /> Confirm & Reset</>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -1594,7 +2062,6 @@ function AdminProductForm({ router, editId }) {
             </div>
             <div><Label>Sub-category</Label><Input value={f.subcategory} onChange={e => setF({ ...f, subcategory: e.target.value })} className="h-11 rounded-xl"/></div>
             <div><Label>Price (₹) *</Label><Input required type="number" value={f.price} onChange={e => setF({ ...f, price: e.target.value === '' ? '' : parseFloat(e.target.value) })} className="h-11 rounded-xl"/></div>
-            <div><Label>MRP (₹)</Label><Input type="number" value={f.mrp} onChange={e => setF({ ...f, mrp: e.target.value === '' ? '' : parseFloat(e.target.value) })} className="h-11 rounded-xl"/></div>
             <div><Label>Stock *</Label><Input required type="number" value={f.stock_quantity} onChange={e => setF({ ...f, stock_quantity: e.target.value === '' ? '' : parseInt(e.target.value) || 0 })} className="h-11 rounded-xl"/></div>
             <div><Label>SKU</Label><Input value={f.sku} onChange={e => setF({ ...f, sku: e.target.value })} className="h-11 rounded-xl"/></div>
             <div><Label>HSN Code *</Label><Input required value={f.hsn_code} onChange={e => setF({ ...f, hsn_code: e.target.value })} placeholder="e.g. 4820" className="h-11 rounded-xl"/></div>
@@ -2441,17 +2908,25 @@ function AdminCategories() {
         slug: editing.slug || editing.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
       }
       if (editing.id) {
-        await fetch('/api/categories/' + editing.id, {
+        const res = await fetch('/api/categories/' + editing.id, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
           body: JSON.stringify(body)
         })
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}))
+          throw new Error(errData.error || 'Failed to update category')
+        }
       } else {
-        await fetch('/api/categories', {
+        const res = await fetch('/api/categories', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
           body: JSON.stringify(body)
         })
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}))
+          throw new Error(errData.error || 'Failed to create category')
+        }
       }
       toast.success('Saved successfully')
       setEditing(null)

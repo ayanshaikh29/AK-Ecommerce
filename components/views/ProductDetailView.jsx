@@ -431,12 +431,6 @@ function ProductDetailViewContent({ initialProduct }) {
           </div>
           <div className="flex items-baseline gap-3 mb-2">
             <span className="font-display text-4xl md:text-5xl font-extrabold text-primary">{formatINR(product.price)}</span>
-            {product.mrp > product.price && (
-              <>
-                <span className="text-lg text-muted-foreground line-through">{formatINR(product.mrp)}</span>
-                <span className="text-accent font-extrabold">{product.discount_percent || Math.round(((product.mrp - product.price) / product.mrp) * 100)}% off</span>
-              </>
-            )}
           </div>
           <p className="text-xs text-muted-foreground mb-5">Inclusive of all taxes • GST invoice available</p>
           {lowStock && <div className="bg-destructive/10 text-destructive rounded-2xl p-4 text-sm font-semibold mb-5 bounce-in inline-flex items-center gap-2"><Zap className="w-4 h-4" />Only {product.stock_quantity} left — order soon!</div>}
