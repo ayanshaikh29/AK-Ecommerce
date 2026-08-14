@@ -101,6 +101,7 @@ export function CustomerPricingManager() {
 
   const handleCreateCustomer = async (e) => {
     e.preventDefault()
+    e.stopPropagation()
     if (!newCustForm.full_name || !newCustForm.email || !newCustForm.password) {
       if (newCustForm.role === 'customer' && !newCustForm.full_name) {
         toast.error('Business Name is required for customer accounts')
@@ -164,7 +165,7 @@ export function CustomerPricingManager() {
         assigned_zonal_admin_name: assignedVendor?.name || 'Not Assigned',
         assigned_zonal_admin_email: assignedVendor?.email || 'Not Assigned'
       })
-      setNewCustForm({ role: 'customer', full_name: '', contact_person: '', email: '', phone: '', password: '', assigned_vendor_id: '' })
+      setNewCustForm({ role: 'customer', full_name: '', contact_person: '', email: '', phone: '', password: '', assigned_vendor_id: null })
       setConfirmPassword('')
       fetchCustomerList()
     } catch (err) {
@@ -880,7 +881,10 @@ export function CustomerPricingManager() {
                                   const res = await fetch(`/api/admin/user-credentials?user_id=${c.id}`, {
                                     headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
                                   })
-                                  if (!res.ok) throw new Error('Failed to retrieve user credentials')
+                                  if (!res.ok) {
+                                    const errData = await res.json().catch(() => ({}))
+                                    throw new Error(errData.error || 'Failed to retrieve user credentials')
+                                  }
                                   const data = await res.json()
                                   setCreatedCredentials({
                                     id: data.id,
@@ -1323,7 +1327,7 @@ export function CustomerPricingManager() {
                   return (
                     <div>
                       <select
-                        value={newCustForm.assigned_vendor_id || ''}
+                        value={newCustForm.assigned_vendor_id || null}
                         onChange={e => setNewCustForm(prev => ({ ...prev, assigned_vendor_id: e.target.value }))}
                         className="w-full h-10 rounded-xl text-xs bg-card border border-border px-3 font-semibold text-foreground focus:ring-accent"
                       >
@@ -1570,6 +1574,7 @@ export function CustomerPricingManager() {
           <form
             onSubmit={async (e) => {
               e.preventDefault()
+              e.stopPropagation()
               if (!changePwForm.newPassword) {
                 toast.error('New Password is required')
                 return
@@ -1744,7 +1749,7 @@ export function CustomerPricingManager() {
                         <div>
                           <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Assigned Zonal Admin</label>
                           <select
-                            value={profileData.user.assigned_vendor_id || ''}
+                            value={profileData.user.assigned_vendor_id || null}
                             onChange={async (e) => {
                               const newVId = e.target.value || null
                               setUpdatingVendorId(true)

@@ -59,6 +59,7 @@ function extractMetadata(prod) {
   let gallery_images = [];
   let hsn_code = '';
   let gst_percent = 18;
+  let subcategory = '';
 
   let cleanDescription = prod.description || '';
   const metaMatch = cleanDescription.match(/<!--METADATA:([\s\S]*?)-->/);
@@ -73,6 +74,7 @@ function extractMetadata(prod) {
       gallery_images = meta.gallery_images || [];
       hsn_code = meta.hsn_code || '';
       gst_percent = meta.gst_percent !== undefined ? Number(meta.gst_percent) : 18;
+      subcategory = meta.subcategory || '';
       
       cleanDescription = cleanDescription.replace(/<!--METADATA:([\s\S]*?)-->/, '').trim();
     } catch (e) {
@@ -90,7 +92,8 @@ function extractMetadata(prod) {
     thumbnail: prod.thumbnail || thumbnail,
     gallery_images: prod.gallery_images || gallery_images,
     hsn_code: prod.hsn_code || hsn_code,
-    gst_percent: prod.gst_percent !== undefined ? Number(prod.gst_percent) : gst_percent
+    gst_percent: prod.gst_percent !== undefined ? Number(prod.gst_percent) : gst_percent,
+    subcategory: prod.subcategory || subcategory
   }
 }
 
@@ -104,7 +107,8 @@ function injectMetadata(body) {
     thumbnail: body.thumbnail || '',
     gallery_images: body.gallery_images || body.images || [],
     hsn_code: body.hsn_code || '',
-    gst_percent: body.gst_percent !== undefined ? Number(body.gst_percent) : 18
+    gst_percent: body.gst_percent !== undefined ? Number(body.gst_percent) : 18,
+    subcategory: body.subcategory || ''
   };
   return cleanDescription + '\n\n<!--METADATA:' + JSON.stringify(extraMetadata) + '-->';
 }
@@ -788,14 +792,24 @@ async function route(req, method) {
       if (!user || user.role !== 'admin') return err('Forbidden', 403)
       const { name, min_order_value, description } = body
       if (!name) return err('Name is required')
-      const slug = body.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
       const id = uuidv4()
-      const doc = { id, name, slug, min_order_value: min_order_value !== undefined ? (min_order_value === '' ? null : Number(min_order_value)) : null, description: description || '', created_at: new Date().toISOString() }
+      const slug = body.slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
+      const doc = { 
+        id, 
+        name, 
+        slug, 
+        min_order_value: min_order_value !== undefined ? (min_order_value === '' ? null : Number(min_order_value)) : null, 
+        description: description || '', 
+        image_url: body.image_url || null,
+        icon: body.icon || 'Package',
+        created_at: new Date().toISOString() 
+      }
       
       let { error } = await supabase.from('categories').insert(doc)
       if (error && (error.message.includes("column \"description\"") || error.message.includes("description") || error.code === '42703')) {
         const fallbackDoc = { ...doc }
         delete fallbackDoc.description
+        delete fallbackDoc.icon
         const { error: retryErr } = await supabase.from('categories').insert(fallbackDoc)
         error = retryErr
       }
@@ -963,15 +977,19 @@ async function route(req, method) {
       if (!user || user.role !== 'admin') return err('Forbidden', 403)
       const now = new Date().toISOString()
       const pId = uuidv4()
+      
+      const calculatedMrp = body.mrp && Number(body.mrp) >= Number(body.price) ? Number(body.mrp) : Number(body.price)
+      const discountPercent = calculatedMrp > 0 ? Math.max(0, Math.round((1 - Number(body.price) / calculatedMrp) * 100)) : 0
+
       const doc = { 
         id: pId, 
         name: body.name, 
         slug: (body.name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-'), 
         description: injectMetadata(body), 
         price: body.price, 
-        mrp: body.mrp, 
-        discount_percent: body.mrp?Math.round((1-body.price/body.mrp)*100):0, 
-        category_id: body.category_id, 
+        mrp: calculatedMrp, 
+        discount_percent: discountPercent, 
+        category_id: body.category_id || null, 
         stock_quantity: body.stock_quantity, 
         sku: body.sku || 'AK-' + Math.floor(Math.random()*90000+10000), 
         is_active: body.is_active!==false, 
@@ -1006,13 +1024,17 @@ async function route(req, method) {
       // Merge only the provided body fields with existing values
       const merged = { ...existingWithMeta, ...body }
       
+      const calculatedMrp = merged.mrp && Number(merged.mrp) >= Number(merged.price) ? Number(merged.mrp) : Number(merged.price)
+      const discountPercent = calculatedMrp > 0 ? Math.max(0, Math.round((1 - Number(merged.price) / calculatedMrp) * 100)) : 0
+
       const upd = { 
         name: merged.name, 
         slug: merged.slug || (merged.name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-'), 
         description: injectMetadata(merged), 
         price: merged.price, 
-        mrp: merged.mrp, 
-        category_id: merged.category_id, 
+        mrp: calculatedMrp, 
+        discount_percent: discountPercent,
+        category_id: merged.category_id || null, 
         stock_quantity: merged.stock_quantity, 
         sku: merged.sku, 
         is_active: merged.is_active, 
@@ -1022,7 +1044,6 @@ async function route(req, method) {
       }
       // Remove undefined keys so we don't overwrite with undefined
       Object.keys(upd).forEach(k => upd[k] === undefined && delete upd[k])
-      if (merged.mrp && merged.price) upd.discount_percent = Math.round((1-merged.price/merged.mrp)*100)
       
       const { error: updErr } = await supabase.from('products').update(upd).eq('id', p[1])
       if (updErr) {
@@ -2630,7 +2651,7 @@ async function route(req, method) {
 
     if (method === 'POST') {
       const { company_name, contact_person, phone, email, products_needed, quantity, message } = body
-      if (!contact_person || !phone || !products_needed) return err('Missing required fields')
+      if (!contact_person || !phone || !products_needed) return err('Missing required fields', 400)
       const { error } = await supabase.from('bulk_enquiries').insert({
         id: uuidv4(),
         company_name: company_name || '',
@@ -3365,7 +3386,7 @@ async function route(req, method) {
   // ==================== CUSTOMER SUPPORT CHATBOT ====================
   if (p[0] === 'chat' && method === 'POST') {
     const { message, history, sessionId } = body
-    if (!message || !sessionId) return err('Message and sessionId required')
+    if (!message || !sessionId) return err('Message and sessionId required', 400)
     
     const now = new Date().toISOString()
     const msgLower = message.toLowerCase().trim()
@@ -3685,12 +3706,16 @@ Current Conversation History:\n` +
       return json(data || [])
     }
     if (method === 'POST') {
+      const { question, answer } = body
+      if (!question || !answer) return err('Missing question or answer', 400)
       const doc = { id: uuidv4(), ...body, created_at: now, updated_at: now }
       const { error } = await supabase.from('faqs').insert(doc)
       if (error) return err(error.message, 500)
       return json(doc)
     }
     if (method === 'PUT' && p[2]) {
+      if (body.hasOwnProperty('question') && !body.question) return err('Question cannot be empty', 400)
+      if (body.hasOwnProperty('answer') && !body.answer) return err('Answer cannot be empty', 400)
       const { error } = await supabase.from('faqs').update({ ...body, updated_at: now }).eq('id', p[2])
       if (error) return err(error.message, 500)
       return json({ ok: true })

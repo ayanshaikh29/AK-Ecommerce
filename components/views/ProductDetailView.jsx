@@ -329,7 +329,10 @@ function ProductDetailViewContent({ initialProduct }) {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
         body: JSON.stringify({ product_id: product.id, rating: reviewRating, comment: reviewText })
       })
-      if (!res.ok) throw new Error('Failed to post review')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Failed to post review')
+      }
       
       const newReview = {
         id: Date.now().toString(),

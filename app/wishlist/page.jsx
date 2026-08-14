@@ -59,7 +59,8 @@ export default function WishlistPage() {
         toast.success('Removed from wishlist')
         setItems(prev => prev.filter(i => i.product.id !== productId))
       } else {
-        throw new Error('Failed to remove')
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Failed to remove')
       }
     } catch (e) {
       toast.error('Error removing item')

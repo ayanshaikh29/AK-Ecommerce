@@ -203,7 +203,10 @@ export function SupportChatbot({ settings }) {
         })
       })
 
-      if (!res.ok) throw new Error('Failed to send message')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Failed to send message')
+      }
       const data = await res.json()
 
       setMessages(prev => [

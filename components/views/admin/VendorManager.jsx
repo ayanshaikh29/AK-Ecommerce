@@ -136,6 +136,7 @@ export function VendorManager() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    e.stopPropagation()
     if (!name || !email || !password) {
       toast.error('Zonal Admin Name, Email, and Password are required')
       return
@@ -200,7 +201,7 @@ export function VendorManager() {
 
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
-              <Button size="sm" className="rounded-xl gold-gradient text-primary font-bold shadow-soft">
+              <Button type="button" size="sm" className="rounded-xl gold-gradient text-primary font-bold shadow-soft">
                 <Plus className="w-4 h-4 mr-1.5" /> Create Zonal Admin
               </Button>
             </DialogTrigger>
@@ -350,7 +351,10 @@ export function VendorManager() {
                         const res = await fetch(`/api/admin/user-credentials?user_id=${v.user_id || v.id}`, {
                           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
                         })
-                        if (!res.ok) throw new Error('Failed to retrieve zonal admin credentials')
+                        if (!res.ok) {
+                          const errData = await res.json().catch(() => ({}))
+                          throw new Error(errData.error || 'Failed to retrieve zonal admin credentials')
+                        }
                         const data = await res.json()
                         setCreatedCredentials({
                           id: data.id,
@@ -519,6 +523,7 @@ export function VendorManager() {
           <form
             onSubmit={async (e) => {
               e.preventDefault()
+              e.stopPropagation()
               if (!changePwForm.newPassword) {
                 toast.error('New Password is required')
                 return

@@ -49,7 +49,10 @@ export function CustomerDashboardView({ user }) {
           notes: requestForm.notes.trim()
         })
       })
-      if (!res.ok) throw new Error('Failed to submit product request')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Failed to submit product request')
+      }
       toast.success('Product request submitted successfully!')
       setRequestForm({ name: '', description: '', quantity: '1', notes: '' })
       setRequestOpen(false)

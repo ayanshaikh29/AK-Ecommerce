@@ -160,7 +160,12 @@ export default function OrderDetailsPage() {
       const res = await fetch(`/api/orders/${orderId}/invoice-pdf`, {
         headers: { Authorization: `Bearer ${token}` }
       })
-      if (!res.ok) throw new Error('Failed to download invoice')
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '')
+        let errMsg = 'Failed to download invoice'
+        try { errMsg = JSON.parse(errText).error || errMsg } catch(e) { errMsg = errText || errMsg }
+        throw new Error(errMsg)
+      }
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -180,7 +185,12 @@ export default function OrderDetailsPage() {
       const res = await fetch(`/api/orders/${orderId}/challan-pdf`, {
         headers: { Authorization: `Bearer ${token}` }
       })
-      if (!res.ok) throw new Error('Failed to download challan')
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '')
+        let errMsg = 'Failed to download challan'
+        try { errMsg = JSON.parse(errText).error || errMsg } catch(e) { errMsg = errText || errMsg }
+        throw new Error(errMsg)
+      }
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')

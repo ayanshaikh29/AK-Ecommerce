@@ -805,7 +805,10 @@ function AdminErrorLogs() {
       const res = await fetch('/api/log-client-error', {
         headers: { Authorization: `Bearer ${token}` }
       })
-      if (!res.ok) throw new Error('Failed to load error logs')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Failed to load error logs')
+      }
       const data = await res.json()
       setErrors(data.errors || [])
       setLastFetched(new Date())
@@ -1954,7 +1957,7 @@ function AdminProductForm({ router, editId }) {
     description: '',
     price: '',
     mrp: '',
-    category_id: '',
+    category_id: null,
     subcategory: '',
     stock_quantity: '',
     sku: '',
@@ -1989,7 +1992,7 @@ function AdminProductForm({ router, editId }) {
           description: p.description || '',
           price: p.price !== undefined ? String(p.price) : '',
           mrp: p.mrp !== undefined ? String(p.mrp) : '',
-          category_id: p.category_id || '',
+          category_id: p.category_id || null,
           subcategory: p.subcategory || '',
           stock_quantity: p.stock_quantity !== undefined ? String(p.stock_quantity) : '',
           sku: p.sku || '',
@@ -2016,6 +2019,10 @@ function AdminProductForm({ router, editId }) {
 
   const save = async e => {
     e.preventDefault()
+    if (!f.category_id) {
+      toast.error('Please select a category')
+      return
+    }
     if (!f.hsn_code || !f.hsn_code.trim()) {
       toast.error('HSN Code is required for tax invoice compilation')
       return
@@ -2023,7 +2030,7 @@ function AdminProductForm({ router, editId }) {
     const body = { 
       ...f, 
       price: +f.price, 
-      mrp: f.mrp ? +f.mrp : null, 
+      mrp: f.mrp ? +f.mrp : +f.price, 
       stock_quantity: +f.stock_quantity, 
       gst_percent: +f.gst_percent 
     }
@@ -2741,7 +2748,7 @@ function AdminBanners() {
   useEffect(() => { load() }, [])
   const empty = { title: '', subtitle: '', image_url: '', cta_text: 'Shop Now', cta_link: '/products', sort_order: 1, is_active: true }
   const save = async e => { 
-    e.preventDefault(); 
+    e.preventDefault(); e.stopPropagation();
     try { 
       if (editing.id) await fetch('/api/banners/' + editing.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(editing) }); 
       else await fetch('/api/banners', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(editing) }); 
@@ -2834,7 +2841,7 @@ function AdminClients() {
   useEffect(() => { load() }, [])
   const empty = { name: '', logo_url: '', sort_order: 1, is_active: true }
   const save = async e => { 
-    e.preventDefault(); 
+    e.preventDefault(); e.stopPropagation();
     try { 
       if (editing.id) await fetch('/api/clients/' + editing.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(editing) }); 
       else await fetch('/api/clients', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(editing) }); 
@@ -2902,6 +2909,7 @@ function AdminCategories() {
 
   const save = async e => {
     e.preventDefault()
+    e.stopPropagation()
     try {
       const body = {
         ...editing,
@@ -3070,6 +3078,7 @@ function QuickAddCategory({ cats, onCategoryAdded, trigger }) {
 
   const handleAdd = async (e) => {
     e.preventDefault()
+    e.stopPropagation()
     if (!name.trim()) return
     setSaving(true)
     try {
@@ -3084,7 +3093,10 @@ function QuickAddCategory({ cats, onCategoryAdded, trigger }) {
           min_order_value: minOrder !== '' ? Number(minOrder) : null
         })
       })
-      if (!res.ok) throw new Error('Failed to create category')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Failed to create category')
+      }
       const newCat = await res.json()
       toast.success('Category created successfully')
       setName('')
@@ -3292,7 +3304,7 @@ function AdminFAQs() {
   useEffect(() => { load() }, [])
   const empty = { question: '', answer: '', sort_order: 1 }
   const save = async e => { 
-    e.preventDefault(); 
+    e.preventDefault(); e.stopPropagation();
     try { 
       if (editing.id) await fetch('/api/admin/faqs/' + editing.id, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(editing) }); 
       else await fetch('/api/admin/faqs', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify(editing) }); 
@@ -3767,7 +3779,8 @@ function AdminQA() {
   }, [])
 
   const save = async (e) => {
-    e.preventDefault()
+    e.preventDefault();
+    e.stopPropagation();
     if (!answerText.trim()) return
     try {
       const res = await fetch(`/api/admin/qa/${answering.id}`, {
@@ -3940,7 +3953,12 @@ function AdminOrderDetail({ orderId }) {
       const res = await fetch(`/api/orders/${order.id}/invoice-pdf`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       })
-      if (!res.ok) throw new Error('Failed to download invoice')
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '')
+        let errMsg = 'Failed to download invoice'
+        try { errMsg = JSON.parse(errText).error || errMsg } catch(e) { errMsg = errText || errMsg }
+        throw new Error(errMsg)
+      }
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -3958,7 +3976,12 @@ function AdminOrderDetail({ orderId }) {
       const res = await fetch(`/api/orders/${order.id}/challan-pdf`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       })
-      if (!res.ok) throw new Error('Failed to download challan')
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '')
+        let errMsg = 'Failed to download challan'
+        try { errMsg = JSON.parse(errText).error || errMsg } catch(e) { errMsg = errText || errMsg }
+        throw new Error(errMsg)
+      }
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')

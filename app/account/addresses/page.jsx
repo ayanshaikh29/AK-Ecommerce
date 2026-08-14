@@ -122,7 +122,7 @@ export default function AddressesPage() {
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}))
         console.error('Address save details:', errData.error || errData)
-        throw new Error('Could not save your address. Please verify your profile info or try signing out and in again.')
+        throw new Error(errData.error || 'Could not save your address. Please verify your profile info or try signing out and in again.')
       }
       
       toast.success(editingId ? 'Address updated' : 'Address added successfully!')
@@ -142,7 +142,10 @@ export default function AddressesPage() {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       })
-      if (!res.ok) throw new Error('Failed to delete address')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Failed to delete address')
+      }
       toast.success('Address deleted')
       fetchAddresses()
     } catch (err) {
@@ -162,7 +165,10 @@ export default function AddressesPage() {
         },
         body: JSON.stringify({ ...addr, is_default: true })
       })
-      if (!res.ok) throw new Error('Failed to set default')
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Failed to set default')
+      }
       toast.success('Default address updated')
       fetchAddresses()
     } catch (err) {
