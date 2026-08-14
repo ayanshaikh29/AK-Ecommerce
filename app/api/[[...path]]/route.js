@@ -545,7 +545,7 @@ async function route(req, method) {
     }
   }
 
-  const body = ['POST','PUT','PATCH'].includes(method) ? await req.json().catch(()=>({})) : {}
+  const body = ['POST','PUT','PATCH','DELETE'].includes(method) ? await req.json().catch(()=>({})) : {}
 
   if (p[0] === 'auth') {
     if (p[1] === 'signup' && method === 'POST') {
@@ -1089,7 +1089,7 @@ async function route(req, method) {
     if (method === 'DELETE' && p[1] === 'bulk') {
       if (!user || user.role !== 'admin') return err('Forbidden', 403)
       const ids = body.ids || []
-      if (!Array.isArray(ids) || ids.length === 0) return err('IDs array required')
+      if (!Array.isArray(ids) || ids.length === 0) return err('IDs array required', 400)
 
       const { data: activeOrders } = await supabase
         .from('orders')
