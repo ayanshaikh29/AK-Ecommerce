@@ -18,12 +18,23 @@ export function VendorManager() {
   const [dialogOpen, setDialogOpen] = useState(false)
 
   // Form State
+  const [username, setUsername] = useState('')
+  const [usernameError, setUsernameError] = useState('')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [phone, setPhone] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  const validateUsername = (val) => {
+    const clean = (val || '').trim().toLowerCase()
+    if (!clean) return 'Username is required'
+    if (clean.length < 3) return 'Username must be at least 3 characters'
+    if (clean.length > 30) return 'Username cannot exceed 30 characters'
+    if (!/^[a-z0-9_]+$/.test(clean)) return 'Only lowercase letters, numbers, and underscores allowed (no spaces)'
+    return ''
+  }
 
   // Credentials Modal State
   const [createdCredentials, setCreatedCredentials] = useState(null)
@@ -137,6 +148,14 @@ export function VendorManager() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     e.stopPropagation()
+
+    const uErr = validateUsername(username)
+    if (uErr) {
+      setUsernameError(uErr)
+      toast.error(uErr)
+      return
+    }
+
     if (!name || !email || !password) {
       toast.error('Zonal Admin Name, Email, and Password are required')
       return
@@ -151,17 +170,27 @@ export function VendorManager() {
     }
     setSubmitting(true)
     try {
+      const cleanUsername = username.trim().toLowerCase()
       const res = await fetch('/api/admin/create-account', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`
         },
-        body: JSON.stringify({ role: 'vendor', full_name: name, email, password, phone })
+        body: JSON.stringify({
+          role: 'vendor',
+          username: cleanUsername,
+          full_name: name,
+          email,
+          password,
+          phone
+        })
       })
       if (res.ok) {
         const data = await res.json()
         toast.success('Zonal Admin created successfully!')
+        setUsername('')
+        setUsernameError('')
         setName('')
         setEmail('')
         setPassword('')
@@ -214,7 +243,31 @@ export function VendorManager() {
 
               <form onSubmit={handleSubmit} className="space-y-4 pt-2">
                 <div>
-                  <label className="text-xs font-semibold mb-1 block">Zonal Admin Name *</label>
+                  <label className="text-xs font-semibold mb-1 block">Zonal Admin Name / Username *</label>
+                  <Input
+                    required
+                    value={username}
+                    onChange={e => {
+                      const val = e.target.value.toLowerCase().replace(/\s+/g, '_')
+                      setUsername(val)
+                      setUsernameError(validateUsername(val))
+                    }}
+                    placeholder="e.g. zonal_admin_north"
+                    className={`h-10 rounded-xl font-mono text-xs ${usernameError ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+                    autoComplete="off"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    This username will identify the Zonal Admin in the system (min 3 chars, letters, numbers & underscores only).
+                  </p>
+                  {usernameError && (
+                    <p className="text-[11px] text-destructive font-medium mt-1">
+                      {usernameError}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold mb-1 block">Zonal Admin / Company Name *</label>
                   <Input
                     required
                     value={name}
@@ -323,6 +376,14 @@ export function VendorManager() {
               </div>
 
               <div className="space-y-1.5 text-xs text-muted-foreground border-t pt-3">
+                {v.username && (
+                  <div className="flex items-center justify-between pb-1">
+                    <span className="text-[10px] text-muted-foreground font-semibold uppercase">Username</span>
+                    <span className="font-mono text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      @{v.username}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <Mail className="w-3.5 h-3.5 text-accent" />
                   <span className="font-mono text-foreground font-semibold">{v.email}</span>
@@ -421,6 +482,14 @@ export function VendorManager() {
                   <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Zonal Admin Name</span>
                   <span className="font-bold text-slate-800">{createdCredentials.full_name}</span>
                 </div>
+                {createdCredentials.username && (
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Username</span>
+                    <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      @{createdCredentials.username}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center border-b border-slate-100 pb-2">
                   <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Zonal Admin Portal URL</span>
                   <span className="font-mono font-bold text-[#F4B942] max-w-[200px] truncate">
@@ -679,6 +748,12 @@ export function VendorManager() {
                     <h3 className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Basic Information</h3>
                     <div className="bg-secondary/40 p-4 rounded-2xl border space-y-2 text-xs">
                       <div className="flex justify-between"><span className="text-muted-foreground">Name</span><span className="font-bold">{profileData.user.full_name}</span></div>
+                      {profileData.user.username && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Username</span>
+                          <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">@{profileData.user.username}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between"><span className="text-muted-foreground">Email</span><span className="font-mono">{profileData.user.email}</span></div>
                       {profileData.user.phone && <div className="flex justify-between"><span className="text-muted-foreground">Phone</span><span className="font-mono">{profileData.user.phone}</span></div>}
                       <div className="flex justify-between"><span className="text-muted-foreground">Role</span><span className="font-bold capitalize">{profileData.user.role}</span></div>

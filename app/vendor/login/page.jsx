@@ -73,14 +73,15 @@ export default function ZonalAdminLoginPage() {
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <Label className="text-xs font-bold mb-1.5 block">Zonal Admin Email</Label>
+              <Label className="text-xs font-bold mb-1.5 block">Zonal Admin Email or Username</Label>
               <Input
                 required
-                type="email"
-                placeholder="zonaladmin@akenterprises.com"
+                type="text"
+                placeholder="e.g. zonal_admin or zonaladmin@akenterprises.com"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
                 className="h-11 rounded-xl text-sm"
+                autoComplete="username"
               />
             </div>
 

@@ -438,8 +438,8 @@ async function route(req, method) {
         user_id: 'usr_1',
         user_email: 'customer@client.com',
         addresses: {
-          full_name: 'Ayan Shaikh',
-          business_name: 'Ayan Corp',
+          full_name: 'Amit Sharma',
+          business_name: 'Apex Enterprise',
           phone: '9876543210',
           gst: '27AAAAA1111A1Z1',
           line1: '123 Main St',
@@ -626,8 +626,18 @@ async function route(req, method) {
       return json({ token, user: { id: newUuid, email: u.email, full_name: u.full_name, role: u.role, phone: u.phone, gst_number: u.gst_number || null, company_name: u.company_name || null, address: u.address || null, city: u.city || null, state: u.state || null, pincode: u.pincode || null } })
     }
     if (p[1] === 'login' && method === 'POST') {
-      const { email, password } = body
-      const { data: u } = await supabase.from('users').select('*').eq('email', email).eq('password', hashPw(password)).maybeSingle()
+      const { email, username, password } = body
+      const loginIdentifier = (email || username || '').trim().toLowerCase()
+      if (!loginIdentifier || !password) return err('Email or username and password required', 400)
+
+      // Support login via email or username
+      let query = supabase.from('users').select('*')
+      if (loginIdentifier.includes('@')) {
+        query = query.eq('email', loginIdentifier)
+      } else {
+        query = query.or(`username.eq.${loginIdentifier},email.eq.${loginIdentifier}`)
+      }
+      const { data: u } = await query.eq('password', hashPw(password)).maybeSingle()
       if (!u) return err('Invalid credentials', 401)
 
       // Check if vendor account is disabled
@@ -702,12 +712,18 @@ async function route(req, method) {
 
       console.log('[DEBUG LOGIN] token payload being signed:', JSON.stringify({ id: u.id, email: u.email, role: u.role, name: u.full_name, gst_number: u.gst_number || '' }))
       const token = sign({ id: u.id, email: u.email, role: u.role, name: u.full_name, gst_number: u.gst_number || '' })
-      return json({ token, user: { id: u.id, email: u.email, full_name: u.full_name, role: u.role, phone: u.phone, gst_number: u.gst_number || null, company_name: u.company_name || null, address: u.address || null, city: u.city || null, state: u.state || null, pincode: u.pincode || null } })
+      return json({ token, user: { id: u.id, email: u.email, username: u.username || null, full_name: u.full_name, role: u.role, phone: u.phone, gst_number: u.gst_number || null, company_name: u.company_name || null, address: u.address || null, city: u.city || null, state: u.state || null, pincode: u.pincode || null } })
     }
 
     if (p[1] === 'me' && method === 'GET') {
       if (!user) return err('Unauthorized', 401)
-      const { data: u, error: uErr } = await supabase.from('users').select('id, email, full_name, phone, role, gst_number, company_name, address, city, state, pincode').eq('id', user.id).maybeSingle()
+      let { data: u, error: uErr } = await supabase.from('users').select('id, email, username, full_name, phone, role, gst_number, company_name, address, city, state, pincode').eq('id', user.id).maybeSingle()
+      if (uErr && (uErr.message?.includes('username') || uErr.code === '42703')) {
+        // Defensive fallback if SQL migration hasn't been executed yet in Supabase
+        const fallbackRes = await supabase.from('users').select('id, email, full_name, phone, role, gst_number, company_name, address, city, state, pincode').eq('id', user.id).maybeSingle()
+        u = fallbackRes.data ? { ...fallbackRes.data, username: null } : null
+        uErr = fallbackRes.error
+      }
       if (uErr) {
         console.error('[ME error]:', uErr.message)
         return err('Unable to load user profile. Please contact the administrator if this problem persists.', 500)
@@ -1610,10 +1626,21 @@ async function route(req, method) {
           vendor_name: vendorDisplay,
           address: o.addresses,
           zoho_invoice_status: o.zoho_invoice_status || (o.zoho_invoice_id ? 'synced' : 'pending'),
-          items: (o.order_items || []).map(it => ({
-            ...it,
-            image: it.products?.product_images?.[0]?.image_url || '/placeholder.png'
-          }))
+          items: (o.order_items || []).map(it => {
+            const origQty = it.original_quantity != null ? Number(it.original_quantity) : Number(it.quantity || 0)
+            const appQty = it.approved_quantity != null ? Number(it.approved_quantity) : Number(it.quantity || 0)
+            const delQty = it.delivered_quantity != null ? Number(it.delivered_quantity) : (o.status === 'delivered' ? appQty : 0)
+            const pendQty = Math.max(0, appQty - delQty)
+            return {
+              ...it,
+              original_quantity: origQty,
+              approved_quantity: appQty,
+              quantity: appQty,
+              delivered_quantity: delQty,
+              pending_quantity: pendQty,
+              image: it.products?.product_images?.[0]?.image_url || it.image || '/placeholder.png'
+            }
+          })
         }
       })
 
@@ -1725,11 +1752,35 @@ async function route(req, method) {
           user_email: userEmail,
           address: resolvedAddress,   // Always a plain object or null — never an array
           zoho_invoice_status: o.zoho_invoice_status || (o.zoho_invoice_id ? 'synced' : 'pending'),
-          items: (o.order_items || []).map(it => ({
-            ...it,
-            image: it.products?.product_images?.[0]?.image_url || '/placeholder.png'
-          }))
+          items: (o.order_items || []).map(it => {
+            const origQty = it.original_quantity != null ? Number(it.original_quantity) : Number(it.quantity || 0)
+            const appQty = it.approved_quantity != null ? Number(it.approved_quantity) : Number(it.quantity || 0)
+            const delQty = it.delivered_quantity != null ? Number(it.delivered_quantity) : (o.status === 'delivered' ? appQty : 0)
+            const pendQty = Math.max(0, appQty - delQty)
+            return {
+              ...it,
+              original_quantity: origQty,
+              approved_quantity: appQty,
+              quantity: appQty,
+              delivered_quantity: delQty,
+              pending_quantity: pendQty,
+              image: it.products?.product_images?.[0]?.image_url || it.image || '/placeholder.png'
+            }
+          }),
+          quantity_modifications: []
         }
+
+        try {
+          const { data: mods } = await supabase
+            .from('order_quantity_modifications')
+            .select('*')
+            .eq('order_id', o.id)
+            .order('created_at', { ascending: false })
+          if (Array.isArray(mods) && mods.length > 0) {
+            orderMapped.quantity_modifications = mods
+          }
+        } catch (_) {}
+
         return json(orderMapped)
       } catch (e) {
         console.error('[GET Single Order Unexpected Error]:', e)
@@ -1958,10 +2009,18 @@ async function route(req, method) {
         product_name_snapshot: item.product_name_snapshot,
         price_snapshot: item.price_snapshot,
         quantity: item.quantity,
+        original_quantity: item.quantity,
+        approved_quantity: item.quantity,
         created_at: now
       }))
       
-      const { error: itemsErr } = await supabase.from('order_items').insert(itemDocs)
+      let { error: itemsErr } = await supabase.from('order_items').insert(itemDocs)
+      if (itemsErr && (itemsErr.message?.includes('column') || itemsErr.code === '42703')) {
+        // Fallback if approved_quantity / original_quantity columns not migrated yet
+        const legacyDocs = itemDocs.map(({ original_quantity, approved_quantity, ...rest }) => rest)
+        const retryRes = await supabase.from('order_items').insert(legacyDocs)
+        itemsErr = retryRes.error
+      }
       if (itemsErr) {
         console.error('Database Order items insert error:', itemsErr)
         await supabase.from('orders').delete().eq('id', orderId)
@@ -3908,12 +3967,34 @@ Current Conversation History:\n` +
   if (p[0] === 'admin' && p[1] === 'create-account' && method === 'POST') {
     if (!user || user.role !== 'admin') return err('Forbidden — Admin access required', 403)
 
-    const { full_name, email, phone, password, role = 'customer', business_name, company_name } = body
+    const { full_name, username, email, phone, password, role = 'customer', business_name, company_name } = body
     if (!full_name || !email || !password) return err('Name, Email, and Password required', 400)
 
     const cleanEmail = email.trim().toLowerCase()
 
-    // Check if user already exists
+    // Validate username if provided or required for Zonal Admin
+    let cleanUsername = username ? String(username).trim().toLowerCase() : ''
+    if (role === 'vendor') {
+      if (!cleanUsername) return err('Zonal Admin Name / Username is required', 400)
+      if (cleanUsername.length < 3 || cleanUsername.length > 30) {
+        return err('Username must be between 3 and 30 characters', 400)
+      }
+      if (!/^[a-z0-9_]+$/.test(cleanUsername)) {
+        return err('Username can only contain lowercase letters, numbers, and underscores (no spaces)', 400)
+      }
+
+      // Check username uniqueness
+      const { data: existingUsername } = await supabase
+        .from('users')
+        .select('id')
+        .ilike('username', cleanUsername)
+        .maybeSingle()
+      if (existingUsername) {
+        return err(`Username "${cleanUsername}" is already taken. Please choose another one.`, 409)
+      }
+    }
+
+    // Check if user already exists by email
     const { data: existingUser } = await supabase.from('users').select('id').eq('email', cleanEmail).maybeSingle()
     if (existingUser) return err('An account with this email address already exists', 409)
 
@@ -3922,7 +4003,7 @@ Current Conversation History:\n` +
       email: cleanEmail,
       password,
       email_confirm: true,
-      user_metadata: { full_name, role, plain_password: password }
+      user_metadata: { full_name, username: cleanUsername || undefined, role, plain_password: password }
     })
 
     let newUuid = newAuthUser?.user?.id
@@ -3938,6 +4019,7 @@ Current Conversation History:\n` +
     const baseUserPayload = {
       id: newUuid,
       email: cleanEmail,
+      username: cleanUsername || null,
       password: hashPw(password),
       full_name: full_name.trim(),
       company_name: company_name ? company_name.trim() : (role === 'customer' ? full_name.trim() : ''),
@@ -3955,9 +4037,14 @@ Current Conversation History:\n` +
       referral_code: refCode
     })
 
-    if (dbErr && (dbErr.message?.includes('catalog_access') || dbErr.message?.includes('status') || dbErr.message?.includes('referral_code') || dbErr.message?.includes('schema cache'))) {
+    if (dbErr && (dbErr.message?.includes('catalog_access') || dbErr.message?.includes('status') || dbErr.message?.includes('referral_code') || dbErr.message?.includes('username') || dbErr.message?.includes('schema cache'))) {
       console.warn('[Admin Create Account]: Retrying insert with core user fields')
-      const resFallback = await supabase.from('users').insert(baseUserPayload)
+      let resFallback = await supabase.from('users').insert(baseUserPayload)
+      if (resFallback.error && resFallback.error.message?.includes('username')) {
+        const payloadNoUsername = { ...baseUserPayload }
+        delete payloadNoUsername.username
+        resFallback = await supabase.from('users').insert(payloadNoUsername)
+      }
       dbErr = resFallback.error
     }
 
@@ -3969,7 +4056,13 @@ Current Conversation History:\n` +
 
     // 3. If role === 'vendor', also ensure entry in vendors table
     if (role === 'vendor') {
-      await saveVendor({ name: full_name, phone: phone || '', email: cleanEmail, user_id: newUuid })
+      await saveVendor({
+        name: full_name,
+        username: cleanUsername || null,
+        phone: phone || '',
+        email: cleanEmail,
+        user_id: newUuid
+      })
     }
 
     return json({
@@ -3977,6 +4070,7 @@ Current Conversation History:\n` +
       user: {
         id: newUuid,
         full_name,
+        username: cleanUsername || null,
         email: cleanEmail,
         phone: phone || '',
         role: role === 'vendor' ? 'vendor' : 'customer',
@@ -3997,7 +4091,7 @@ Current Conversation History:\n` +
         return err('Failed to retrieve authentication account: ' + (authErr?.message || 'Not found'), 404)
       }
 
-      const { data: dbUser } = await supabase.from('users').select('id, email, full_name, phone, role, updated_at, assigned_vendor_id').eq('id', targetId).maybeSingle()
+      const { data: dbUser } = await supabase.from('users').select('id, email, username, full_name, phone, role, updated_at, assigned_vendor_id').eq('id', targetId).maybeSingle()
 
       // Look up assigned Zonal Admin details if vendor is assigned
       let assigned_zonal_admin_name = 'Not Assigned'
@@ -4013,6 +4107,7 @@ Current Conversation History:\n` +
       return json({
         id: targetId,
         full_name: dbUser?.full_name || authUser.user.user_metadata?.full_name || 'User',
+        username: dbUser?.username || authUser.user.user_metadata?.username || null,
         email: dbUser?.email || authUser.user.email,
         phone: dbUser?.phone || authUser.user.phone || '',
         role: dbUser?.role || authUser.user.user_metadata?.role || 'customer',
@@ -4090,9 +4185,25 @@ Current Conversation History:\n` +
       const vendors = await getVendorsList()
       const { data: disabledStore } = await supabase.from('settings').select('marquee_messages').eq('id', 'disabled_vendors').maybeSingle()
       const disabledList = disabledStore?.marquee_messages || []
+
+      // Fetch linked usernames for vendors whose user_id is present
+      const userIds = (vendors || []).map(v => v.user_id).filter(Boolean)
+      let usernameMap = new Map()
+      if (userIds.length > 0) {
+        const { data: usersWithUsername } = await supabase
+          .from('users')
+          .select('id, username')
+          .in('id', userIds)
+        if (usersWithUsername) {
+          usersWithUsername.forEach(u => {
+            if (u.username) usernameMap.set(u.id, u.username)
+          })
+        }
+      }
       
       const mapped = (vendors || []).map(v => ({
         ...v,
+        username: v.username || (v.user_id ? usernameMap.get(v.user_id) : null) || null,
         is_enabled: !disabledList.includes(v.id)
       }))
       return json(mapped)
@@ -4168,9 +4279,7 @@ Current Conversation History:\n` +
     }
 
     if (method === 'GET') {
-      // NOTE: vendor_accepted & vendor_accepted_at columns do NOT exist in DB.
-      // Derive vendor_accepted from status field instead.
-      let ordersSelect = 'id, order_number, status, total, payment_method, placed_at, updated_at, zoho_invoice_status, zoho_invoice_id, zoho_challan_id, addresses(*), order_items(id, product_name_snapshot, quantity, price_snapshot, products(hsn_code))'
+      let ordersSelect = 'id, order_number, status, subtotal, discount, shipping_fee, total, payment_method, placed_at, updated_at, zoho_invoice_status, zoho_invoice_id, zoho_challan_id, status_history, addresses(*), order_items(*, products(id, name, sku, unit, hsn_code, gst_percent, product_images(image_url)))'
       let query = supabase.from('orders').select(ordersSelect)
       if (user.role !== 'admin' && vendor) {
         query = query.eq('assigned_vendor_id', vendor.id)
@@ -4178,7 +4287,7 @@ Current Conversation History:\n` +
 
       let { data: orders, error } = await query.order('placed_at', { ascending: false })
       if (error && error.message.includes('zoho_invoice_status')) {
-        ordersSelect = 'id, order_number, status, total, payment_method, placed_at, updated_at, zoho_invoice_id, zoho_challan_id, addresses(*), order_items(id, product_name_snapshot, quantity, price_snapshot, products(hsn_code))'
+        ordersSelect = 'id, order_number, status, subtotal, discount, shipping_fee, total, payment_method, placed_at, updated_at, zoho_invoice_id, zoho_challan_id, status_history, addresses(*), order_items(*, products(id, name, sku, unit, hsn_code, gst_percent, product_images(image_url)))'
         let fallbackQuery = supabase.from('orders').select(ordersSelect)
         if (user.role !== 'admin' && vendor) {
           fallbackQuery = fallbackQuery.eq('assigned_vendor_id', vendor.id)
@@ -4196,46 +4305,214 @@ Current Conversation History:\n` +
       const VENDOR_ACCEPTED_STATUSES = ['vendor_accepted', 'vendor_accepted_pending_admin_approval', 'packed', 'shipped', 'out_for_delivery', 'delivered']
       const mapped = (orders || []).map(o => {
         const { status: statusStr, history: statusHistory } = buildStatusHistory(o)
+        const mappedItems = (o.order_items || []).map(it => {
+          const originalQty = it.original_quantity != null ? Number(it.original_quantity) : Number(it.quantity || 0)
+          const approvedQty = it.approved_quantity != null ? Number(it.approved_quantity) : Number(it.quantity || 0)
+          const deliveredQty = it.delivered_quantity != null ? Number(it.delivered_quantity) : (o.status === 'delivered' ? approvedQty : 0)
+          const pendingQty = Math.max(0, approvedQty - deliveredQty)
+          const img = it.products?.product_images?.[0]?.image_url || it.image || '/placeholder.png'
+          return {
+            ...it,
+            original_quantity: originalQty,
+            approved_quantity: approvedQty,
+            quantity: approvedQty,
+            delivered_quantity: deliveredQty,
+            pending_quantity: pendingQty,
+            image: img,
+            sku: it.products?.sku || it.sku || '',
+            unit: it.products?.unit || it.unit || 'NOS',
+            hsn_code: it.products?.hsn_code || it.hsn_code || '—',
+            gst_percent: it.products?.gst_percent ?? it.gst_percent ?? 18
+          }
+        })
+
         return {
           id: o.id,
           order_number: o.order_number,
           status: statusStr,
           vendor_accepted: VENDOR_ACCEPTED_STATUSES.includes(o.status),
           vendor_accepted_at: null,
+          subtotal: o.subtotal,
+          discount: o.discount || 0,
+          shipping_fee: o.shipping_fee || 0,
           total_amount: o.total || 0,
+          total: o.total || 0,
           status_history: statusHistory,
           placed_at: o.placed_at,
           address: o.addresses,
-          items: o.order_items || [],
+          items: mappedItems,
           zoho_invoice_status: o.zoho_invoice_status || (o.zoho_invoice_id ? 'synced' : 'pending'),
           zoho_invoice_id: o.zoho_invoice_id,
-          zoho_challan_id: o.zoho_challan_id
+          zoho_challan_id: o.zoho_challan_id,
+          quantity_modifications: []
         }
       })
+
+      // Fetch quantity modifications audit trail for mapped orders
+      const orderIds = mapped.map(m => m.id)
+      if (orderIds.length > 0) {
+        try {
+          const { data: mods } = await supabase
+            .from('order_quantity_modifications')
+            .select('*')
+            .in('order_id', orderIds)
+            .order('created_at', { ascending: false })
+          if (Array.isArray(mods) && mods.length > 0) {
+            const modMap = {}
+            mods.forEach(m => {
+              if (!modMap[m.order_id]) modMap[m.order_id] = []
+              modMap[m.order_id].push(m)
+            })
+            mapped.forEach(m => {
+              if (modMap[m.id]) m.quantity_modifications = modMap[m.id]
+            })
+          }
+        } catch (_) {}
+      }
 
       return json(mapped)
     }
 
     if (method === 'PUT' && p[2]) {
-      const { status, action } = body
+      const { status, action, items, rejection_reason } = body
       const nowStr = new Date().toISOString()
-      const updateData = { updated_at: nowStr }
 
-      // New workflow: vendor can only ACCEPT or REJECT orders in "pending_vendor_acceptance" status
-      // All other status updates (packed/shipped/delivered) are admin-only
-      if (action === 'accept' || status === 'accepted' || status === 'confirmed') {
-        // Verify order is in pending_vendor_acceptance status
-        const { data: orderToAccept } = await supabase.from('orders').select('id, status, order_number, user_id, status_history').eq('id', p[2]).maybeSingle()
-        if (!orderToAccept) return err('Order not found', 404)
-        if (orderToAccept.status !== 'pending_vendor_acceptance') {
-          return err('This order cannot be accepted — it may have already been processed', 400)
+      // Fetch order with its items
+      const { data: orderToUpdate, error: fetchErr } = await supabase
+        .from('orders')
+        .select('*, addresses(*), order_items(*, products(*))')
+        .eq('id', p[2])
+        .maybeSingle()
+
+      if (fetchErr || !orderToUpdate) return err('Order not found', 404)
+
+      // Role and assignment check
+      if (user.role !== 'admin' && vendor && orderToUpdate.assigned_vendor_id !== vendor.id) {
+        return err('You are not authorized to manage this order', 403)
+      }
+
+      const updateData = { updated_at: nowStr }
+      const history = Array.isArray(orderToUpdate.status_history) ? [...orderToUpdate.status_history] : []
+      let orderModified = false
+      const modificationsToLog = []
+      const newItemsState = []
+
+      // ── Quantity Editing Validation & Processing ──
+      const isQtySaveAction = action === 'save_quantities' || action === 'update_quantities'
+      const isAcceptAction = action === 'accept' || status === 'accepted' || status === 'confirmed'
+      const isRejectAction = action === 'reject' || status === 'vendor_rejected' || status === 'rejected'
+
+      if (isQtySaveAction || isAcceptAction) {
+        if (orderToUpdate.status !== 'pending_vendor_acceptance') {
+          return err('Quantities can only be modified and accepted while the order is awaiting Zonal Admin acceptance', 400)
         }
+      }
+
+      if (Array.isArray(items) && items.length > 0) {
+        // Validate each item submitted
+        for (const updateItem of items) {
+          const existingItem = (orderToUpdate.order_items || []).find(it => it.id === updateItem.id)
+          if (!existingItem) {
+            return err(`Invalid item ID: ${updateItem.id}`, 400)
+          }
+
+          const newQty = Number(updateItem.approved_quantity)
+          if (!Number.isInteger(newQty) || newQty <= 0) {
+            return err(`Approved quantity must be a positive whole number for "${existingItem.product_name_snapshot}"`, 400)
+          }
+
+          const currentApproved = existingItem.approved_quantity != null ? Number(existingItem.approved_quantity) : Number(existingItem.quantity)
+          const origQty = existingItem.original_quantity != null ? Number(existingItem.original_quantity) : Number(existingItem.quantity)
+
+          if (newQty !== currentApproved) {
+            if (!updateItem.modification_reason || !updateItem.modification_reason.trim()) {
+              return err(`Modification reason is mandatory for "${existingItem.product_name_snapshot}"`, 400)
+            }
+            orderModified = true
+            modificationsToLog.push({
+              id: uuidv4(),
+              order_id: p[2],
+              order_item_id: existingItem.id,
+              product_id: existingItem.product_id,
+              product_name: existingItem.product_name_snapshot,
+              original_quantity: origQty,
+              previous_approved_quantity: currentApproved,
+              new_approved_quantity: newQty,
+              modification_reason: updateItem.modification_reason.trim(),
+              modified_by: user.id,
+              modifier_name: vendor?.name || user.full_name || 'Zonal Admin',
+              created_at: nowStr
+            })
+          }
+        }
+
+        // Apply modifications to order_items in database
+        for (const updateItem of items) {
+          const existingItem = (orderToUpdate.order_items || []).find(it => it.id === updateItem.id)
+          const newQty = Number(updateItem.approved_quantity)
+          const origQty = existingItem.original_quantity != null ? Number(existingItem.original_quantity) : Number(existingItem.quantity)
+
+          // Defensive update: persist approved_quantity, original_quantity and quantity
+          let { error: itemUpdErr } = await supabase.from('order_items').update({
+            quantity: newQty,
+            approved_quantity: newQty,
+            original_quantity: origQty
+          }).eq('id', updateItem.id)
+
+          if (itemUpdErr && (itemUpdErr.message.includes('column') || itemUpdErr.code === '42703')) {
+            // Columns not created in DB yet, fallback to updating quantity
+            await supabase.from('order_items').update({ quantity: newQty }).eq('id', updateItem.id)
+          }
+
+          newItemsState.push({
+            ...existingItem,
+            original_quantity: origQty,
+            approved_quantity: newQty,
+            quantity: newQty
+          })
+        }
+
+        // Insert audit trail logs
+        if (modificationsToLog.length > 0) {
+          try {
+            await supabase.from('order_quantity_modifications').insert(modificationsToLog)
+          } catch (auditErr) {
+            console.warn('[Audit log warning]:', auditErr.message)
+          }
+
+          const modSummary = modificationsToLog.map(m => `${m.product_name}: ${m.previous_approved_quantity} → ${m.new_approved_quantity} (${m.modification_reason})`).join('; ')
+          history.push({
+            status: orderToUpdate.status,
+            note: `Quantity revised by ${vendor?.name || 'Zonal Admin'}: ${modSummary}`,
+            timestamp: nowStr
+          })
+        }
+
+        // Recalculate order subtotal and total using GST logic
+        let newSubtotal = 0
+        newItemsState.forEach(it => {
+          const rate = Number(it.price_snapshot || 0)
+          const qty = Number(it.approved_quantity || it.quantity || 0)
+          newSubtotal += rate * qty
+        })
+        const discount = Number(orderToUpdate.discount || 0)
+        const shipping = Number(orderToUpdate.shipping_fee || 0)
+        const newTotal = Math.max(0, newSubtotal - discount + shipping)
+
+        updateData.subtotal = newSubtotal
+        updateData.total = newTotal
+      }
+
+      // ── Handle Action: Accept Order ──
+      if (isAcceptAction) {
         updateData.status = 'vendor_accepted_pending_admin_approval'
-        // Persist status_history so customer timeline updates
-        const history = Array.isArray(orderToAccept.status_history) ? [...orderToAccept.status_history] : []
-        history.push({ status: 'vendor_accepted_pending_admin_approval', note: `Accepted by ${vendor?.name || 'Zonal Admin'} — awaiting Owner final approval`, timestamp: nowStr })
+        history.push({
+          status: 'vendor_accepted_pending_admin_approval',
+          note: `Accepted by ${vendor?.name || 'Zonal Admin'}${orderModified ? ' with quantity revisions' : ''} — awaiting Owner final approval`,
+          timestamp: nowStr
+        })
         updateData.status_history = history
-        // Notify admin that vendor accepted — needs final approval
+
         try {
           await supabase.from('activity_logs').insert({
             id: uuidv4(),
@@ -4244,28 +4521,28 @@ Current Conversation History:\n` +
             user_email: user.email,
             event_type: 'order',
             category: 'orders',
-            title: `Order #${orderToAccept.order_number} accepted by ${vendor?.name || 'vendor'} — awaiting your final approval`,
-            description: 'Zonal Admin accepted — Owner must now confirm or reject the order',
-            metadata: { order_id: p[2], order_number: orderToAccept.order_number },
+            title: `Order #${orderToUpdate.order_number} accepted by ${vendor?.name || 'Zonal Admin'} — awaiting your final approval`,
+            description: orderModified ? 'Zonal Admin accepted with revised item quantities. Review and give final approval.' : 'Zonal Admin accepted — Owner must now confirm or reject the order.',
+            metadata: { order_id: p[2], order_number: orderToUpdate.order_number, modified: orderModified },
             created_at: nowStr
           })
         } catch (actErr) {
           console.warn('Admin notification insert failed:', actErr.message)
         }
-      } else if (action === 'reject' || status === 'vendor_rejected' || status === 'rejected') {
-        // Verify order is in pending_vendor_acceptance status
-        const { data: orderToReject } = await supabase.from('orders').select('id, status, order_number, user_id, status_history').eq('id', p[2]).maybeSingle()
-        if (!orderToReject) return err('Order not found', 404)
-        if (orderToReject.status !== 'pending_vendor_acceptance') {
+      // ── Handle Action: Save Quantities Only (Draft) ──
+      } else if (isQtySaveAction) {
+        updateData.status_history = history
+        // Preserves pending_vendor_acceptance status
+      // ── Handle Action: Reject Order ──
+      } else if (isRejectAction) {
+        if (orderToUpdate.status !== 'pending_vendor_acceptance') {
           return err('This order cannot be rejected — it may have already been processed', 400)
         }
         updateData.status = 'vendor_rejected'
-        updateData.rejection_reason = body.rejection_reason || `Rejected by ${vendor?.name || 'vendor'}`
-        // Persist status_history so customer timeline updates
-        const history = Array.isArray(orderToReject.status_history) ? [...orderToReject.status_history] : []
+        updateData.rejection_reason = rejection_reason || body.rejection_reason || `Rejected by ${vendor?.name || 'vendor'}`
         history.push({ status: 'vendor_rejected', note: `Rejected by ${vendor?.name || 'Zonal Admin'}. ${updateData.rejection_reason}`, timestamp: nowStr })
         updateData.status_history = history
-        // Notify admin that vendor rejected
+
         try {
           await supabase.from('activity_logs').insert({
             id: uuidv4(),
@@ -4274,16 +4551,16 @@ Current Conversation History:\n` +
             user_email: user.email,
             event_type: 'order',
             category: 'orders',
-            title: `Order #${orderToReject.order_number} rejected by ${vendor?.name || 'vendor'}`,
+            title: `Order #${orderToUpdate.order_number} rejected by ${vendor?.name || 'vendor'}`,
             description: 'Needs reassignment by admin',
-            metadata: { order_id: p[2], order_number: orderToReject.order_number },
+            metadata: { order_id: p[2], order_number: orderToUpdate.order_number },
             created_at: nowStr
           })
         } catch (actErr) {
           console.warn('Admin notification insert failed:', actErr.message)
         }
       } else {
-        return err('Vendors can only accept or reject pending orders. Status updates like packed/shipped/delivered are admin-only.', 400)
+        return err('Vendors can only accept, save quantity adjustments, or reject pending orders.', 400)
       }
 
       let { error } = await supabase.from('orders').update(updateData).eq('id', p[2])
@@ -4648,8 +4925,14 @@ Current Conversation History:\n` +
     try {
       const supabase = db()
 
-      // Fetch user info (removed 'status' as it is not present in the users schema)
-      const { data: userData, error: userErr } = await supabase.from('users').select('id, email, full_name, phone, role, created_at, assigned_vendor_id').eq('id', targetUserId).maybeSingle()
+      // Fetch user info (include username)
+      let { data: userData, error: userErr } = await supabase.from('users').select('id, email, username, full_name, phone, role, created_at, assigned_vendor_id').eq('id', targetUserId).maybeSingle()
+      if (userErr && userErr.message?.includes('username')) {
+        // Fallback without username if column not yet added
+        const resNoUser = await supabase.from('users').select('id, email, full_name, phone, role, created_at, assigned_vendor_id').eq('id', targetUserId).maybeSingle()
+        userData = resNoUser.data
+        userErr = resNoUser.error
+      }
       if (userErr) {
         console.error('[User Profile] DB error fetching users table for ID:', targetUserId, 'Error:', {
           message: userErr.message,

@@ -18,7 +18,7 @@ const baseOrder = {
   total: 5670.00,
   placed_at: new Date().toISOString(),
   addresses: {
-    full_name: 'Ayan Shaikh',
+    full_name: 'Amit Sharma',
     phone: '918308860894',
     line1: 'Erandwana',
     city: 'Pune',
@@ -26,7 +26,7 @@ const baseOrder = {
     pincode: '411004'
   },
   customer_profile: {
-    company_name: 'Ayan Enterprises',
+    company_name: 'Apex Enterprises',
     gst_number: '27AAAAA1111A1Z1'
   },
   order_items: [

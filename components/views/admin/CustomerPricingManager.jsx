@@ -64,8 +64,9 @@ export function CustomerPricingManager() {
 
   // Admin Account Creation State (Customer & Vendor)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
-  const [newCustForm, setNewCustForm] = useState({ role: 'customer', full_name: '', contact_person: '', email: '', phone: '', password: '' })
+  const [newCustForm, setNewCustForm] = useState({ role: 'customer', username: '', full_name: '', contact_person: '', email: '', phone: '', password: '' })
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [usernameError, setUsernameError] = useState('')
 
   // B2B Catalog Access Approval states
   const [warningUser, setWarningUser] = useState(null)
@@ -99,9 +100,28 @@ export function CustomerPricingManager() {
   const [profileLoading, setProfileLoading] = useState(false)
   const [updatingVendorId, setUpdatingVendorId] = useState(false)
 
+  const validateUsername = (val) => {
+    const clean = (val || '').trim().toLowerCase()
+    if (!clean) return 'Username is required'
+    if (clean.length < 3) return 'Username must be at least 3 characters'
+    if (clean.length > 30) return 'Username cannot exceed 30 characters'
+    if (!/^[a-z0-9_]+$/.test(clean)) return 'Only lowercase letters, numbers, and underscores allowed (no spaces)'
+    return ''
+  }
+
   const handleCreateCustomer = async (e) => {
     e.preventDefault()
     e.stopPropagation()
+
+    if (newCustForm.role === 'vendor') {
+      const uErr = validateUsername(newCustForm.username)
+      if (uErr) {
+        setUsernameError(uErr)
+        toast.error(uErr)
+        return
+      }
+    }
+
     if (!newCustForm.full_name || !newCustForm.email || !newCustForm.password) {
       if (newCustForm.role === 'customer' && !newCustForm.full_name) {
         toast.error('Business Name is required for customer accounts')
@@ -127,8 +147,10 @@ export function CustomerPricingManager() {
     }
     setCreatingCust(true)
     try {
+      const cleanUsername = newCustForm.username ? newCustForm.username.trim().toLowerCase() : ''
       const payload = {
         role: newCustForm.role || 'customer',
+        username: cleanUsername || undefined,
         full_name: newCustForm.role === 'customer' ? (newCustForm.contact_person || newCustForm.full_name) : newCustForm.full_name,
         company_name: newCustForm.role === 'customer' ? newCustForm.full_name : undefined,
         business_name: newCustForm.role === 'customer' ? newCustForm.full_name : undefined,
@@ -165,8 +187,9 @@ export function CustomerPricingManager() {
         assigned_zonal_admin_name: assignedVendor?.name || 'Not Assigned',
         assigned_zonal_admin_email: assignedVendor?.email || 'Not Assigned'
       })
-      setNewCustForm({ role: 'customer', full_name: '', contact_person: '', email: '', phone: '', password: '', assigned_vendor_id: null })
+      setNewCustForm({ role: 'customer', username: '', full_name: '', contact_person: '', email: '', phone: '', password: '', assigned_vendor_id: null })
       setConfirmPassword('')
+      setUsernameError('')
       fetchCustomerList()
     } catch (err) {
       toast.error(err.message)
@@ -1271,13 +1294,45 @@ export function CustomerPricingManager() {
               <label className="text-xs font-bold block mb-1">Account Type *</label>
               <select
                 value={newCustForm.role}
-                onChange={e => setNewCustForm(prev => ({ ...prev, role: e.target.value }))}
+                onChange={e => {
+                  const r = e.target.value
+                  setNewCustForm(prev => ({ ...prev, role: r }))
+                  setUsernameError('')
+                }}
                 className="w-full h-10 rounded-xl text-xs bg-card border border-border px-3 font-bold text-foreground focus:ring-accent"
               >
                 <option value="customer">👥 Branch Manager</option>
                 <option value="vendor">🚚 Zonal Admin Account</option>
               </select>
             </div>
+
+            {newCustForm.role === 'vendor' && (
+              <div>
+                <label className="text-xs font-bold block mb-1">
+                  Zonal Admin Name / Username *
+                </label>
+                <Input
+                  required
+                  placeholder="e.g. zonal_admin_mumbai"
+                  value={newCustForm.username}
+                  onChange={e => {
+                    const val = e.target.value.toLowerCase().replace(/\s+/g, '_')
+                    setNewCustForm(prev => ({ ...prev, username: val }))
+                    setUsernameError(validateUsername(val))
+                  }}
+                  className={`h-10 rounded-xl text-xs font-mono ${usernameError ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  This username will identify the Zonal Admin in the system (min 3 chars, letters, numbers & underscores only).
+                </p>
+                {usernameError && (
+                  <p className="text-[11px] text-destructive font-medium mt-1">
+                    {usernameError}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div>
               <label className="text-xs font-bold block mb-1">{newCustForm.role === 'vendor' ? 'Zonal Admin / Company Name *' : 'Business Name *'}</label>
               <Input
@@ -1292,7 +1347,7 @@ export function CustomerPricingManager() {
               <div>
                 <label className="text-xs font-bold block mb-1">Full Name (Contact Person)</label>
                 <Input
-                  placeholder="e.g. Ayan Shaikh"
+                  placeholder="e.g. Regional Manager"
                   value={newCustForm.contact_person || ''}
                   onChange={e => setNewCustForm(prev => ({ ...prev, contact_person: e.target.value }))}
                   className="h-10 rounded-xl text-xs"
@@ -1327,7 +1382,7 @@ export function CustomerPricingManager() {
                   return (
                     <div>
                       <select
-                        value={newCustForm.assigned_vendor_id || null}
+                        value={newCustForm.assigned_vendor_id || ''}
                         onChange={e => setNewCustForm(prev => ({ ...prev, assigned_vendor_id: e.target.value }))}
                         className="w-full h-10 rounded-xl text-xs bg-card border border-border px-3 font-semibold text-foreground focus:ring-accent"
                       >
@@ -1452,6 +1507,14 @@ export function CustomerPricingManager() {
                   <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Account Name</span>
                   <span className="font-bold text-slate-800">{createdCredentials.full_name}</span>
                 </div>
+                {createdCredentials.username && (
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Username</span>
+                    <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      @{createdCredentials.username}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center border-b border-slate-100 pb-2">
                   <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Login URL</span>
                   <span className="font-mono font-bold text-[#F4B942] max-w-[200px] truncate">
@@ -1732,6 +1795,12 @@ export function CustomerPricingManager() {
                     <h3 className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Basic Information</h3>
                     <div className="bg-secondary/40 p-4 rounded-2xl border space-y-2 text-xs">
                       <div className="flex justify-between"><span className="text-muted-foreground">Name</span><span className="font-bold">{profileData.user.full_name}</span></div>
+                      {profileData.user.username && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Username</span>
+                          <span className="font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">@{profileData.user.username}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between"><span className="text-muted-foreground">Email</span><span className="font-mono">{profileData.user.email}</span></div>
                       {profileData.user.phone && <div className="flex justify-between"><span className="text-muted-foreground">Phone</span><span className="font-mono">{profileData.user.phone}</span></div>}
                       <div className="flex justify-between"><span className="text-muted-foreground">Role</span><span className="font-bold capitalize">{profileData.user.role}</span></div>
@@ -1749,7 +1818,7 @@ export function CustomerPricingManager() {
                         <div>
                           <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Assigned Zonal Admin</label>
                           <select
-                            value={profileData.user.assigned_vendor_id || null}
+                            value={profileData.user.assigned_vendor_id || ''}
                             onChange={async (e) => {
                               const newVId = e.target.value || null
                               setUpdatingVendorId(true)

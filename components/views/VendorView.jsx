@@ -7,13 +7,15 @@ import {
   CheckCircle2, AlertCircle, FileText, Download, Calendar, User, 
   MapPin, Eye, ChevronRight, MessageSquare, Award, Clock, ClipboardCheck,
   ShieldCheck, HelpCircle, Layers, ArrowLeft, Loader2,
-  IndianRupee, ShoppingCart, TrendingUp, CalendarRange
+  IndianRupee, ShoppingCart, TrendingUp, CalendarRange,
+  Plus, Minus, Save, History, RotateCcw, ShieldAlert, Check
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useAppContext } from '@/components/providers/AppProvider'
 import { getStatusLabel } from '@/lib/status-labels'
 import { useRealtimeOrders } from '@/lib/hooks/useRealtime'
@@ -56,6 +58,14 @@ export function VendorView() {
 
   // Selected Order for detail view page render (inline replacement mode)
   const [selectedOrderId, setSelectedOrderId] = useState(null)
+
+  // Quantity Editing & Approval State
+  const [editingQuantities, setEditingQuantities] = useState({})
+  const [modificationReasons, setModificationReasons] = useState({})
+  const [customReasons, setCustomReasons] = useState({})
+  const [savingQuantities, setSavingQuantities] = useState(false)
+  const [showAcceptModal, setShowAcceptModal] = useState(false)
+  const [acceptLoading, setAcceptLoading] = useState(false)
 
   // 1. Fetch Vendor Orders
   const fetchVendorOrders = useCallback(async () => {
@@ -194,25 +204,139 @@ export function VendorView() {
     }
   }
 
-  // Accept Order
-  const handleAcceptOrder = async (orderId) => {
+  // Quantity Editing Handlers
+  const handleQuantityChange = (itemId, val) => {
+    const numVal = parseInt(val, 10)
+    if (isNaN(numVal) || numVal < 1) return
+    setEditingQuantities(prev => ({ ...prev, [itemId]: numVal }))
+  }
+
+  const handleStepQuantity = (itemId, delta) => {
+    setEditingQuantities(prev => {
+      const cur = Number(prev[itemId] || 1)
+      const next = Math.max(1, cur + delta)
+      return { ...prev, [itemId]: next }
+    })
+  }
+
+  const handleResetQuantity = (itemId, originalQty) => {
+    setEditingQuantities(prev => ({ ...prev, [itemId]: originalQty }))
+    setModificationReasons(prev => ({ ...prev, [itemId]: '' }))
+    setCustomReasons(prev => ({ ...prev, [itemId]: '' }))
+  }
+
+  const getItemsPayload = (order) => {
+    const targetOrder = order || selectedOrder
+    if (!targetOrder?.items) return []
+    return targetOrder.items.map(it => {
+      const appQty = Number(editingQuantities[it.id] ?? it.approved_quantity ?? it.quantity ?? 1)
+      const origQty = Number(it.original_quantity ?? it.quantity ?? 1)
+      const isModified = appQty !== origQty
+      let reason = (modificationReasons[it.id] || '').trim()
+      if (reason === 'Other') {
+        reason = (customReasons[it.id] || '').trim() || 'Other'
+      }
+      return {
+        id: it.id,
+        approved_quantity: appQty,
+        modification_reason: isModified ? reason : undefined
+      }
+    })
+  }
+
+  const validateModifications = (order) => {
+    const targetOrder = order || selectedOrder
+    if (!targetOrder?.items) return { valid: true }
+    for (const it of targetOrder.items) {
+      const appQty = Number(editingQuantities[it.id] ?? it.approved_quantity ?? it.quantity ?? 1)
+      if (!Number.isInteger(appQty) || appQty <= 0) {
+        return { valid: false, error: `Quantity for "${it.product_name_snapshot}" must be a positive whole number.` }
+      }
+      const origQty = Number(it.original_quantity ?? it.quantity ?? 1)
+      if (appQty !== origQty) {
+        let reason = (modificationReasons[it.id] || '').trim()
+        if (reason === 'Other') {
+          reason = (customReasons[it.id] || '').trim()
+        }
+        if (!reason) {
+          return { valid: false, error: `Please select or provide a reason for modifying quantity of "${it.product_name_snapshot}".` }
+        }
+      }
+    }
+    return { valid: true }
+  }
+
+  // Save Quantity Changes (Draft without accepting)
+  const handleSaveQuantities = async () => {
+    if (!selectedOrder) return
+    const val = validateModifications(selectedOrder)
+    if (!val.valid) {
+      toast.error(val.error)
+      return
+    }
+    setSavingQuantities(true)
     try {
-      const res = await fetch(`/api/vendor/orders/${orderId}`, {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      const res = await fetch(`/api/vendor/orders/${selectedOrder.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`
+          Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ action: 'accept' })
+        body: JSON.stringify({
+          action: 'save_quantities',
+          items: getItemsPayload(selectedOrder)
+        })
       })
+      const data = await res.json()
+      if (res.ok) {
+        toast.success('Approved quantities saved successfully!')
+        await fetchVendorOrders()
+      } else {
+        toast.error(data.error || 'Failed to save quantities')
+      }
+    } catch {
+      toast.error('Network error saving quantities')
+    } finally {
+      setSavingQuantities(false)
+    }
+  }
+
+  // Confirm and Accept Order with Approved Quantities
+  const handleConfirmAndAccept = async () => {
+    if (!selectedOrder) return
+    const val = validateModifications(selectedOrder)
+    if (!val.valid) {
+      toast.error(val.error)
+      setShowAcceptModal(false)
+      return
+    }
+    setAcceptLoading(true)
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+      const res = await fetch(`/api/vendor/orders/${selectedOrder.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          action: 'accept',
+          items: getItemsPayload(selectedOrder)
+        })
+      })
+      const data = await res.json()
       if (res.ok) {
         toast.success('Order Accepted! Sent to Owner for final approval.')
-        fetchVendorOrders()
+        setShowAcceptModal(false)
+        await fetchVendorOrders()
       } else {
-        toast.error('Failed to accept order')
+        toast.error(data.error || 'Failed to accept order')
       }
     } catch {
       toast.error('Network error accepting order')
+    } finally {
+      setAcceptLoading(false)
     }
   }
 
@@ -300,12 +424,56 @@ export function VendorView() {
     return orders.find(o => o.id === selectedOrderId)
   }, [orders, selectedOrderId])
 
+  // Sync editing quantities whenever selected order changes
+  useEffect(() => {
+    if (selectedOrder) {
+      const qMap = {}
+      const rMap = {}
+      selectedOrder.items?.forEach(it => {
+        qMap[it.id] = it.approved_quantity ?? it.quantity ?? 1
+        rMap[it.id] = ''
+      })
+      setEditingQuantities(qMap)
+      setModificationReasons(rMap)
+      setCustomReasons({})
+    } else {
+      setEditingQuantities({})
+      setModificationReasons({})
+      setCustomReasons({})
+      setShowAcceptModal(false)
+    }
+  }, [selectedOrderId, selectedOrder?.updated_at])
+
+  // Recalculated Order Summary for live review
+  const recalculatedSummary = useMemo(() => {
+    if (!selectedOrder) return null
+    let origTotalQty = 0
+    let appTotalQty = 0
+    let subtotal = 0
+    let modifiedCount = 0
+
+    selectedOrder.items?.forEach(it => {
+      const orig = Number(it.original_quantity ?? it.quantity ?? 0)
+      const app = Number(editingQuantities[it.id] ?? it.approved_quantity ?? it.quantity ?? 0)
+      const price = Number(it.price_snapshot || 0)
+      origTotalQty += orig
+      appTotalQty += app
+      subtotal += price * app
+      if (app !== orig) modifiedCount++
+    })
+
+    const discount = Number(selectedOrder.discount || 0)
+    const shipping = Number(selectedOrder.shipping_fee || 0)
+    const total = Math.max(0, subtotal - discount + shipping)
+    const diffQty = appTotalQty - origTotalQty
+    const diffAmount = total - Number(selectedOrder.total || 0)
+
+    return { origTotalQty, appTotalQty, subtotal, total, modifiedCount, diffQty, diffAmount }
+  }, [selectedOrder, editingQuantities])
+
   // Inline Replacement: Render premium details view
   if (selectedOrder) {
-
-    // Derive active timeline step percentage (new flow)
-    const stepMap = { 'pending_vendor_acceptance': 10, 'vendor_accepted_pending_admin_approval': 30, 'confirmed': 45, 'packed': 60, 'shipped': 75, 'out_for_delivery': 85, 'delivered': 100 }
-    const activePercent = stepMap[selectedOrder.status] || 10
+    const isPendingVendor = selectedOrder.status === 'pending_vendor_acceptance'
 
     return (
       <div className="min-h-screen bg-[#F8F9FC] pb-12 font-sans text-left">
@@ -351,42 +519,251 @@ export function VendorView() {
             {/* Left Column details container */}
             <div className="space-y-6">
               
-              {/* Order Items — Logistics View */}
+              {/* Order Items — Product Images & Quantity Management */}
               <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden">
                 <CardContent className="p-6">
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-display font-extrabold text-sm text-slate-800">Order Items</h3>
-                    <Badge className="bg-[#F4B942]/10 text-[#A96B0D] font-bold border border-[#F4B942]/20">{selectedOrder.items?.length || 0} Products</Badge>
+                    <div>
+                      <h3 className="font-display font-extrabold text-base text-slate-800">Order Items & Quantities</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {isPendingVendor
+                          ? 'Review product images and adjust approved quantities based on stock availability before accepting.'
+                          : 'Review product images and approved fulfillment quantities.'}
+                      </p>
+                    </div>
+                    <Badge className="bg-[#F4B942]/10 text-[#A96B0D] font-bold border border-[#F4B942]/20">
+                      {selectedOrder.items?.length || 0} Products
+                    </Badge>
                   </div>
-                  <div className="space-y-3">
-                    {selectedOrder.items?.map((it, i) => (
-                      <div key={i} className="p-4 bg-[#F8F9FC] rounded-xl border border-slate-100">
-                        <div className="flex gap-3 items-start">
-                          {it.image && (
-                            <img src={it.image} alt="" className="w-14 h-14 object-cover rounded-lg border bg-white shrink-0" />
+
+                  <div className="space-y-4">
+                    {selectedOrder.items?.map((it, i) => {
+                      const origQty = Number(it.original_quantity ?? it.quantity ?? 1)
+                      const currentApproved = Number(it.approved_quantity ?? it.quantity ?? 1)
+                      const editedQty = Number(editingQuantities[it.id] ?? currentApproved)
+                      const isModified = editedQty !== origQty
+                      const deliveredQty = Number(it.delivered_quantity ?? (selectedOrder.status === 'delivered' ? editedQty : 0))
+                      const pendingQty = Math.max(0, editedQty - deliveredQty)
+                      const lineTotal = (Number(it.price_snapshot) || 0) * editedQty
+
+                      return (
+                        <div key={it.id || i} className="p-4 bg-[#F8F9FC] rounded-2xl border border-slate-200/70 hover:border-slate-300 transition-all space-y-3">
+                          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+                            {/* Product Thumbnail & Details */}
+                            <div className="flex gap-3.5 items-center min-w-0 flex-1">
+                              <div className="relative w-16 h-16 rounded-xl border border-slate-200 bg-white overflow-hidden shrink-0 flex items-center justify-center shadow-xs">
+                                {it.image && it.image !== '/placeholder.png' ? (
+                                  <img
+                                    src={it.image}
+                                    alt={it.product_name_snapshot}
+                                    loading="lazy"
+                                    decoding="async"
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      e.currentTarget.onerror = null
+                                      e.currentTarget.src = '/placeholder.png'
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 text-slate-400">
+                                    <Package className="w-6 h-6 stroke-1" />
+                                    <span className="text-[8px] font-bold mt-0.5">No Img</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="min-w-0 space-y-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="font-bold text-slate-900 text-sm leading-snug">{it.product_name_snapshot}</p>
+                                  {isModified && (
+                                    <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                                      editedQty > origQty 
+                                        ? 'bg-emerald-500/10 text-emerald-700 border-emerald-300' 
+                                        : 'bg-amber-500/10 text-amber-700 border-amber-300'
+                                    }`}>
+                                      {editedQty > origQty ? `+${(editedQty - origQty).toLocaleString('en-IN')} Increased` : `${(editedQty - origQty).toLocaleString('en-IN')} Reduced`}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+                                  {it.sku && <span className="font-mono text-[11px] text-slate-400">SKU: {it.sku}</span>}
+                                  {it.hsn_code && <span>HSN: <strong className="font-mono text-slate-700">{it.hsn_code}</strong></span>}
+                                  <span>Rate: <strong className="text-slate-800">{formatINR(it.price_snapshot)}</strong></span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Item Subtotal */}
+                            <div className="text-right sm:self-center shrink-0">
+                              <span className="text-[10px] uppercase font-bold text-slate-400 block">Total</span>
+                              <span className="text-base font-black text-slate-900">{formatINR(lineTotal)}</span>
+                            </div>
+                          </div>
+
+                          {/* Quantities Row */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-200/60 text-xs">
+                            <div className="bg-white p-2.5 rounded-xl border border-slate-200/60">
+                              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Original Requested</span>
+                              <span className="font-black text-slate-700 text-sm mt-0.5 block">{origQty.toLocaleString('en-IN')}</span>
+                            </div>
+
+                            {/* Approved Quantity (Editable if pending) */}
+                            <div className="bg-white p-2.5 rounded-xl border border-slate-200/60">
+                              <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block flex items-center justify-between">
+                                <span>Approved Qty</span>
+                                {isPendingVendor && isModified && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleResetQuantity(it.id, origQty)}
+                                    className="text-[9px] text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
+                                  >
+                                    Reset
+                                  </button>
+                                )}
+                              </span>
+
+                              {isPendingVendor ? (
+                                <div className="flex items-center gap-1.5 mt-1.5">
+                                  <button
+                                    type="button"
+                                    disabled={editedQty <= 1}
+                                    onClick={() => handleStepQuantity(it.id, -1)}
+                                    className="w-7 h-7 rounded-lg border border-slate-200 hover:bg-slate-100 flex items-center justify-center text-slate-700 font-black disabled:opacity-30 disabled:pointer-events-none"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    value={editedQty}
+                                    onChange={(e) => handleQuantityChange(it.id, e.target.value)}
+                                    className="w-20 h-7 rounded-lg border border-slate-200 text-center font-black text-sm text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStepQuantity(it.id, 1)}
+                                    className="w-7 h-7 rounded-lg border border-slate-200 hover:bg-slate-100 flex items-center justify-center text-slate-700 font-black"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="font-black text-slate-900 text-sm mt-0.5 block">{editedQty.toLocaleString('en-IN')}</span>
+                              )}
+                            </div>
+
+                            <div className="bg-white p-2.5 rounded-xl border border-slate-200/60">
+                              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Delivered Qty</span>
+                              <span className="font-black text-emerald-600 text-sm mt-0.5 block">{deliveredQty.toLocaleString('en-IN')}</span>
+                            </div>
+
+                            <div className="bg-white p-2.5 rounded-xl border border-slate-200/60">
+                              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Pending Qty</span>
+                              <span className="font-black text-amber-600 text-sm mt-0.5 block">{pendingQty.toLocaleString('en-IN')}</span>
+                            </div>
+                          </div>
+
+                          {/* Mandatory Reason Field when Modified in Pending Status */}
+                          {isPendingVendor && isModified && (
+                            <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 space-y-2">
+                              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800">
+                                <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                <span>Reason for Quantity Modification *</span>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <select
+                                  value={modificationReasons[it.id] || ''}
+                                  onChange={(e) => setModificationReasons(prev => ({ ...prev, [it.id]: e.target.value }))}
+                                  className="h-8 rounded-lg text-xs bg-white border border-amber-300 px-2.5 font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                >
+                                  <option value="">Select reason...</option>
+                                  <option value="Stock unavailable">Stock unavailable</option>
+                                  <option value="Partial fulfillment">Partial fulfillment</option>
+                                  <option value="Additional stock available">Additional stock available</option>
+                                  <option value="Customer-approved quantity revision">Customer-approved quantity revision</option>
+                                  <option value="Other">Other</option>
+                                </select>
+
+                                {modificationReasons[it.id] === 'Other' && (
+                                  <input
+                                    type="text"
+                                    placeholder="Specify custom reason..."
+                                    value={customReasons[it.id] || ''}
+                                    onChange={(e) => setCustomReasons(prev => ({ ...prev, [it.id]: e.target.value }))}
+                                    className="h-8 rounded-lg text-xs bg-white border border-amber-300 px-2.5 font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                  />
+                                )}
+                              </div>
+                            </div>
                           )}
-                          <div className="flex-1 min-w-0 space-y-1.5">
-                            <p className="font-bold text-slate-800 text-sm">{it.product_name_snapshot}</p>
-                            {it.sku && <p className="text-[10px] text-slate-400 font-mono">SKU: {it.sku}</p>}
-                          </div>
                         </div>
-                        <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-100 text-xs">
+                      )
+                    })}
+                  </div>
+
+                  {/* Live Recalculated Order Summary & Save Action Bar */}
+                  {isPendingVendor && (
+                    <div className="mt-6 pt-5 border-t border-slate-200/80 space-y-4">
+                      <div className="bg-slate-900 text-white rounded-2xl p-5 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Order Summary with Approved Quantities</span>
+                          {recalculatedSummary?.modifiedCount > 0 && (
+                            <span className="text-xs bg-amber-400 text-slate-950 font-black px-2.5 py-0.5 rounded-full">
+                              {recalculatedSummary.modifiedCount} product(s) modified
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs pt-1">
                           <div>
-                            <span className="text-[9px] text-slate-400 font-bold uppercase block">Ordered</span>
-                            <span className="font-black text-slate-800">{it.quantity}</span>
+                            <span className="text-slate-400 text-[10px] block">Requested Units</span>
+                            <span className="font-bold text-white text-sm">{recalculatedSummary?.origTotalQty?.toLocaleString('en-IN')}</span>
                           </div>
                           <div>
-                            <span className="text-[9px] text-slate-400 font-bold uppercase block">Delivered</span>
-                            <span className="font-black text-emerald-600">{it.delivered_quantity ?? (selectedOrder.status === 'delivered' ? it.quantity : 0)}</span>
+                            <span className="text-slate-400 text-[10px] block">Approved Units</span>
+                            <span className="font-bold text-[#F4B942] text-sm">{recalculatedSummary?.appTotalQty?.toLocaleString('en-IN')}</span>
                           </div>
                           <div>
-                            <span className="text-[9px] text-slate-400 font-bold uppercase block">Pending</span>
-                            <span className="font-black text-amber-600">{it.pending_quantity ?? (selectedOrder.status === 'delivered' ? 0 : it.quantity)}</span>
+                            <span className="text-slate-400 text-[10px] block">Items Subtotal</span>
+                            <span className="font-bold text-white text-sm">{formatINR(recalculatedSummary?.subtotal)}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 text-[10px] block">Final Payable</span>
+                            <span className="font-black text-emerald-400 text-base">{formatINR(recalculatedSummary?.total)}</span>
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={savingQuantities}
+                          onClick={handleSaveQuantities}
+                          className="rounded-full border-slate-300 font-bold text-xs h-10 px-6 hover:bg-slate-100 gap-1.5"
+                        >
+                          {savingQuantities ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                          Save Quantity Changes
+                        </Button>
+
+                        <Button
+                          type="button"
+                          onClick={() => {
+                            const val = validateModifications(selectedOrder)
+                            if (!val.valid) {
+                              toast.error(val.error)
+                              return
+                            }
+                            setShowAcceptModal(true)
+                          }}
+                          className="rounded-full bg-slate-900 text-white font-bold text-xs h-10 px-8 hover:bg-slate-800 gap-1.5 shadow-sm"
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          Accept Order...
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -467,6 +844,36 @@ export function VendorView() {
                 </CardContent>
               </Card>
 
+              {/* Quantity Modification Audit Trail (If modifications exist) */}
+              {Array.isArray(selectedOrder.quantity_modifications) && selectedOrder.quantity_modifications.length > 0 && (
+                <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden border-l-4 border-l-[#F4B942]">
+                  <CardContent className="p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <History className="w-4 h-4 text-[#A96B0D]" />
+                      <h3 className="font-display font-bold text-sm text-slate-800">Quantity Modification History</h3>
+                    </div>
+                    <div className="space-y-3">
+                      {selectedOrder.quantity_modifications.map((m, idx) => (
+                        <div key={m.id || idx} className="p-3.5 bg-[#F8F9FC] rounded-xl border border-slate-100 text-xs space-y-1">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <span className="font-bold text-slate-900">{m.product_name}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">{new Date(m.created_at).toLocaleString('en-IN')}</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap text-slate-600">
+                            <span>Requested: <strong className="text-slate-800">{m.original_quantity}</strong></span>
+                            <span>&bull;</span>
+                            <span>Revision: <strong className="text-amber-700">{m.previous_approved_quantity} &rarr; {m.new_approved_quantity}</strong></span>
+                            <span>&bull;</span>
+                            <span>By: <strong className="text-slate-800">{m.modifier_name || 'Zonal Admin'}</strong></span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 pt-0.5">Reason: <em className="text-slate-700 not-italic font-medium">{m.modification_reason}</em></p>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Status Timeline checkpoints (vertical style matching owner/customer side) */}
               <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden">
                 <CardContent className="p-6">
@@ -494,22 +901,51 @@ export function VendorView() {
             {/* Right Column sidebar */}
             <div className="space-y-6">
               
-              {/* Checkpoint controller actions — Accept/Reject ONLY for new orders, read-only for all others */}
+              {/* Checkpoint controller actions */}
               <Card className="rounded-2xl border border-[#ECECEC] bg-white shadow-xs overflow-hidden border-l-4 border-l-[#F4B942]">
                 <CardContent className="p-6 space-y-4">
                   <h3 className="font-display font-black text-xs uppercase text-slate-400 tracking-wider">Order Status</h3>
                   
-                  {selectedOrder.status === 'pending_vendor_acceptance' ? (
-                    <div className="space-y-3">
-                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                        <p className="text-xs font-bold text-amber-700">Action Required</p>
-                        <p className="text-[10px] text-amber-600 mt-1">Please review and accept or reject this order. Once accepted, the Owner will proceed with fulfillment.</p>
+                  {isPendingVendor ? (
+                    <div className="space-y-4">
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-1.5">
+                        <p className="text-xs font-bold text-amber-800 flex items-center gap-1.5">
+                          <AlertCircle className="w-4 h-4 text-amber-600" /> Action Required
+                        </p>
+                        <p className="text-[11px] text-amber-700 leading-relaxed">
+                          Please verify product items and modify approved quantities if stock is limited. Then accept the order to send for Owner final approval.
+                        </p>
                       </div>
+
+                      {/* Financial summary snapshot */}
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2 text-xs">
+                        <div className="flex justify-between items-center text-slate-500">
+                          <span>Items Subtotal:</span>
+                          <span className="font-bold text-slate-800">{formatINR(recalculatedSummary?.subtotal)}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-slate-500">
+                          <span>Approved Units:</span>
+                          <span className="font-bold text-slate-800">{recalculatedSummary?.appTotalQty?.toLocaleString('en-IN')}</span>
+                        </div>
+                        <div className="flex justify-between items-center pt-2 border-t border-slate-200 font-bold">
+                          <span className="text-slate-700">Total Payable:</span>
+                          <span className="text-sm font-black text-slate-900">{formatINR(recalculatedSummary?.total)}</span>
+                        </div>
+                      </div>
+
                       <div className="grid gap-2">
                         <Button 
-                          onClick={() => handleAcceptOrder(selectedOrder.id)}
-                          className="w-full rounded-full font-bold h-11 bg-slate-900 text-white text-xs hover:bg-slate-800 shadow-sm"
+                          onClick={() => {
+                            const val = validateModifications(selectedOrder)
+                            if (!val.valid) {
+                              toast.error(val.error)
+                              return
+                            }
+                            setShowAcceptModal(true)
+                          }}
+                          className="w-full rounded-full font-bold h-11 bg-slate-900 text-white text-xs hover:bg-slate-800 shadow-sm gap-1.5"
                         >
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                           ✓ Accept Order
                         </Button>
                         <Button 
@@ -522,11 +958,15 @@ export function VendorView() {
                       </div>
                     </div>
                   ) : (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <Badge className={`capitalize font-bold text-[10px] rounded-full px-3 py-1 ${CHECKPOINT_COLORS[selectedOrder.status] || 'bg-slate-100 text-slate-600'}`}>
                         {getStatusLabel(selectedOrder.status)}
                       </Badge>
-                      <p className="text-[10px] text-slate-400 font-medium">
+                      <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/70 text-xs space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Final Order Value</span>
+                        <span className="text-lg font-black text-slate-900 block">{formatINR(selectedOrder.total)}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
                         {selectedOrder.status === 'confirmed' && 'Order accepted — Owner will process fulfillment.'}
                         {selectedOrder.status === 'packed' && 'Order packed at warehouse, awaiting dispatch.'}
                         {selectedOrder.status === 'shipped' && 'Package dispatched to courier partner.'}
@@ -544,6 +984,93 @@ export function VendorView() {
 
           </div>
         </div>
+
+        {/* Acceptance Confirmation Modal with Breakdown */}
+        <Dialog open={showAcceptModal} onOpenChange={setShowAcceptModal}>
+          <DialogContent className="max-w-md rounded-2xl bg-white p-6 text-left">
+            <DialogHeader>
+              <DialogTitle className="font-display font-black text-xl text-slate-900 flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" /> Confirm Order Acceptance
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500">
+                Please review the finalized quantities before sending to Owner for confirmation.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 text-xs mt-3">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2.5">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Original Total Quantity:</span>
+                  <span className="font-bold text-slate-800 text-sm">{recalculatedSummary?.origTotalQty?.toLocaleString('en-IN')} units</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Final Approved Quantity:</span>
+                  <span className="font-black text-slate-900 text-sm">{recalculatedSummary?.appTotalQty?.toLocaleString('en-IN')} units</span>
+                </div>
+                {recalculatedSummary?.modifiedCount > 0 && (
+                  <div className="flex justify-between items-center text-amber-700 font-bold pt-1 border-t border-slate-200/60">
+                    <span>Modified Products:</span>
+                    <span>{recalculatedSummary.modifiedCount} product(s)</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-1 border-t border-slate-200/60">
+                  <span className="text-slate-500 font-bold">Updated Order Value:</span>
+                  <span className="font-black text-slate-900 text-base">{formatINR(recalculatedSummary?.total)}</span>
+                </div>
+              </div>
+
+              {/* Breakdown of modified items if any */}
+              {recalculatedSummary?.modifiedCount > 0 && (
+                <div className="space-y-2">
+                  <span className="font-bold text-slate-700 text-[11px] block">Modified Items Breakdown:</span>
+                  <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                    {selectedOrder.items?.map(it => {
+                      const orig = Number(it.original_quantity ?? it.quantity ?? 1)
+                      const app = Number(editingQuantities[it.id] ?? orig)
+                      if (orig === app) return null
+                      const reason = modificationReasons[it.id] === 'Other' ? (customReasons[it.id] || 'Other') : (modificationReasons[it.id] || 'Modified')
+                      return (
+                        <div key={it.id} className="p-2 bg-amber-500/10 rounded-lg border border-amber-200 flex justify-between items-start gap-2">
+                          <div>
+                            <p className="font-bold text-slate-800 line-clamp-1">{it.product_name_snapshot}</p>
+                            <p className="text-[10px] text-amber-700">Reason: {reason}</p>
+                          </div>
+                          <span className="font-mono font-bold text-amber-800 shrink-0">
+                            {orig} &rarr; {app}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Once accepted, this order will be routed to the Owner for final confirmation. The customer and branch manager will see the approved quantities.
+              </p>
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowAcceptModal(false)}
+                  className="flex-1 rounded-full font-bold h-11 text-xs border-slate-200 hover:bg-slate-100"
+                >
+                  Go Back & Review
+                </Button>
+                <Button
+                  type="button"
+                  disabled={acceptLoading}
+                  onClick={handleConfirmAndAccept}
+                  className="flex-1 rounded-full bg-slate-900 text-white font-bold h-11 text-xs hover:bg-slate-800 gap-1.5"
+                >
+                  {acceptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
+                  Confirm & Accept
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }

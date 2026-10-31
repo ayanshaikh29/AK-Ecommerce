@@ -4118,17 +4118,63 @@ function AdminOrderDetail({ orderId }) {
             <CardContent className="p-6">
               <h3 className="font-display font-extrabold text-lg mb-4">Order Items</h3>
               <div className="divide-y">
-                {order.items?.map((it, i) => (
-                  <div key={i} className="py-4 flex gap-4 items-center">
-                    <img src={it.image} alt="" className="w-12 h-14 object-cover rounded-lg border bg-secondary/15 shrink-0" />
-                    <div className="flex-1">
-                      <p className="font-semibold text-sm leading-snug">{it.product_name_snapshot}</p>
-                      <p className="text-xs text-muted-foreground mt-1">Qty {it.quantity} &times; {formatINR(it.price_snapshot)}</p>
+                {order.items?.map((it, i) => {
+                  const origQty = it.original_quantity ?? it.quantity;
+                  const appQty = it.approved_quantity ?? it.quantity;
+                  const isModified = origQty !== appQty;
+                  return (
+                    <div key={i} className="py-4 flex gap-4 items-center">
+                      <img
+                        src={it.image || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="%2394a3b8" stroke-width="1.5"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>'}
+                        alt=""
+                        className="w-12 h-14 object-cover rounded-lg border bg-secondary/15 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm leading-snug">{it.product_name_snapshot}</p>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mt-1">
+                          <span>Qty <strong>{appQty.toLocaleString('en-IN')}</strong> &times; {formatINR(it.price_snapshot)}</span>
+                          {isModified && (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
+                              (Original requested: {origQty.toLocaleString('en-IN')})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="font-bold text-sm text-foreground">{formatINR(it.price_snapshot * appQty)}</span>
                     </div>
-                    <span className="font-bold text-sm text-foreground">{formatINR(it.price_snapshot * it.quantity)}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
+
+              {order.quantity_modifications && order.quantity_modifications.length > 0 && (
+                <div className="mt-5 pt-4 border-t border-border/60">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-500" /> Quantity Revision History by Zonal Admin
+                  </h4>
+                  <div className="space-y-2">
+                    {order.quantity_modifications.map((mod, mIdx) => (
+                      <div key={mIdx} className="bg-amber-50/70 border border-amber-200/70 rounded-xl p-3 text-xs">
+                        <div className="flex items-center justify-between text-slate-800 font-semibold mb-1">
+                          <span>{mod.product_name || `Item #${mod.product_id?.slice(0, 8)}`}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {new Date(mod.created_at).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 text-slate-600">
+                          <span>Requested: <strong>{mod.original_quantity}</strong></span>
+                          <span>&rarr;</span>
+                          <span className="text-amber-800 font-bold">Approved: <strong>{mod.new_quantity}</strong></span>
+                        </div>
+                        {mod.reason && (
+                          <p className="text-[11px] text-amber-900/80 mt-1 italic">
+                            Reason: {mod.reason}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 

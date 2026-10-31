@@ -255,23 +255,30 @@ export default function OrderDetailsPage() {
 
   useEffect(() => {
     setMounted(true)
-    if (mounted && !user) {
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
+    if (!user) {
       router.push(`/login?redirect=/orders/${orderId}`)
       return
     }
-    if (user && orderId) {
+    if (orderId) {
       fetchOrderDetails()
     }
   }, [user, orderId, mounted])
 
-  // Poll for status updates every 10 seconds
+  // Poll for status updates only if active order (not terminal)
   useEffect(() => {
     if (!user || !orderId) return
+    const terminalStatuses = ['delivered', 'cancelled', 'returned', 'vendor_rejected']
+    if (order && terminalStatuses.includes(order.status)) return
+
     const interval = setInterval(() => {
       fetchOrderDetails()
-    }, 10000)
+    }, 25000)
     return () => clearInterval(interval)
-  }, [user, orderId])
+  }, [user, orderId, order?.status])
 
   if (!mounted || !user || loading) {
     return (
@@ -559,10 +566,24 @@ export default function OrderDetailsPage() {
                         <h4 className="font-semibold text-sm line-clamp-2 text-foreground leading-snug">
                           {it?.product_name_snapshot || it?.name || 'Product'}
                         </h4>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Quantity: <span className="font-semibold text-foreground">{it?.quantity || 0}</span>
-                        </p>
-                        <p className="text-xs text-muted-foreground">
+                        {(() => {
+                          const origQty = it?.original_quantity ?? it?.quantity ?? 0;
+                          const appQty = it?.approved_quantity ?? it?.quantity ?? 0;
+                          const isModified = origQty !== appQty;
+                          return (
+                            <div className="space-y-0.5 mt-1 text-xs">
+                              <p className="text-muted-foreground">
+                                Approved Qty: <span className="font-bold text-foreground">{appQty.toLocaleString('en-IN')}</span>
+                              </p>
+                              {isModified && (
+                                <p className="text-[11px] font-medium text-amber-700 bg-amber-50 inline-block px-1.5 py-0.5 rounded border border-amber-200">
+                                  Original requested: {origQty.toLocaleString('en-IN')}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })()}
+                        <p className="text-xs text-muted-foreground mt-0.5">
                           Price: <span className="font-semibold text-foreground">{formatINR(it?.price_snapshot)}</span>
                         </p>
                         {it?.products?.hsn_code && (

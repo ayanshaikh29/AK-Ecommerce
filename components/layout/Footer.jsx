@@ -8,7 +8,7 @@ export function Footer({ settings }) {
   const pathname = usePathname()
   if (pathname?.startsWith('/admin') || pathname?.startsWith('/vendor')) return null
   return (
-    <footer className="bg-primary text-primary-foreground/80 py-16 border-t border-white/10">
+    <footer className="bg-primary text-primary-foreground/80 py-16 border-t border-white/10" suppressHydrationWarning>
       <div className="max-w-7xl mx-auto px-4 md:px-6 grid md:grid-cols-4 gap-12">
         <div className="col-span-1 md:col-span-2">
           <Link href="/" className="inline-flex items-center gap-3 mb-6 group">
@@ -50,8 +50,19 @@ export function Footer({ settings }) {
           </div>
         </div>
       </div>
-      <div className="max-w-7xl mx-auto px-4 md:px-6 mt-16 pt-8 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-4 text-xs">
-        <p>© {new Date().getFullYear()} {settings?.brand_name || 'AK Enterprises'}. All rights reserved.</p>
+      <div suppressHydrationWarning className="max-w-7xl mx-auto px-4 md:px-6 mt-16 pt-8 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-4 text-xs">
+        <p suppressHydrationWarning>© {new Date().getFullYear()} {settings?.brand_name || 'AK Enterprises'}. All rights reserved.</p>
+        <p className="text-primary-foreground/70" suppressHydrationWarning>
+          Developed by{' '}
+          <a
+            href="https://digitaladvertise.in"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-white hover:text-accent font-semibold underline underline-offset-4 transition-colors"
+          >
+            Digital Advertise
+          </a>
+        </p>
         <div className="flex items-center gap-6">
           <Link href="/privacy-policy" className="hover:text-white transition">Privacy Policy</Link>
           <Link href="/terms-conditions" className="hover:text-white transition">Terms of Service</Link>
